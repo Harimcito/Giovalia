@@ -843,19 +843,10 @@ def paso_2():
                 "el modelo y el código, y la búsqueda funciona mucho mejor.")
 
     # Usar la última versión editada si existe (evita perder checks al volver)
-    base = E.get("tabla_edit", E["tabla"])
-    editada = editor(
-        base, hide_index=True, width="stretch", key="editor",
-        disabled=[COL_CANT, COL_PROD, COL_ORIGEN],
-        column_config={
-            COL_INCLUIR: st.column_config.CheckboxColumn(COL_INCLUIR, width="small"),
-            COL_CANT: st.column_config.NumberColumn(COL_CANT, width="small"),
-            COL_PROD: st.column_config.TextColumn(COL_PROD, width="large"),
-            COL_COD: st.column_config.TextColumn(COL_COD, width="medium"),
-            COL_ORIGEN: st.column_config.TextColumn(COL_ORIGEN, width="medium"),
-        },
-    )
-    E["tabla_edit"] = editada
+    editada = editar_lineas_en_etapas()
+    if editada is None:
+        st.warning("Carga una cotización o lee un pedido en el paso anterior.")
+        return
 
     panel_revision()
     atras, sigue = st.columns(2)
@@ -1042,6 +1033,7 @@ def tarjeta(clave: str, desc: str):
 
 def paso_3():
     st.header("3. Fotos y fichas técnicas")
+    editar_lineas_en_etapas()
     claves, descripciones = datos_productos()
     if not claves:
         st.warning("No hay productos seleccionados. Vuelve al paso anterior y marca al menos uno.")
@@ -1143,7 +1135,7 @@ def generar_pdf():
     lineas, ruta, tabla = E["lineas"], E["ruta"], E["tabla_edit"]
     finales = []
     for ln, (_, fila) in zip(lineas, tabla.iterrows()):
-        if not fila[COL_INCLUIR]:
+        if not fila[COL_INCLUIR] or not str(ln.get("descripcion", "")).strip() or _numero(ln.get("cantidad"), 0) <= 0:
             continue
         clave = str(fila[COL_COD]).strip().upper()
         if clave and clave != "NAN":  # aprende: claves corregidas y último precio usado
@@ -1163,6 +1155,7 @@ def generar_pdf():
 
 def paso_4():
     st.header("4. Tu PDF")
+    editar_lineas_en_etapas()
     claves, _ = datos_productos()
     con_foto = sum(1 for c in claves if bib.archivos(c)[0])
     con_ficha = sum(1 for c in claves if bib.archivos(c)[1])
