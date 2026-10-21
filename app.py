@@ -303,6 +303,275 @@ def editor(df, **kw):
         return st.data_editor(df, height=min(35 * (len(df) + 1 + extra) + 8, 2400), **kw)
 
 
+def _cliente_actual() -> dict:
+    return {
+        "nombre": E.get("c_nombre", ""),
+        "rut": E.get("c_rut", ""),
+        "direccion": E.get("c_dir", ""),
+        "ciudad": E.get("c_ciudad", ""),
+        "telefono": E.get("c_tel", ""),
+        "email": E.get("c_email", ""),
+        "fecha": E.get("c_fecha", date.today()),
+        "numero": E.get("cot_numero", ""),
+    }
+
+
+def totales_lineas(lineas: list[dict]) -> dict:
+    entradas = [{"cantidad": _numero(ln.get("cantidad"), 0),
+                 "precio_neto": _numero(ln.get("unitario"), 0)}
+                for ln in lineas if _numero(ln.get("cantidad"), 0) > 0]
+    return rv.totales_de(entradas) if entradas else {"neto": 0, "iva": 0, "total": 0}
+
+
+def mostrar_totales_vivos(totales: dict):
+    a, b, c = st.columns(3)
+    a.metric("Neto", rv.clp(totales.get("neto", 0)))
+    b.metric("IVA (19 %)", rv.clp(totales.get("iva", 0)))
+    c.metric("Total con IVA", rv.clp(totales.get("total", 0)))
+
+
+def _leer_etiquetas(ws):
+    for fila in ws.iter_rows():
+        etiquetas = {ct.normalizar(c.value): c.column for c in fila if isinstance(c.value, str)}
+        if "CANTIDAD" in etiquetas and "DESCRIPCION" in etiquetas:
+            return fila[0].row, etiquetas
+    raise ValueError("No encontré los encabezados Cantidad y Descripción en el Excel.")
+
+
+def guardar_xlsx_actual():
+    """Actualiza el Excel del borrador con las líneas editadas y lo copia al historial."""
+    cot_id = E.get("cot_id")
+    if not cot_id or not E.get("lineas"):
+        return
+    lineas = [ln for ln in E["lineas"] if str(ln.get("descripcion", "")).strip()
+              and _numero(ln.get("cantidad"), 0) > 0]
+    ruta_actual = Path(E["ruta"]) if E.get("ruta") else None
+    origen_pedido = E.get("origen_pedido", "pedido")
+
+    if origen_pedido == "pedido" or not ruta_actual or not ruta_actual.exists():
+        tmp = Path(tempfile.mkdtemp()) / "cotizacion.xlsx"
+        ct.crear_cotizacion_xlsx(
+            [{"cantidad": ln["cantidad"], "descripcion": ln["descripcion"],
+              "precio_neto": ln.get("unitario")} for ln in lineas],
+            _cliente_actual(), tmp,
+        )
+        fuente = tmp
+    else:
+        wb = load_workbook(ruta_actual)
+        ws = wb.active
+        try:
+            fila_enc, columnas = _leer_etiquetas(ws)
+        except ValueError:
+            wb.close()
+            fila_enc, columnas = None, {}
+        c_cant, c_desc = columnas.get("CANTIDAD"), columnas.get("DESCRIPCION")
+        c_unit, c_total = columnas.get("PUNITARIO"), columnas.get("TOTAL")
+        total_rows = {}
+        if fila_enc is not None:
+            for fila in ws.iter_rows(min_row=fila_enc + 1):
+                for celda in fila:
+                    if isinstance(celda.value, str):
+                        etiqueta = ct.normalizar(celda.value.rstrip(":"))
+                        if etiqueta in ("TOTALNETO", "IVA", "TOTAL") and celda.column < ws.max_column:
+                            total_rows.setdefault(etiqueta, celda.row)
+            inicio = fila_enc + 1
+            primera_fila_total = min(total_rows.values()) if total_rows else ws.max_row + 1
+            espacios = max(0, primera_fila_total - inicio)
+        else:
+            espacios = 0
+
+        if fila_enc is None or c_cant is None or c_desc is None or c_unit is None or len(lineas) > espacios:
+            if fila_enc is not None:
+                wb.close()
+            # Caso excepcional: archivo externo sin columnas editables o se agregaron más filas
+            # que las disponibles. Se usa la plantilla estándar para no cortar productos.
+            cliente = dict(_cliente_actual())
+            if ruta_actual and ruta_actual.exists():
+                try:
+                    d = pc.leer_para_pdf(ruta_actual)
+                    pares = {ct.normalizar(e): v for e, v in d["izquierda"] + d["derecha"]}
+                    for k, etiqueta in (("nombre", "NOMBRE"), ("rut", "RUT"), ("direccion", "DIRECCION"),
+                                        ("ciudad", "CIUDAD"), ("telefono", "TELEFONO"), ("email", "EMAIL")):
+                        cliente[k] = cliente.get(k) or pares.get(etiqueta, "")
+                except Exception:
+                    pass
+            tmp = Path(tempfile.mkdtemp()) / "cotizacion.xlsx"
+            ct.crear_cotizacion_xlsx(
+                [{"cantidad": ln["cantidad"], "descripcion": ln["descripcion"],
+                  "precio_neto": ln.get("unitario")} for ln in lineas],
+                cliente, tmp,
+            )
+            fuente = tmp
+        else:
+            # Las filas de producto ya existentes se reutilizan para conservar la plantilla y su diseño.
+            for i in range(espacios):
+                fila = inicio + i
+                ln = lineas[i] if i < len(lineas) else None
+                ws.cell(fila, c_cant).value = ln["cantidad"] if ln else None
+                ws.cell(fila, c_desc).value = ln["descripcion"] if ln else None
+                ws.cell(fila, c_unit).value = ln.get("unitario") if ln else None
+                if c_total:
+                    ws.cell(fila, c_total).value = (round(_numero(ln.get("unitario"), 0) * ln["cantidad"])
+                                                    if ln and ln.get("unitario") is not None else None)
+            tot = totales_lineas(lineas)
+            for etiqueta, valor in (("TOTALNETO", tot["neto"]), ("IVA", tot["iva"]), ("TOTAL", tot["total"])):
+                fila = total_rows.get(etiqueta)
+                if fila:
+                    celda_etiqueta = next((c for c in ws[fila]
+                                           if isinstance(c.value, str)
+                                           and ct.normalizar(c.value.rstrip(":")) == etiqueta), None)
+                    if celda_etiqueta and celda_etiqueta.column < ws.max_column:
+                        ws.cell(fila, celda_etiqueta.column + 1).value = valor
+            wb.save(ruta_actual)
+            wb.close()
+            actualizar_numero_en_excel(ruta_actual, str(E.get("cot_numero", "")))
+            fuente = ruta_actual
+
+    hist.guardar_archivos(int(cot_id), xlsx=fuente)
+    registro = hist.obtener(int(cot_id))
+    if registro and registro.get("xlsx"):
+        E["ruta"] = Path(registro["xlsx"])
+        actualizar_numero_en_excel(E["ruta"], str(E.get("cot_numero", "")))
+        hist.guardar_archivos(int(cot_id), xlsx=E["ruta"])
+
+
+def actualizar_inventario(lineas: list[dict]):
+    """Aprende precios netos y nombres a medida que se edita la cotización."""
+    for ln in lineas:
+        if not ln.get("es_producto"):
+            continue
+        desc = str(ln.get("descripcion", "")).strip()
+        clave = str(ln.get("clave_auto", "") or "").strip().upper()
+        if not clave and desc:
+            clave = ct.clave_descriptiva(desc)
+        if clave:
+            precio = ln.get("unitario")
+            bib.registrar(clave, nombre=desc or clave, alias=desc or None,
+                          precio_neto=_numero(precio, 0) if precio is not None and not _es_vacio(precio) and _numero(precio, 0) > 0 else None)
+
+
+def aplicar_tabla_editada(df: pd.DataFrame):
+    """Convierte la tabla visible en líneas de cotización e inventario."""
+    anteriores = E.get("lineas", [])
+    lineas = []
+    origen_por_etiqueta = {v: k for k, v in ORIGEN.items() if v}
+    for i, fila in enumerate(df.to_dict("records")):
+        desc = str(fila.get(COL_PROD) or "").strip()
+        cantidad = _numero(fila.get(COL_CANT), 0)
+        if not desc or desc.lower() == "nan" or cantidad <= 0:
+            continue
+        previo = anteriores[i] if i < len(anteriores) else {}
+        codigo_valor = fila.get(COL_COD)
+        clave = "" if _es_vacio(codigo_valor) else str(codigo_valor).strip().upper()
+        if not clave:
+            clave = ct.clave_descriptiva(desc)
+        precio_valor = fila.get(COL_PRECIO)
+        precio = None if _es_vacio(precio_valor) else _numero(precio_valor, 0)
+        origen_etiqueta = str(fila.get(COL_ORIGEN) or "")
+        origen = origen_por_etiqueta.get(origen_etiqueta, previo.get("origen", "descripcion"))
+        incluir = fila.get(COL_INCLUIR, True)
+        lineas.append({
+            "fila": previo.get("fila", i + 1),
+            "cantidad": ct._cantidad(cantidad),
+            "descripcion": ct.limpiar_descripcion(desc),
+            "unitario": precio,
+            "es_producto": not any(p in ct.normalizar(desc).lower() for p in ct.PALABRAS_NO_PRODUCTO),
+            "clave_auto": clave,
+            "origen": origen,
+            "incluir": not _es_vacio(incluir) and bool(incluir),
+        })
+    E["lineas"] = lineas
+    E["tabla_edit"] = df.copy()
+    E["tabla"] = df.copy()
+    E.pop("pdf_bytes", None)
+    E.pop("pdf_nombre", None)
+    E.pop("informe", None)
+    actualizar_inventario(lineas)
+    guardar_xlsx_actual()
+    guardar_estado_borrador()
+
+
+def editar_lineas_en_etapas():
+    """La lista y los precios son editables hasta generar el PDF."""
+    if "pdf_bytes" in E:
+        st.caption("La cotización quedó bloqueada después de generar el PDF. Inicia otra cotización para hacer cambios.")
+        return E.get("tabla_edit")
+    base = E.get("tabla_edit", E.get("tabla"))
+    if base is None:
+        return None
+    st.subheader("Productos y precios (editables)")
+    st.caption("El precio unitario se ingresa en valor neto, antes de IVA. Puedes editar las celdas o agregar/eliminar filas.")
+    key = f"lineas_editor_{E.get('cot_id', 0)}"
+    editada = editor(
+        base, num_rows="dynamic", hide_index=True, width="stretch", key=key,
+        column_config={
+            COL_INCLUIR: st.column_config.CheckboxColumn(COL_INCLUIR, width="small"),
+            COL_CANT: st.column_config.NumberColumn(COL_CANT, min_value=0, step=1, width="small"),
+            COL_PROD: st.column_config.TextColumn(COL_PROD, width="large"),
+            COL_COD: st.column_config.TextColumn(COL_COD, width="medium"),
+            COL_PRECIO: st.column_config.NumberColumn(COL_PRECIO, min_value=0, format="$ %d"),
+        },
+    )
+    if not editada.equals(base):
+        aplicar_tabla_editada(editada)
+    else:
+        E["tabla_edit"] = editada
+    mostrar_totales_vivos(totales_lineas(E.get("lineas", [])))
+    return editada
+
+
+def guardar_estado_borrador():
+    """Persiste los datos esenciales tras cada interacción de Streamlit."""
+    cot_id = E.get("cot_id")
+    if not cot_id:
+        return
+    registro = hist.obtener(int(cot_id))
+    if not registro:
+        return
+    data = registro.get("datos") or {}
+    cliente_anterior = data.get("cliente") or {}
+    cliente = dict(cliente_anterior)
+    for clave, origen in (("nombre", "c_nombre"), ("rut", "c_rut"), ("direccion", "c_dir"),
+                          ("ciudad", "c_ciudad"), ("telefono", "c_tel"), ("email", "c_email")):
+        if origen in E:
+            cliente[clave] = E.get(origen, "")
+    fecha = E.get("c_fecha", date.today())
+    lineas = E.get("lineas", data.get("lineas", [])) or []
+    tot = totales_lineas(lineas) if lineas else {"neto": 0, "iva": 0, "total": 0}
+    if not lineas and isinstance(E.get("orden_df"), pd.DataFrame):
+        con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+        vistas = []
+        for fila in E["orden_df"].to_dict("records"):
+            q = _numero(fila.get("Cantidad"), 0)
+            p = fila.get("Precio unitario")
+            if q > 0 and not _es_vacio(p):
+                vistas.append({"cantidad": q, "precio_neto": ct.neto_desde(_numero(p), con_iva)})
+        if vistas:
+            tot = rv.totales_de(vistas)
+
+    estado = {}
+    for clave in ("paso", "vista", "precios_modo", "orden_texto", "c_nombre", "c_rut", "c_dir",
+                  "c_ciudad", "c_tel", "c_email", "origen_pedido", "cot_numero", "lineas", "info_desc"):
+        if clave in E:
+            estado[clave] = _json_seguro(E[clave])
+    if "c_fecha" in E:
+        estado["c_fecha"] = _json_seguro(E["c_fecha"])
+    for clave in ("tabla_edit", "tabla"):
+        if isinstance(E.get(clave), pd.DataFrame):
+            estado[clave] = _json_seguro(E[clave])
+    if isinstance(E.get("tabla_edit"), pd.DataFrame):
+        estado["tabla_columns"] = list(E["tabla_edit"].columns)
+    if isinstance(E.get("orden_df"), pd.DataFrame):
+        estado["orden_df"] = _json_seguro(E["orden_df"])
+    if E.get("ruta"):
+        estado["ruta"] = str(E["ruta"])
+    data.update({"lineas": _json_seguro(lineas), "cliente": _json_seguro(cliente), "_app_state": estado})
+    hist.actualizar(int(cot_id), datos=data, fecha=fecha, cliente=cliente.get("nombre", ""),
+                    rut=cliente.get("rut", ""), neto=tot["neto"], iva=tot["iva"], total=tot["total"],
+                    con_iva=int(E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]),
+                    origen=E.get("origen_pedido", registro.get("origen", "pedido")))
+
+
 def ir_a(paso: int):
     E["paso"] = paso
     st.rerun()
