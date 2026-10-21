@@ -1284,29 +1284,42 @@ def generar_pdf():
 
 def paso_4():
     st.header("4. Revisa y crea tu PDF")
-    st.write("Este es el último paso para corregir los datos. Puedes seguir editando los productos, sus cantidades, códigos y precios hasta presionar **Crear el PDF**.")
-    editor_productos()
-    editar_cabecera()
-    mostrar_totales()
 
-    claves, _ = datos_productos()
-    con_foto = sum(1 for c in claves if bib.archivos(c)[0])
-    con_ficha = sum(1 for c in claves if bib.archivos(c)[1])
-    st.write(f"La cotización tiene **{len(E.get('lineas', []))} líneas**. Fotos: **{con_foto}** de {len(claves)}. "
-             f"Fichas técnicas: **{con_ficha}** de {len(claves)}.")
-    n_errores = panel_revision(en_paso_4=True)
-    permitido = not bool(E.get("error_numero"))
-    if n_errores:
-        acepto = st.checkbox("Entiendo los problemas de arriba y quiero crear el PDF igual", key="ok_riesgo")
-        permitido = permitido and acepto
-    if E.get("error_numero"):
-        st.error("Corrige el número de cotización antes de generar el PDF.")
-    if st.button("📄 Crear el PDF", type="primary", width="stretch", disabled=not permitido):
-        try:
-            refrescar_excel_actual()
-            generar_pdf()
-        except Exception as exc:
-            st.error(f"No pude crear el PDF: {exc}")
+    if "pdf_bytes" not in E:
+        st.write("Esta es la última oportunidad para corregir los productos, cantidades, códigos, precios y datos del cliente antes de crear el PDF.")
+        editor_productos()
+        editar_cabecera()
+        mostrar_totales()
+
+        claves, _ = datos_productos()
+        con_foto = sum(1 for c in claves if bib.archivos(c)[0])
+        con_ficha = sum(1 for c in claves if bib.archivos(c)[1])
+        st.write(f"La cotización tiene **{len(E.get('lineas', []))} líneas**. Fotos: **{con_foto}** de {len(claves)}. "
+                 f"Fichas técnicas: **{con_ficha}** de {len(claves)}.")
+        n_errores = panel_revision(en_paso_4=True)
+        permitido = not bool(E.get("error_numero"))
+        if n_errores:
+            acepto = st.checkbox("Entiendo los problemas de arriba y quiero crear el PDF igual", key="ok_riesgo")
+            permitido = permitido and acepto
+        if E.get("error_numero"):
+            st.error("Corrige el número de cotización antes de generar el PDF.")
+        if st.button("📄 Crear el PDF", type="primary", width="stretch", disabled=not permitido):
+            try:
+                refrescar_excel_actual()
+                generar_pdf()
+            except Exception as exc:
+                st.error(f"No pude crear el PDF: {exc}")
+    else:
+        st.success("El PDF ya está generado. Para evitar que el archivo y los datos se desincronicen, la edición está pausada.")
+        mostrar_totales()
+        if st.button("✏️ Volver a editar y regenerar el PDF", type="primary", width="stretch"):
+            for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
+                E.pop(clave_estado, None)
+            if E.get("cot_id") and hist.obtener(E["cot_id"]):
+                hist.actualizar(E["cot_id"], pdf=None, estado="Borrador")
+            E["editado_manual"] = True
+            st.rerun()
+
     if "pdf_bytes" in E:
         st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
         st.download_button("⬇️ Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"],
@@ -1321,11 +1334,15 @@ def paso_4():
         for clave_info, texto in textos:
             if E["informe"][clave_info]:
                 st.warning(f"{texto}: " + ", ".join(E["informe"][clave_info]))
+
     st.divider()
-    atras, nueva = st.columns(2)
-    if atras.button("← Volver a fotos y fichas", width="stretch"):
-        ir_a(3)
-    nueva.button("🔄 Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+    if "pdf_bytes" not in E:
+        atras, nueva = st.columns(2)
+        if atras.button("← Volver a fotos y fichas", width="stretch"):
+            ir_a(3)
+        nueva.button("🔄 Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+    else:
+        nueva = st.button("🔄 Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
 
 
 # ============================================================== HISTORIAL
