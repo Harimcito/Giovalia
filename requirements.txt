@@ -1,0 +1,10 @@
+streamlit>=1.50
+openpyxl
+pypdf
+reportlab
+pillow
+pandas
+ddgs
+requests
+pypdfium2
+openai
