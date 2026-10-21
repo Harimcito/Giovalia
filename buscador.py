@@ -175,6 +175,7 @@ def buscar_fichas(
         if not crudos:
             raise ErrorBusqueda(f"No pude buscar fichas técnicas: {e}") from e
 
+    diag["crudos"] = len(crudos)
     candidatos, vistos = [], set()
     for r in crudos:
         url = r.get("href") or r.get("url")
