@@ -451,31 +451,33 @@ def actualizar_inventario(lineas: list[dict]):
 
 
 def aplicar_tabla_editada(df: pd.DataFrame):
-    """Convierte la tabla visible en líneas de cotización e inventario."""
+    """Convierte la tabla visible en líneas de cotización e inventario, conservando filas incompletas."""
     anteriores = E.get("lineas", [])
     lineas = []
     origen_por_etiqueta = {v: k for k, v in ORIGEN.items() if v}
     for i, fila in enumerate(df.to_dict("records")):
         desc = str(fila.get(COL_PROD) or "").strip()
+        if desc.lower() == "nan":
+            desc = ""
         cantidad = _numero(fila.get(COL_CANT), 0)
-        if not desc or desc.lower() == "nan" or cantidad <= 0:
-            continue
+        cantidad = max(0, cantidad)
         previo = anteriores[i] if i < len(anteriores) else {}
         codigo_valor = fila.get(COL_COD)
         clave = "" if _es_vacio(codigo_valor) else str(codigo_valor).strip().upper()
-        if not clave:
+        if not clave and desc:
             clave = ct.clave_descriptiva(desc)
         precio_valor = fila.get(COL_PRECIO)
-        precio = None if _es_vacio(precio_valor) else _numero(precio_valor, 0)
+        precio = None if _es_vacio(precio_valor) else max(0, _numero(precio_valor, 0))
         origen_etiqueta = str(fila.get(COL_ORIGEN) or "")
         origen = origen_por_etiqueta.get(origen_etiqueta, previo.get("origen", "descripcion"))
-        incluir = fila.get(COL_INCLUIR, True)
+        incluir = fila.get(COL_INCLUIR, bool(desc))
+        es_producto = bool(desc) and not any(p in ct.normalizar(desc).lower() for p in ct.PALABRAS_NO_PRODUCTO)
         lineas.append({
             "fila": previo.get("fila", i + 1),
             "cantidad": ct._cantidad(cantidad),
-            "descripcion": ct.limpiar_descripcion(desc),
+            "descripcion": ct.limpiar_descripcion(desc) if desc else "",
             "unitario": precio,
-            "es_producto": not any(p in ct.normalizar(desc).lower() for p in ct.PALABRAS_NO_PRODUCTO),
+            "es_producto": es_producto,
             "clave_auto": clave,
             "origen": origen,
             "incluir": not _es_vacio(incluir) and bool(incluir),
@@ -490,7 +492,6 @@ def aplicar_tabla_editada(df: pd.DataFrame):
     guardar_xlsx_actual()
     guardar_estado_borrador()
 
-
 def editar_lineas_en_etapas():
     """La lista y los precios son editables hasta generar el PDF."""
     if "pdf_bytes" in E:
@@ -504,6 +505,7 @@ def editar_lineas_en_etapas():
     key = f"lineas_editor_{E.get('cot_id', 0)}"
     editada = editor(
         base, num_rows="dynamic", hide_index=True, width="stretch", key=key,
+        disabled=[COL_ORIGEN],
         column_config={
             COL_INCLUIR: st.column_config.CheckboxColumn(COL_INCLUIR, width="small"),
             COL_CANT: st.column_config.NumberColumn(COL_CANT, min_value=0, step=1, width="small"),
@@ -633,14 +635,17 @@ def datos_productos():
         # Checkbox puede venir como bool, numpy.bool_ o NaN
         if inc is None or (isinstance(inc, float) and pd.isna(inc)) or not bool(inc):
             continue
+        desc = str(fila[COL_PROD] or "").strip()
+        if not desc or desc.lower() == "nan":
+            continue
+        cantidad = _numero(fila.get(COL_CANT), 0)
+        if cantidad <= 0:
+            continue
         clave = str(fila[COL_COD] if pd.notna(fila[COL_COD]) else "").strip().upper()
         if not clave or clave == "NAN":
-            # Si está marcado pero sin código, generamos uno a partir del nombre
-            desc = str(fila[COL_PROD] or "")
-            clave = ct.clave_descriptiva(desc) if desc else ""
+            clave = ct.clave_descriptiva(desc)
         if not clave or clave == "NAN":
             continue
-        desc = str(fila[COL_PROD] or "")
         descripciones.setdefault(clave, desc)
         if clave not in claves:
             claves.append(clave)
