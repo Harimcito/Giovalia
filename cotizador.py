@@ -405,7 +405,7 @@ def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="
             else:
                 fichas.append((clave, ficha))
                 try:  # ¿la ficha guardada realmente nombra este producto?
-                    if es_codigo(clave) and menciones_clave(ficha.read_bytes(), clave) == 0:
+                    if es_codigo(clave) and not menciones_clave(ficha.read_bytes(), [clave]):
                         informe["ficha_dudosa"].append(clave)
                 except Exception:
                     informe["ficha_dudosa"].append(clave)
