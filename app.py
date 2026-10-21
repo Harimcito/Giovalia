@@ -417,19 +417,51 @@ def paso_2():
     if not api_key:
         st.info("Sin la clave de OpenAI busco solo con el nombre del producto. Con la clave, deduzco la marca, "
                 "el modelo y el código, y la búsqueda funciona mucho mejor.")
-    E["tabla_edit"] = editor(
-        E["tabla"], hide_index=True, width="stretch", key="editor",
+
+    # Usar la última versión editada si existe (evita perder checks al volver)
+    base = E.get("tabla_edit", E["tabla"])
+    editada = editor(
+        base, hide_index=True, width="stretch", key="editor",
         disabled=[COL_CANT, COL_PROD, COL_ORIGEN],
-        column_config={COL_INCLUIR: st.column_config.CheckboxColumn(COL_INCLUIR, width="small"),
-                       COL_CANT: st.column_config.NumberColumn(COL_CANT, width="small"),
-                       COL_PROD: st.column_config.TextColumn(COL_PROD, width="large"),
-                       COL_COD: st.column_config.TextColumn(COL_COD, width="medium"),
-                       COL_ORIGEN: st.column_config.TextColumn(COL_ORIGEN, width="medium")})
+        column_config={
+            COL_INCLUIR: st.column_config.CheckboxColumn(COL_INCLUIR, width="small"),
+            COL_CANT: st.column_config.NumberColumn(COL_CANT, width="small"),
+            COL_PROD: st.column_config.TextColumn(COL_PROD, width="large"),
+            COL_COD: st.column_config.TextColumn(COL_COD, width="medium"),
+            COL_ORIGEN: st.column_config.TextColumn(COL_ORIGEN, width="medium"),
+        },
+    )
+    E["tabla_edit"] = editada
+
     panel_revision()
     atras, sigue = st.columns(2)
     if atras.button("← Volver", width="stretch"):
         ir_a(1)
     if sigue.button("Siguiente: fotos y fichas →", type="primary", width="stretch"):
+        # Forzar que la tabla editada quede guardada y validar ANTES de cambiar de paso
+        E["tabla_edit"] = editada
+        claves, _ = datos_productos()
+        if not claves:
+            # Mensaje más claro: ¿falta el check o falta el código?
+            marcados = 0
+            sin_codigo = 0
+            for _, fila in editada.iterrows():
+                inc = fila[COL_INCLUIR]
+                if inc is not None and not (isinstance(inc, float) and pd.isna(inc)) and bool(inc):
+                    marcados += 1
+                    clave = str(fila[COL_COD] if pd.notna(fila[COL_COD]) else "").strip()
+                    if not clave or clave.upper() == "NAN":
+                        sin_codigo += 1
+            if marcados == 0:
+                st.error("No hay productos seleccionados. Marca al menos uno en la columna **Incluir**.")
+            elif sin_codigo:
+                st.error(
+                    f"Hay {sin_codigo} producto(s) marcado(s) pero **sin código**. "
+                    "Escribe un código en la columna Código (o déjalo y se generará solo) e inténtalo de nuevo."
+                )
+            else:
+                st.error("No hay productos seleccionados. Vuelve a marcar al menos uno.")
+            return
         ir_a(3)
 
 
