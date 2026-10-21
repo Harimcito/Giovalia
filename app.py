@@ -233,7 +233,7 @@ def cargar(ruta: Path, origen_pedido: str):
             ln["clave_auto"], ln["origen"] = ct.resolver_clave(bib, ln["descripcion"], ia.get(ln["descripcion"]))
         else:
             ln["clave_auto"], ln["origen"] = "", ""
-        ln["incluir"] = bool(ln.get("incluir", ln["es_producto"]))
+        ln["incluir"] = bool(ln.get("incluir", True))
 
     for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
         E.pop(k, None)
@@ -257,6 +257,9 @@ def datos_productos():
         inc = fila[COL_INCLUIR]
         # Checkbox puede venir como bool, numpy.bool_ o NaN
         if inc is None or (isinstance(inc, float) and pd.isna(inc)) or not bool(inc):
+            continue
+        desc_filtro = _texto_seguro(fila.get(COL_PROD))
+        if not desc_filtro or any(p in ct.normalizar(desc_filtro).lower() for p in ct.PALABRAS_NO_PRODUCTO):
             continue
         clave = str(fila[COL_COD] if pd.notna(fila[COL_COD]) else "").strip().upper()
         if not clave or clave == "NAN":
@@ -450,6 +453,28 @@ def widget_numero_cotizacion():
     st.caption("Puedes cambiarlo durante la cotización, antes de crear el PDF.")
 
 
+def editar_cabecera():
+    """Permite corregir número, fecha y datos del cliente en cualquier etapa."""
+    st.subheader("Datos de la cotización")
+    widget_numero_cotizacion()
+    for k in ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email"):
+        E.setdefault(k, "")
+    E.setdefault("c_fecha", date.today())
+    c1, c2 = st.columns(2)
+    c1.text_input("Nombre o razón social", key="c_nombre")
+    c2.text_input("RUT", key="c_rut")
+    c3, c4 = st.columns(2)
+    c3.text_input("Dirección", key="c_dir")
+    c4.text_input("Ciudad", key="c_ciudad")
+    c5, c6 = st.columns(2)
+    c5.text_input("Teléfono", key="c_tel")
+    c6.text_input("Correo (opcional)", key="c_email")
+    st.date_input("Fecha de la cotización", key="c_fecha")
+    if E.get("c_rut") and rv.validar_rut(E["c_rut"]) is False:
+        st.warning("El RUT no parece válido; revisa el dígito verificador.")
+    persistir_borrador()
+
+
 def sincronizar_editor_productos(editada: pd.DataFrame):
     """Copia cambios del editor a las líneas canónicas que usa el borrador y el PDF."""
     anteriores = list(E.get("lineas", []))
@@ -498,6 +523,8 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
             E.pop(k, None)
     guardar_precios_inventario(nuevas)
     persistir_borrador()
+    if cambio:
+        refrescar_excel_actual()
 
 
 def editor_productos():
