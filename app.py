@@ -2,7 +2,7 @@
 import re
 import tempfile
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -118,6 +118,7 @@ E.setdefault("paso", 1)
 
 COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_ORIGEN = (
     "Incluir", "Cantidad", "Producto", "Código", "¿Cómo lo identifiqué?")
+COL_PRECIO = "Precio unitario"
 ORIGEN = {"biblioteca": "📚 Ya lo conocía", "ia": "🧠 Lo deduje con IA", "texto": "🔤 Estaba en el texto",
           "descripcion": "✏️ Lo armé con el nombre", "": ""}
 
@@ -173,6 +174,7 @@ def editor(df, **kw):
 
 def ir_a(paso: int):
     E["paso"] = paso
+    persistir_borrador()
     st.rerun()
 
 
@@ -186,7 +188,7 @@ def mostrar_pasos(actual: int):
 
 
 def cargar(ruta: Path, origen_pedido: str):
-    """Lee la cotización, identifica cada producto y prepara la tabla de revisión."""
+    """Lee una cotización y prepara líneas, datos del cliente y precios editables."""
     lineas = ct.leer_cotizacion(ruta)
     productos = [ln for ln in lineas if ln["es_producto"]]
     ia = {}
@@ -197,21 +199,53 @@ def cargar(ruta: Path, origen_pedido: str):
             ia = {ln["descripcion"]: r for ln, r in zip(productos, resultados)}
         except Exception:
             st.warning("No pude usar la IA para entender los productos. Sigo con la búsqueda normal.")
+
+    # Una cotización importada parte mostrando precios netos. Un pedido nuevo respeta el modo elegido.
+    if origen_pedido == "cotizacion":
+        E["precios_modo"] = OPCIONES_PRECIO[1]
+        try:
+            d = pc.leer_para_pdf(ruta)
+            cli = {ct.normalizar(etiqueta): valor for etiqueta, valor in d["izquierda"] + d["derecha"]}
+            E["c_nombre"] = cli.get("NOMBRE", "")
+            E["c_rut"] = cli.get("RUT", "")
+            E["c_dir"] = cli.get("DIRECCION", "")
+            E["c_ciudad"] = cli.get("CIUDAD", "")
+            E["c_tel"] = cli.get("TELEFONO", "")
+            E["c_email"] = cli.get("CORREO", cli.get("EMAIL", ""))
+            numero_importado = str(cli.get("NCOTIZACION") or "").strip()
+            if numero_importado:
+                E["cot_numero"] = numero_importado
+            fecha_importada = str(cli.get("FECHA") or "").strip()
+            try:
+                E["c_fecha"] = date.fromisoformat(fecha_importada[:10])
+            except ValueError:
+                try:
+                    E["c_fecha"] = datetime.strptime(fecha_importada, "%d/%m/%Y").date()
+                except ValueError:
+                    E.setdefault("c_fecha", date.today())
+        except Exception:
+            E.setdefault("c_fecha", date.today())
+    else:
+        E.setdefault("c_fecha", date.today())
+
     for ln in lineas:
         if ln["es_producto"]:
             ln["clave_auto"], ln["origen"] = ct.resolver_clave(bib, ln["descripcion"], ia.get(ln["descripcion"]))
         else:
             ln["clave_auto"], ln["origen"] = "", ""
+        ln["incluir"] = bool(ln.get("incluir", ln["es_producto"]))
+
     for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
         E.pop(k, None)
-    E.update(ruta=ruta, lineas=lineas, info_desc=ia, origen_pedido=origen_pedido,
-             tabla=pd.DataFrame({
-                 COL_INCLUIR: [ln["es_producto"] for ln in lineas],
-                 COL_CANT: [ln["cantidad"] for ln in lineas],
-                 COL_PROD: [ln["descripcion"] for ln in lineas],
-                 COL_COD: [ln["clave_auto"] for ln in lineas],
-                 COL_ORIGEN: [ORIGEN[ln["origen"]] for ln in lineas]}))
-    E["tabla_edit"] = E["tabla"]
+    E["editado_manual"] = False
+    E["info_desc"] = ia
+    E["origen_pedido"] = origen_pedido
+    E["lineas"] = lineas
+    E["tabla"] = tabla_desde_lineas(lineas)
+    E["tabla_edit"] = E["tabla"].copy()
+    E["editor_version"] = int(E.get("editor_version", 0)) + 1
+    E["ruta"] = Path(ruta)
+    persistir_borrador()
 
 
 def datos_productos():
