@@ -105,6 +105,61 @@ class Historial:
             numero, i = f"{base}-{i}", i + 1
         return numero
 
+    def cambiar_numero(self, cot_id: int, nuevo_numero: str) -> str:
+        """Cambia el número de una cotización y mantiene sus archivos asociados."""
+        nuevo_numero = _s(nuevo_numero)
+        if not nuevo_numero:
+            raise ValueError("El número de cotización no puede estar vacío.")
+        reg = self.obtener(cot_id)
+        if not reg:
+            raise ValueError("No encontré la cotización que quieres modificar.")
+        anterior = reg["numero"]
+        if nuevo_numero == anterior:
+            return anterior
+        with self._con() as con:
+            duplicado = con.execute(
+                "SELECT id FROM cotizaciones WHERE numero=? AND id<>?",
+                (nuevo_numero, cot_id),
+            ).fetchone()
+        if duplicado:
+            raise ValueError(f"Ya existe una cotización con el número «{nuevo_numero}».")
+
+        carpeta_anterior = self._carpeta(anterior)
+        carpeta_nueva = self._carpeta(nuevo_numero)
+        if carpeta_nueva.exists() and carpeta_nueva != carpeta_anterior:
+            raise ValueError("Ya existe una carpeta con ese número. Elige otro número.")
+        if carpeta_anterior.exists():
+            carpeta_nueva.parent.mkdir(parents=True, exist_ok=True)
+            carpeta_anterior.rename(carpeta_nueva)
+
+        base = re.sub(r"[^A-Za-z0-9._-]", "_", nuevo_numero)
+        nuevos_archivos = {}
+        for campo, extension in (("xlsx", ".xlsx"), ("pdf", ".pdf")):
+            ruta = reg.get(campo)
+            if ruta:
+                destino = carpeta_nueva / f"{base}{extension}"
+                origen = Path(ruta)
+                if origen.exists() and origen != destino:
+                    origen.rename(destino)
+                nuevos_archivos[campo] = str(destino) if destino.exists() else None
+
+        with self._con() as con:
+            con.execute(
+                "UPDATE cotizaciones SET numero=?, xlsx=?, pdf=?, actualizado=? WHERE id=?",
+                (nuevo_numero, nuevos_archivos.get("xlsx", reg.get("xlsx")),
+                 nuevos_archivos.get("pdf", reg.get("pdf")), _ahora(), cot_id),
+            )
+        return nuevo_numero
+
+    def borrador_reciente(self) -> dict | None:
+        """Devuelve el borrador abierto que se guardó más recientemente."""
+        with self._con() as con:
+            fila = con.execute(
+                "SELECT id FROM cotizaciones WHERE estado='Borrador' "
+                "AND (pdf IS NULL OR pdf='') ORDER BY actualizado DESC, id DESC LIMIT 1"
+            ).fetchone()
+        return self.obtener(fila["id"]) if fila else None
+
     # ------------------------------------------------------------ cotizaciones
     def crear(self, cliente: dict, lineas: list[dict], totales: dict, con_iva: bool = True,
               fecha: date | None = None, origen: str = "pedido", numero: str | None = None) -> tuple[int, str]:
