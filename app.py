@@ -605,14 +605,22 @@ def cargar(ruta: Path, origen_pedido: str):
             ln["clave_auto"], ln["origen"] = "", ""
     for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
         E.pop(k, None)
+    for ln in lineas:
+        ln.setdefault("incluir", bool(ln.get("es_producto")))
     E.update(ruta=ruta, lineas=lineas, info_desc=ia, origen_pedido=origen_pedido,
              tabla=pd.DataFrame({
-                 COL_INCLUIR: [ln["es_producto"] for ln in lineas],
+                 COL_INCLUIR: [ln.get("incluir", ln["es_producto"]) for ln in lineas],
                  COL_CANT: [ln["cantidad"] for ln in lineas],
                  COL_PROD: [ln["descripcion"] for ln in lineas],
                  COL_COD: [ln["clave_auto"] for ln in lineas],
-                 COL_ORIGEN: [ORIGEN[ln["origen"]] for ln in lineas]}))
+                 COL_ORIGEN: [ORIGEN[ln["origen"]] for ln in lineas],
+                 COL_PRECIO: [ln.get("unitario") for ln in lineas]}))
     E["tabla_edit"] = E["tabla"]
+    if E.get("cot_id"):
+        hist.guardar_archivos(int(E["cot_id"]), xlsx=ruta)
+        guardado = hist.obtener(int(E["cot_id"]))
+        if guardado and guardado.get("xlsx"):
+            E["ruta"] = Path(guardado["xlsx"])
 
 
 def datos_productos():
