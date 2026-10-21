@@ -356,7 +356,7 @@ def _leer_etiquetas(ws):
 def guardar_xlsx_actual():
     """Actualiza el Excel del borrador con las líneas editadas y lo copia al historial."""
     cot_id = E.get("cot_id")
-    if not cot_id or not E.get("lineas"):
+    if not cot_id or "lineas" not in E:
         return
     lineas = [ln for ln in E["lineas"] if str(ln.get("descripcion", "")).strip()
               and _numero(ln.get("cantidad"), 0) > 0]
