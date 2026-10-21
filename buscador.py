@@ -100,14 +100,26 @@ def miniatura_pdf(datos: bytes) -> bytes | None:
 
 
 # ---------------------------------------------------------------- búsqueda
-def buscar_fotos(consulta: str, max_resultados: int = 6) -> list[dict]:
-    """Candidatos de foto ya descargados y validados."""
+def buscar_fotos(
+    consulta: str,
+    max_resultados: int = 6,
+    *,
+    clave: str | None = None,
+    diag: dict | None = None,
+) -> list[dict]:
+    """Candidatos de foto descargados y validados.
+
+    clave y diag mantienen compatibilidad con la interfaz de app.py.
+    """
+    if diag is None:
+        diag = {}
     marca = marca_en(consulta)
     try:
         crudos = _buscador().images(consulta, max_results=40)
     except Exception as e:
         raise ErrorBusqueda(f"No pude buscar imágenes: {e}") from e
 
+    diag["crudos"] = len(crudos)
     candidatos, vistos = [], set()
     for r in crudos:
         url = r.get("image") or r.get("url")
@@ -129,16 +141,31 @@ def buscar_fotos(consulta: str, max_resultados: int = 6) -> list[dict]:
         except Exception:
             return None
         fuente = r.get("source") or urlparse(url).netloc
+        clave_txt = str(clave or "").strip()
+        texto_candidato = "{} {}".format(r.get("title", ""), url)
+        verificada = bool(clave_txt and es_codigo(clave_txt) and menciones_clave(texto_candidato, [clave_txt]))
         return {"url": url, "datos": datos, "ext": ext, "ancho": ancho, "alto": alto,
-                "fuente": fuente, "titulo": r.get("title", "")}
+                "fuente": fuente, "titulo": r.get("title", ""),
+                "verificada": verificada, "baja_resolucion": False}
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         validos = [c for c in pool.map(bajar, candidatos[:max_resultados * 3]) if c]
     return validos[:max_resultados]
 
 
-def buscar_fichas(consulta: str, max_resultados: int = 4) -> list[dict]:
-    """Candidatos de ficha técnica (PDF) ya descargados y validados."""
+def buscar_fichas(
+    consulta: str,
+    max_resultados: int = 4,
+    *,
+    clave: str | None = None,
+    diag: dict | None = None,
+) -> list[dict]:
+    """Candidatos de ficha técnica (PDF) descargados y validados.
+
+    clave y diag mantienen compatibilidad con la interfaz de app.py.
+    """
+    if diag is None:
+        diag = {}
     marca = marca_en(consulta)
     crudos = []
     try:
@@ -148,6 +175,7 @@ def buscar_fichas(consulta: str, max_resultados: int = 4) -> list[dict]:
         if not crudos:
             raise ErrorBusqueda(f"No pude buscar fichas técnicas: {e}") from e
 
+    diag["crudos"] = len(crudos)
     candidatos, vistos = [], set()
     for r in crudos:
         url = r.get("href") or r.get("url")
@@ -163,13 +191,37 @@ def buscar_fichas(consulta: str, max_resultados: int = 4) -> list[dict]:
             datos, paginas = descargar_pdf(url)
         except Exception:
             return None
+        titulo = r.get("title", "") or url
+        clave_txt = str(clave or "").strip()
+        menciona = bool(clave_txt and es_codigo(clave_txt) and menciones_clave("{} {}".format(titulo, url), [clave_txt]))
+        nivel = 3 if menciona and paginas <= 8 else 2 if menciona else 1
         return {"url": url, "datos": datos, "paginas": paginas,
-                "miniatura": miniatura_pdf(datos), "titulo": r.get("title", "") or url,
-                "fuente": urlparse(url).netloc}
+                "miniatura": miniatura_pdf(datos), "titulo": titulo,
+                "fuente": urlparse(url).netloc, "verificable": bool(clave_txt and es_codigo(clave_txt)),
+                "nivel": nivel}
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         validos = [c for c in pool.map(bajar, candidatos[:max_resultados * 3]) if c]
     return validos[:max_resultados]
+
+
+def fotos_de_ficha(datos: bytes) -> list[dict]:
+    """Genera un candidato de imagen a partir de la primera página de un PDF."""
+    miniatura = miniatura_pdf(datos)
+    if not miniatura:
+        return []
+    try:
+        with PILImage.open(io.BytesIO(miniatura)) as im:
+            ancho, alto = im.size
+            im.verify()
+    except Exception:
+        return []
+    return [{
+        "url": "", "datos": miniatura, "ext": ".png", "ancho": ancho, "alto": alto,
+        "fuente": "PDF local", "titulo": "Primera página de la ficha técnica",
+        "verificada": False, "baja_resolucion": min(ancho, alto) < MIN_LADO,
+    }]
+
 
 import re
 import unicodedata
