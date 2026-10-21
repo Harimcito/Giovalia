@@ -171,7 +171,7 @@ def restaurar_borrador(registro: dict):
     if estado:
         for clave, valor in estado.items():
             if clave in ("tabla_edit", "tabla"):
-                E[clave] = pd.DataFrame(valor or [])
+                E[clave] = pd.DataFrame(valor or [], columns=estado.get("tabla_columns"))
             elif clave == "orden_df":
                 E[clave] = pd.DataFrame(valor or [], columns=["Cantidad", "Producto", "Precio unitario"])
             elif clave == "ruta":
@@ -1421,6 +1421,22 @@ def vista_productos():
                   on_click=borrar_producto, args=(elegido,))
 
 
+# Recupera borradores de versiones anteriores que tenían Excel guardado pero aún no un estado completo.
+if E.get("_reanudar_xlsx"):
+    _ruta_reanudar = Path(E.pop("_reanudar_xlsx"))
+    _reg_reanudar = hist.obtener(int(E["cot_id"]))
+    if _ruta_reanudar.exists() and _reg_reanudar:
+        try:
+            _cliente_previo = {k: E.get(k, "") for k in
+                               ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")}
+            cargar(_ruta_reanudar, _reg_reanudar.get("origen", "pedido"))
+            E.update(_cliente_previo, paso=2, vista=VISTAS[0],
+                     cot_id=int(_reg_reanudar["id"]), cot_numero=_reg_reanudar["numero"],
+                     num_cot_edit=_reg_reanudar["numero"])
+        except Exception as _error_reanudar:
+            st.warning(f"Encontré un borrador anterior, pero no pude reconstruirlo automáticamente: {_error_reanudar}")
+
+
 # ============================================================== PANTALLA
 if TEMA_ACTIVO:
     st.markdown('<h1 class="titulo"><span class="gota"></span>Cotizaciones con fotos y fichas</h1>',
@@ -1439,3 +1455,9 @@ else:
         E["paso"] = 1
     mostrar_pasos(E["paso"])
     {1: paso_1, 2: paso_2, 3: paso_3, 4: paso_4}[E["paso"]]()
+
+# Guardado automático en SQLite al terminar cada interacción; no depende de pulsar "Siguiente".
+try:
+    guardar_estado_borrador()
+except Exception as _error_guardado:
+    st.warning(f"No pude guardar automáticamente este borrador: {_error_guardado}")
