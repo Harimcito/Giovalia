@@ -200,6 +200,11 @@ def restaurar_borrador(registro: dict):
     for clave in list(E.keys()):
         if clave.startswith(("cand_foto_", "cand_ficha_", "diag_foto_", "diag_ficha_")):
             E.pop(clave, None)
+    if registro.get("xlsx") and Path(registro["xlsx"]).exists():
+        ruta_guardada = Path(registro["xlsx"])
+        E.setdefault("ruta", ruta_guardada)
+        if not isinstance(E.get("tabla_edit"), pd.DataFrame) or not E.get("lineas"):
+            E["_reanudar_xlsx"] = str(ruta_guardada)
 
 
 def actualizar_numero_en_excel(ruta: Path, numero: str):
@@ -305,14 +310,15 @@ def editor(df, **kw):
 
 
 def _cliente_actual() -> dict:
+    fuente = E.get("cliente_origen", {})
     return {
-        "nombre": E.get("c_nombre", ""),
-        "rut": E.get("c_rut", ""),
-        "direccion": E.get("c_dir", ""),
-        "ciudad": E.get("c_ciudad", ""),
-        "telefono": E.get("c_tel", ""),
-        "email": E.get("c_email", ""),
-        "fecha": E.get("c_fecha", date.today()),
+        "nombre": E.get("c_nombre") or fuente.get("nombre", ""),
+        "rut": E.get("c_rut") or fuente.get("rut", ""),
+        "direccion": E.get("c_dir") or fuente.get("direccion", ""),
+        "ciudad": E.get("c_ciudad") or fuente.get("ciudad", ""),
+        "telefono": E.get("c_tel") or fuente.get("telefono", ""),
+        "email": E.get("c_email") or fuente.get("email", ""),
+        "fecha": fuente.get("fecha") or E.get("c_fecha", date.today()),
         "numero": E.get("cot_numero", ""),
     }
 
@@ -631,6 +637,19 @@ def cargar(ruta: Path, origen_pedido: str):
         guardado = hist.obtener(int(E["cot_id"]))
         if guardado and guardado.get("xlsx"):
             E["ruta"] = Path(guardado["xlsx"])
+    if origen_pedido == "cotizacion":
+        try:
+            leida = pc.leer_para_pdf(E["ruta"])
+            pares = {ct.normalizar(e): v for e, v in leida["izquierda"] + leida["derecha"]}
+            E["cliente_origen"] = {
+                "nombre": pares.get("NOMBRE", ""), "rut": pares.get("RUT", ""),
+                "direccion": pares.get("DIRECCION", ""), "ciudad": pares.get("CIUDAD", ""),
+                "telefono": pares.get("TELEFONO", ""), "email": pares.get("EMAIL", ""),
+                "fecha": pares.get("FECHA", ""),
+            }
+        except Exception:
+            E["cliente_origen"] = {}
+    guardar_estado_borrador()
 
 
 def datos_productos():
@@ -1204,7 +1223,7 @@ def paso_4():
     atras, nueva = st.columns(2)
     if atras.button("← Volver a fotos y fichas", width="stretch"):
         ir_a(3)
-    nueva.button("🔄 Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+    nueva.button("🔄 Hacer otra cotización", width="stretch", on_click=iniciar_nueva_cotizacion)
 
 
 # ============================================================== HISTORIAL
@@ -1242,6 +1261,9 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         E["cot_id"] = cot_id
     else:
         E.pop("cot_id", None)
+        E["_forzar_nuevo_borrador"] = True
+        E.pop("cot_numero", None)
+        E.pop("num_cot_edit", None)
     E["paso"], E["vista"] = 1, VISTAS[0]
 
 
