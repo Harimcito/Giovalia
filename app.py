@@ -490,19 +490,21 @@ def widget_numero_cotizacion():
     E.setdefault("cot_numero", registro["numero"])
     numero = st.text_input("N° de cotización (editable)", key="cot_numero")
     numero = _texto_seguro(numero)
-    if numero and numero != registro["numero"]:
+    if not numero:
+        E["error_numero"] = "El número de cotización no puede quedar vacío."
+    elif numero != registro["numero"]:
         try:
             hist.renumerar(cot_id, numero)
             E.pop("error_numero", None)
             E["editado_manual"] = True
-            for k in ("pdf_bytes", "pdf_nombre", "informe"):
+            for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
                 E.pop(k, None)
             actualizado = hist.obtener(cot_id)
             if actualizado and actualizado.get("xlsx"):
                 E["ruta"] = Path(actualizado["xlsx"])
         except ValueError as exc:
             E["error_numero"] = str(exc)
-    elif numero == registro["numero"]:
+    else:
         E.pop("error_numero", None)
     if E.get("error_numero"):
         st.error(E["error_numero"])
@@ -742,17 +744,18 @@ def selector_borradores():
         }
         elegido = st.selectbox("Borrador que quieres retomar", list(opciones), key="borrador_a_retomar")
         c1, c2 = st.columns(2)
-        if c1.button("↩️ Retomar borrador", type="primary", width="stretch"):
-            restaurar_borrador(opciones[elegido])
-            st.rerun()
-        if c2.button("➕ Iniciar otra cotización", width="stretch"):
-            iniciar_borrador()
-            st.rerun()
+        c1.button(
+            "↩️ Retomar borrador", type="primary", width="stretch",
+            on_click=restaurar_borrador, args=(opciones[elegido],),
+        )
+        c2.button(
+            "➕ Iniciar otra cotización", width="stretch",
+            on_click=iniciar_borrador,
+        )
     else:
         st.write("Cuando comienzas, se crea un borrador automáticamente. Puedes volver a él si se cierra la aplicación.")
-        if st.button("➕ Iniciar nueva cotización", type="primary", width="stretch"):
-            iniciar_borrador()
-            st.rerun()
+        st.button("➕ Iniciar nueva cotización", type="primary", width="stretch",
+                  on_click=iniciar_borrador)
 
 
 # ============================================================== PASO 1: PEDIDO
