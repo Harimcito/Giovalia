@@ -202,6 +202,12 @@ def restaurar_borrador(registro: dict):
     for clave in list(E.keys()):
         if clave.startswith(("cand_foto_", "cand_ficha_", "diag_foto_", "diag_ficha_")):
             E.pop(clave, None)
+    cliente_origen = E.get("cliente_origen")
+    if isinstance(cliente_origen, dict) and isinstance(cliente_origen.get("fecha"), str):
+        try:
+            cliente_origen["fecha"] = date.fromisoformat(cliente_origen["fecha"][:10])
+        except ValueError:
+            pass
     if registro.get("xlsx") and Path(registro["xlsx"]).exists():
         ruta_guardada = Path(registro["xlsx"])
         E.setdefault("ruta", ruta_guardada)
@@ -1275,6 +1281,8 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         E["c_fecha"] = date.today()
     if mantener:
         E["cot_id"] = cot_id
+        E["cot_numero"] = rec["numero"]
+        E["num_cot_edit"] = rec["numero"]
     else:
         E.pop("cot_id", None)
         E["_forzar_nuevo_borrador"] = True
