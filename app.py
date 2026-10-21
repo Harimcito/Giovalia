@@ -168,6 +168,8 @@ def restaurar_borrador(registro: dict):
     E["cot_id"] = registro["id"]
     E["cot_numero"] = registro["numero"]
     E["num_cot_edit"] = registro["numero"]
+    if registro.get("origen") == "cotizacion" and datos.get("cliente"):
+        E["cliente_origen"] = datos.get("cliente", {})
     if estado:
         for clave, valor in estado.items():
             if clave in ("tabla_edit", "tabla"):
@@ -540,10 +542,15 @@ def guardar_estado_borrador():
     data = registro.get("datos") or {}
     cliente_anterior = data.get("cliente") or {}
     cliente = dict(cliente_anterior)
+    cliente_importado = E.get("cliente_origen", {})
     for clave, origen in (("nombre", "c_nombre"), ("rut", "c_rut"), ("direccion", "c_dir"),
                           ("ciudad", "c_ciudad"), ("telefono", "c_tel"), ("email", "c_email")):
         if origen in E:
-            cliente[clave] = E.get(origen, "")
+            valor = E.get(origen, "")
+            if (valor is None or not str(valor).strip()) and cliente_importado.get(clave):
+                cliente[clave] = cliente_importado[clave]
+            else:
+                cliente[clave] = valor
     fecha = E.get("c_fecha", date.today())
     cliente["fecha"] = _json_seguro(fecha)
     lineas = E.get("lineas", data.get("lineas", [])) or []
@@ -567,7 +574,7 @@ def guardar_estado_borrador():
 
     estado = {}
     for clave in ("paso", "vista", "precios_modo", "orden_texto", "c_nombre", "c_rut", "c_dir",
-                  "c_ciudad", "c_tel", "c_email", "origen_pedido", "cot_numero", "lineas", "info_desc"):
+                  "c_ciudad", "c_tel", "c_email", "origen_pedido", "cot_numero", "lineas", "info_desc", "cliente_origen"):
         if clave in E:
             estado[clave] = _json_seguro(E[clave])
     if "c_fecha" in E:
@@ -641,11 +648,20 @@ def cargar(ruta: Path, origen_pedido: str):
         try:
             leida = pc.leer_para_pdf(E["ruta"])
             pares = {ct.normalizar(e): v for e, v in leida["izquierda"] + leida["derecha"]}
+            fecha_origen = pares.get("FECHA", "")
+            if isinstance(fecha_origen, str):
+                try:
+                    fecha_origen = date.fromisoformat(fecha_origen[:10])
+                except ValueError:
+                    try:
+                        fecha_origen = datetime.strptime(fecha_origen, "%d/%m/%Y").date()
+                    except ValueError:
+                        fecha_origen = None
             E["cliente_origen"] = {
                 "nombre": pares.get("NOMBRE", ""), "rut": pares.get("RUT", ""),
                 "direccion": pares.get("DIRECCION", ""), "ciudad": pares.get("CIUDAD", ""),
                 "telefono": pares.get("TELEFONO", ""), "email": pares.get("EMAIL", ""),
-                "fecha": pares.get("FECHA", ""),
+                "fecha": fecha_origen,
             }
         except Exception:
             E["cliente_origen"] = {}
