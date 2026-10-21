@@ -245,6 +245,9 @@ def cargar(ruta: Path, origen_pedido: str):
     E["tabla_edit"] = E["tabla"].copy()
     E["editor_version"] = int(E.get("editor_version", 0)) + 1
     E["ruta"] = Path(ruta)
+    E["_snapshot_cabecera"] = tuple(
+        _texto_seguro(E.get(k)) for k in ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")
+    ) + (str(E.get("c_fecha", date.today())),)
     if E.get("cot_id"):
         registro_guardado = hist.obtener(E["cot_id"])
         if registro_guardado and registro_guardado.get("xlsx") and Path(registro_guardado["xlsx"]).exists():
@@ -463,6 +466,22 @@ def widget_numero_cotizacion():
     st.caption("Puedes cambiarlo durante la cotización, antes de crear el PDF.")
 
 
+def marcar_cambios_cabecera():
+    """Detecta cambios en los datos del cliente para que también lleguen al Excel/PDF."""
+    campos = ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")
+    estado_actual = tuple(_texto_seguro(E.get(k)) for k in campos) + (str(E.get("c_fecha", date.today())),)
+    anterior = E.get("_snapshot_cabecera")
+    cambio = anterior is not None and anterior != estado_actual
+    if cambio:
+        E["editado_manual"] = True
+        for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
+            E.pop(k, None)
+        if E.get("lineas") and E.get("ruta"):
+            refrescar_excel_actual()
+    E["_snapshot_cabecera"] = estado_actual
+    return cambio
+
+
 def editar_cabecera():
     """Permite corregir número, fecha y datos del cliente en cualquier etapa."""
     st.subheader("Datos de la cotización")
@@ -480,6 +499,7 @@ def editar_cabecera():
     c5.text_input("Teléfono", key="c_tel")
     c6.text_input("Correo (opcional)", key="c_email")
     st.date_input("Fecha de la cotización", key="c_fecha")
+    marcar_cambios_cabecera()
     if E.get("c_rut") and rv.validar_rut(E["c_rut"]) is False:
         st.warning("El RUT no parece válido; revisa el dígito verificador.")
     persistir_borrador()
@@ -763,6 +783,7 @@ def pedido_ui():
     c5.text_input("Teléfono", key="c_tel")
     c6.text_input("Correo (opcional)", key="c_email")
     st.date_input("Fecha de la cotización", key="c_fecha")
+    marcar_cambios_cabecera()
 
     if "orden_df" not in E:
         st.info("Escribe o carga un pedido para comenzar. Tus datos de cliente y el número se guardan en el borrador.")
