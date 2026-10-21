@@ -19,6 +19,16 @@ import revisor as rv
 APP_DIR = Path(__file__).parent
 E = st.session_state
 
+# Aplica datos de una cotización importada al inicio de la siguiente ejecución,
+# antes de crear widgets con esas claves (Streamlit no permite cambiarlas después).
+_pendiente_importado = E.pop("_pending_import_header", None)
+if isinstance(_pendiente_importado, dict):
+    for _clave_widget, _valor_widget in _pendiente_importado.items():
+        if _clave_widget in {
+            "precios_modo", "c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email", "c_fecha", "cot_numero"
+        }:
+            E[_clave_widget] = _valor_widget
+
 # ------------------------------------------------------------- DISEÑO "tinta en agua"
 ANIMAR_FONDO = True   # pon False si prefieres el fondo quieto
 TEMA_BASE = {"base": "light", "primaryColor": "#2A7090", "backgroundColor": "#F5F9FB",
@@ -200,31 +210,39 @@ def cargar(ruta: Path, origen_pedido: str):
         except Exception:
             st.warning("No pude usar la IA para entender los productos. Sigo con la búsqueda normal.")
 
-    # Una cotización importada parte mostrando precios netos. Un pedido nuevo respeta el modo elegido.
+    # Los valores del Excel se aplican al inicio de la siguiente ejecución de Streamlit,
+    # no aquí: las pestañas del paso 1 ya pueden haber creado widgets con esas claves.
     if origen_pedido == "cotizacion":
-        E["precios_modo"] = OPCIONES_PRECIO[1]
+        pendiente = {
+            "precios_modo": OPCIONES_PRECIO[1],
+            "c_nombre": "", "c_rut": "", "c_dir": "", "c_ciudad": "", "c_tel": "", "c_email": "",
+            "c_fecha": date.today(),
+        }
         try:
             d = pc.leer_para_pdf(ruta)
             cli = {ct.normalizar(etiqueta): valor for etiqueta, valor in d["izquierda"] + d["derecha"]}
-            E["c_nombre"] = cli.get("NOMBRE", "")
-            E["c_rut"] = cli.get("RUT", "")
-            E["c_dir"] = cli.get("DIRECCION", "")
-            E["c_ciudad"] = cli.get("CIUDAD", "")
-            E["c_tel"] = cli.get("TELEFONO", "")
-            E["c_email"] = cli.get("CORREO", cli.get("EMAIL", ""))
+            pendiente.update({
+                "c_nombre": cli.get("NOMBRE", ""),
+                "c_rut": cli.get("RUT", ""),
+                "c_dir": cli.get("DIRECCION", ""),
+                "c_ciudad": cli.get("CIUDAD", ""),
+                "c_tel": cli.get("TELEFONO", ""),
+                "c_email": cli.get("CORREO", cli.get("EMAIL", "")),
+            })
             numero_importado = str(cli.get("NCOTIZACION") or "").strip()
             if numero_importado:
-                E["cot_numero"] = numero_importado
+                pendiente["cot_numero"] = numero_importado
             fecha_importada = str(cli.get("FECHA") or "").strip()
             try:
-                E["c_fecha"] = date.fromisoformat(fecha_importada[:10])
+                pendiente["c_fecha"] = date.fromisoformat(fecha_importada[:10])
             except ValueError:
                 try:
-                    E["c_fecha"] = datetime.strptime(fecha_importada, "%d/%m/%Y").date()
+                    pendiente["c_fecha"] = datetime.strptime(fecha_importada, "%d/%m/%Y").date()
                 except ValueError:
-                    E.setdefault("c_fecha", date.today())
+                    pass
         except Exception:
-            E.setdefault("c_fecha", date.today())
+            pass
+        E["_pending_import_header"] = pendiente
     else:
         E.setdefault("c_fecha", date.today())
 
@@ -241,13 +259,23 @@ def cargar(ruta: Path, origen_pedido: str):
     E["info_desc"] = ia
     E["origen_pedido"] = origen_pedido
     E["lineas"] = lineas
-    E["tabla"] = tabla_desde_lineas(lineas)
+    E["tabla"] = tabla_desde_lineas(
+        lineas,
+        con_iva=(E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]) if origen_pedido == "pedido" else False,
+    )
     E["tabla_edit"] = E["tabla"].copy()
     E["editor_version"] = int(E.get("editor_version", 0)) + 1
     E["ruta"] = Path(ruta)
-    E["_snapshot_cabecera"] = tuple(
-        _texto_seguro(E.get(k)) for k in ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")
-    ) + (str(E.get("c_fecha", date.today())),)
+    _cabecera_pendiente = E.get("_pending_import_header")
+    if isinstance(_cabecera_pendiente, dict):
+        E["_snapshot_cabecera"] = tuple(
+            _texto_seguro(_cabecera_pendiente.get(k, E.get(k)))
+            for k in ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")
+        ) + (str(_cabecera_pendiente.get("c_fecha", E.get("c_fecha", date.today()))),)
+    else:
+        E["_snapshot_cabecera"] = tuple(
+            _texto_seguro(E.get(k)) for k in ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")
+        ) + (str(E.get("c_fecha", date.today())),)
     if E.get("cot_id"):
         registro_guardado = hist.obtener(E["cot_id"])
         if registro_guardado and registro_guardado.get("xlsx") and Path(registro_guardado["xlsx"]).exists():
@@ -306,9 +334,10 @@ def _texto_seguro(valor) -> str:
     return str(valor or "").strip()
 
 
-def tabla_desde_lineas(lineas: list[dict]) -> pd.DataFrame:
+def tabla_desde_lineas(lineas: list[dict], con_iva: bool | None = None) -> pd.DataFrame:
     """Crea la tabla editable a partir de las líneas guardadas del borrador."""
-    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+    if con_iva is None:
+        con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
     return pd.DataFrame({
         COL_INCLUIR: [ln.get("incluir", ln.get("es_producto", True)) for ln in lineas],
         COL_CANT: [ln.get("cantidad", 1) for ln in lineas],
@@ -411,7 +440,18 @@ def persistir_borrador():
     registro = hist.obtener(cot_id)
     if not registro:
         return
+    pendiente = E.get("_pending_import_header")
     cliente = cliente_actual()
+    if isinstance(pendiente, dict):
+        nombres_cliente = {
+            "c_nombre": "nombre", "c_rut": "rut", "c_dir": "direccion",
+            "c_ciudad": "ciudad", "c_tel": "telefono", "c_email": "email",
+        }
+        for clave_widget, campo_cliente in nombres_cliente.items():
+            if clave_widget in pendiente:
+                cliente[campo_cliente] = _texto_seguro(pendiente[clave_widget])
+        cliente["fecha"] = pendiente.get("c_fecha", cliente.get("fecha", date.today()))
+    modo_precios = pendiente.get("precios_modo", E.get("precios_modo", OPCIONES_PRECIO[0])) if isinstance(pendiente, dict) else E.get("precios_modo", OPCIONES_PRECIO[0])
     lineas = E.get("lineas", [])
     tot = totales_actuales()
     orden = None
@@ -424,7 +464,7 @@ def persistir_borrador():
         "lineas": lineas,
         "cliente": cliente,
         "origen_pedido": E.get("origen_pedido", "pedido"),
-        "precios_modo": E.get("precios_modo", OPCIONES_PRECIO[0]),
+        "precios_modo": modo_precios,
         "paso": int(E.get("paso", 1)),
         "orden_df": orden,
         "orden_texto": E.get("orden_texto", ""),
@@ -435,7 +475,7 @@ def persistir_borrador():
     hist.actualizar(
         cot_id, datos=datos, fecha=fecha, cliente=cliente["nombre"], rut=cliente["rut"],
         neto=tot["neto"], iva=tot["iva"], total=tot["total"],
-        con_iva=int(E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]),
+        con_iva=int(modo_precios == OPCIONES_PRECIO[0]),
     )
     guardar_precios_inventario(lineas)
 
