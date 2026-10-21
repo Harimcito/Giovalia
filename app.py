@@ -304,6 +304,35 @@ def tabla_desde_lineas(lineas: list[dict]) -> pd.DataFrame:
     })
 
 
+def lineas_desde_orden(orden: pd.DataFrame, con_iva: bool) -> list[dict]:
+    """Convierte el editor de pedido en líneas canónicas para el borrador."""
+    salida = []
+    for _, fila in orden.iterrows():
+        descripcion = _texto_seguro(fila.get("Producto"))
+        if not descripcion or descripcion.lower() == "nan":
+            continue
+        try:
+            cantidad = float(fila.get("Cantidad"))
+            if pd.isna(cantidad) or cantidad <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        precio_ui = fila.get("Precio unitario")
+        try:
+            precio_neto = None if pd.isna(precio_ui) or float(precio_ui) <= 0 else ct.neto_desde(float(precio_ui), con_iva)
+        except (TypeError, ValueError):
+            precio_neto = None
+        descripcion = ct.limpiar_descripcion(descripcion)
+        clave = bib.detectar(descripcion) or ""
+        es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
+        salida.append({
+            "cantidad": ct._cantidad(cantidad), "descripcion": descripcion, "unitario": precio_neto,
+            "precio_neto": precio_neto, "es_producto": es_producto, "incluir": True,
+            "clave_auto": clave, "origen": "biblioteca" if clave else "descripcion",
+        })
+    return salida
+
+
 def cliente_actual() -> dict:
     return {
         "nombre": _texto_seguro(E.get("c_nombre")),
@@ -624,20 +653,21 @@ def aplicar_cliente_guardado():
 
 
 def pedido_ui():
-    st.write("Cuéntame qué productos hay que cotizar. Después te pido los precios y los datos del cliente.")
+    st.write("El pedido se conserva como borrador mientras trabajas. Puedes volver a abrirlo si la aplicación se interrumpe.")
     con_iva = st.radio("Los precios que voy a escribir…", OPCIONES_PRECIO, horizontal=True,
                        key="precios_modo") == OPCIONES_PRECIO[0]
     FUENTES = ["✍️ Lo escribo o pego aquí", "📊 Subir Excel o CSV", "📷 Subir PDF o foto"]
-    fuente = st.radio("¿Cómo me das el pedido?", FUENTES, horizontal=True)
-    texto, archivo_orden, archivos_ia = "", None, []
-    if fuente == FUENTES[0]:
-        texto = st.text_area("Escribe un producto por línea, con su cantidad adelante",
-                             placeholder="10 Tóner HP CF283A\n15 Tóner Kyocera TK-3182\n2 Resma carta",
-                             height=170, key="orden_texto")
-    elif fuente == FUENTES[1]:
-        archivo_orden = st.file_uploader("Sube el Excel o CSV del pedido", type=["xlsx", "csv"],
-                                         key="orden_archivo")
-    else:
+    fuente = st.radio("¿Cómo me das el pedido?", FUENTES, horizontal=True, key="fuente_pedido")
+    E["fuente_orden"] = fuente
+    texto = st.text_area(
+        "Escribe un producto por línea, con su cantidad adelante",
+        placeholder="10 Tóner HP CF283A\n15 Tóner Kyocera TK-3182\n2 Resma carta",
+        height=170, key="orden_texto",
+    ) if fuente == FUENTES[0] else ""
+    archivo_orden, archivos_ia = None, []
+    if fuente == FUENTES[1]:
+        archivo_orden = st.file_uploader("Sube el Excel o CSV del pedido", type=["xlsx", "csv"], key="orden_archivo")
+    elif fuente == FUENTES[2]:
         archivos_ia = st.file_uploader("Sube el PDF o las fotos del pedido (puedes subir varias)",
                                        type=["pdf", "jpg", "jpeg", "png", "webp"],
                                        accept_multiple_files=True, key="orden_ia")
@@ -652,47 +682,35 @@ def pedido_ui():
                     raise ValueError("Primero sube un PDF o una foto.")
                 with st.spinner("Leyendo el pedido…"):
                     filas = li.leer_orden_ia([(f.name, f.getvalue()) for f in archivos_ia], api_key)
-            elif archivo_orden:
+            elif fuente == FUENTES[1]:
+                if not archivo_orden:
+                    raise ValueError("Primero sube un Excel o CSV.")
                 tmp = Path(tempfile.mkdtemp()) / archivo_orden.name
                 tmp.write_bytes(archivo_orden.getvalue())
                 filas = ct.leer_orden_archivo(tmp)
             else:
                 filas = ct.parsear_texto_orden(texto)
-        except Exception as e:
-            st.error(f"No pude leer el pedido: {e}")
+        except Exception as exc:
+            st.error(f"No pude leer el pedido: {exc}")
             filas = []
         if not filas:
             st.warning("No encontré productos. Revisa el pedido e inténtalo de nuevo.")
         else:
             precios = []
-            for f in filas:  # autocompleta: costo + margen de "Mis productos", o el último precio usado
-                clave = bib.detectar(f["descripcion"])
+            for fila in filas:
+                clave = bib.detectar(fila["descripcion"])
                 neto = bib.precio_sugerido(clave) or bib.indice.get(clave, {}).get("precio_neto")
                 precios.append(ct.precio_para_mostrar(neto, con_iva) if neto else None)
-            E["orden_df"] = pd.DataFrame({"Cantidad": [f["cantidad"] for f in filas],
-                                          "Producto": [f["descripcion"] for f in filas],
-                                          "Precio unitario": precios})
+            E["orden_df"] = pd.DataFrame({
+                "Cantidad": [fila["cantidad"] for fila in filas],
+                "Producto": [fila["descripcion"] for fila in filas],
+                "Precio unitario": precios,
+            })
             E.pop("orden_editor", None)
+            E["editor_version"] = int(E.get("editor_version", 0)) + 1
 
-    if "orden_df" not in E:
-        return
-
-    st.divider()
-    st.subheader("Productos del pedido")
-    st.caption("Revisa las cantidades y los nombres, y escribe el **precio** de cada uno. "
-               "Para agregar un producto, escribe en la última fila vacía.")
-    orden = editor(
-        E["orden_df"], num_rows="dynamic", hide_index=True, width="stretch",
-        column_config={"Cantidad": st.column_config.NumberColumn(min_value=0, step=1, width="small"),
-                       "Producto": st.column_config.TextColumn("Producto", width="large"),
-                       "Precio unitario": st.column_config.NumberColumn(min_value=0, format="$ %d")},
-        key="orden_editor")
-
-    st.subheader("Datos del cliente")
-    guardados = hist.clientes()
-    if guardados:
-        st.selectbox("¿Es un cliente que ya tengo guardado?", ["➕ Cliente nuevo"] + [c["nombre"] for c in guardados],
-                     key="cli_sel", on_change=aplicar_cliente_guardado)
+    st.subheader("Datos de la cotización")
+    widget_numero_cotizacion()
     for k in ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email"):
         E.setdefault(k, "")
     E.setdefault("c_fecha", date.today())
@@ -702,58 +720,91 @@ def pedido_ui():
     if rut and rv.validar_rut(rut) is False:
         c2.caption("⚠️ Este RUT no parece válido. Revisa el dígito final.")
     c3, c4 = st.columns(2)
-    direccion = c3.text_input("Dirección", key="c_dir")
-    ciudad = c4.text_input("Ciudad", key="c_ciudad")
+    c3.text_input("Dirección", key="c_dir")
+    c4.text_input("Ciudad", key="c_ciudad")
     c5, c6 = st.columns(2)
-    telefono = c5.text_input("Teléfono", key="c_tel")
-    email = c6.text_input("Correo (opcional)", key="c_email")
-    fecha = st.date_input("Fecha de la cotización", key="c_fecha")
+    c5.text_input("Teléfono", key="c_tel")
+    c6.text_input("Correo (opcional)", key="c_email")
+    st.date_input("Fecha de la cotización", key="c_fecha")
 
-    cot_id = E.get("cot_id")
-    registro = hist.obtener(cot_id) if cot_id else None
-    st.info(f"🔢 N° de cotización: **{registro['numero'] if registro else hist.previsualizar_numero(fecha)}**"
-            + (" (se mantiene porque estás editando esta cotización)" if registro else ""))
+    if "orden_df" not in E:
+        st.info("Escribe o carga un pedido para comenzar. Tus datos de cliente y el número se guardan en el borrador.")
+        persistir_borrador()
+        return
 
-    lineas_orden, sin_precio = [], []
-    for _, f in orden.iterrows():
-        desc, cant = str(f["Producto"] or "").strip(), f["Cantidad"]
-        if not desc or desc == "nan" or pd.isna(cant) or cant <= 0:
-            continue
-        precio = None if pd.isna(f["Precio unitario"]) or f["Precio unitario"] <= 0 else float(f["Precio unitario"])
-        if precio is None:
-            sin_precio.append(desc[:40])
-        lineas_orden.append({"cantidad": ct._cantidad(float(cant)), "descripcion": ct.limpiar_descripcion(desc),
-                             "precio_neto": None if precio is None else ct.neto_desde(precio, con_iva)})
+    st.divider()
+    st.subheader("Productos y precios")
+    st.caption("Puedes cambiar cantidades, nombres y precios, agregar filas y dejar precios pendientes. Los totales se actualizan antes de avanzar.")
+    orden = editor(
+        E["orden_df"], num_rows="dynamic", hide_index=True, width="stretch", key="orden_editor",
+        column_config={
+            "Cantidad": st.column_config.NumberColumn(min_value=0, step=1, width="small"),
+            "Producto": st.column_config.TextColumn("Producto", width="large"),
+            "Precio unitario": st.column_config.NumberColumn(min_value=0, format="$ %d"),
+        },
+    )
+    E["orden_df"] = orden
+    lineas_orden = lineas_desde_orden(orden, con_iva)
+    E["lineas"] = lineas_orden
+    E["tabla"] = tabla_desde_lineas(lineas_orden)
+    E["tabla_edit"] = E["tabla"].copy()
+    E["origen_pedido"] = "pedido"
+    mostrar_totales()
+
+    sin_precio = [ln["descripcion"][:45] for ln in lineas_orden if ln.get("unitario") is None]
     continuar_igual = True
     if sin_precio:
-        st.warning("Todavía faltan precios en: " + ", ".join(sin_precio))
-        continuar_igual = st.checkbox("Quiero continuar igual, sin esos precios", key="ok_sin_precio")
-    if st.button("Crear la cotización y continuar →", type="primary", width="stretch",
+        st.warning("Faltan precios en: " + ", ".join(sin_precio))
+        continuar_igual = st.checkbox("Quiero continuar igual y completar los precios después", key="ok_sin_precio")
+    if st.button("Guardar pedido y continuar →", type="primary", width="stretch",
                  disabled=not lineas_orden or not continuar_igual):
-        cliente = {"nombre": nombre, "rut": rut, "direccion": direccion, "ciudad": ciudad,
-                   "telefono": telefono, "email": email, "fecha": fecha}
-        totales = rv.totales_de(lineas_orden)
-        datos = {"lineas": lineas_orden, "cliente": cliente}
-        nueva = registro is None
-        if nueva:
-            cot_id, numero = hist.crear(cliente, lineas_orden, totales, con_iva, fecha)
+        cliente = cliente_actual()
+        totales = rv.totales_de([
+            {"cantidad": ln["cantidad"], "precio_neto": ln.get("unitario")}
+            for ln in lineas_orden if ln.get("unitario") is not None
+        ])
+        cot_id = E.get("cot_id")
+        if not cot_id:
+            cot_id, numero = hist.crear(cliente, lineas_orden, totales, con_iva, cliente["fecha"], origen="pedido")
+            E["cot_id"], E["cot_numero"] = cot_id, numero
         else:
-            hist.actualizar(cot_id, datos=datos, fecha=fecha, cliente=nombre, rut=rut, neto=totales["neto"],
-                            iva=totales["iva"], total=totales["total"], con_iva=int(con_iva))
-            numero = registro["numero"]
-        base = re.sub(r"[^A-Za-z0-9]+", "_", nombre).strip("_")[:30] or "cliente"
-        ruta = Path(tempfile.mkdtemp()) / f"Cotizacion_{re.sub(r'[^A-Za-z0-9._-]', '_', numero)}_{base}.xlsx"
+            registro = hist.obtener(cot_id)
+            if registro and _texto_seguro(E.get("cot_numero")) != registro["numero"]:
+                try:
+                    hist.renumerar(cot_id, _texto_seguro(E.get("cot_numero")))
+                except ValueError as exc:
+                    st.error(str(exc))
+                    return
+        registro = hist.obtener(E["cot_id"])
+        if not registro:
+            st.error("No pude recuperar el borrador. No se avanzó para evitar perder los datos.")
+            return
+        ruta = Path(tempfile.mkdtemp()) / (
+            f"Cotizacion_{re.sub(r'[^A-Za-z0-9._-]', '_', registro['numero'])}_"
+            f"{re.sub(r'[^A-Za-z0-9]+', '_', nombre).strip('_')[:30] or 'cliente'}.xlsx"
+        )
         try:
-            ct.crear_cotizacion_xlsx(lineas_orden, {**cliente, "numero": numero}, ruta)
-        except Exception:
-            if nueva:
-                hist.eliminar(cot_id)
-            raise
-        hist.guardar_archivos(cot_id, xlsx=ruta)
-        hist.guardar_cliente(cliente)
-        E["cot_id"] = cot_id
-        cargar(ruta, "pedido")
+            ct.crear_cotizacion_xlsx(
+                [{"cantidad": ln["cantidad"], "descripcion": ln["descripcion"], "precio_neto": ln.get("unitario")}
+                 for ln in lineas_orden if _esta_marcado(ln.get("incluir"), True)],
+                {**cliente, "numero": registro["numero"]}, ruta,
+            )
+            hist.actualizar(
+                E["cot_id"], datos={"lineas": lineas_orden, "cliente": cliente, "precios_modo": E["precios_modo"],
+                                    "origen_pedido": "pedido", "paso": 2},
+                fecha=cliente["fecha"], cliente=nombre, rut=rut, neto=totales["neto"],
+                iva=totales["iva"], total=totales["total"], con_iva=int(con_iva), origen="pedido",
+            )
+            hist.guardar_archivos(E["cot_id"], xlsx=ruta)
+            hist.guardar_cliente(cliente)
+        except Exception as exc:
+            st.error(f"No pude guardar el borrador. Los datos siguen en pantalla: {exc}")
+            return
+        E["ruta"] = Path(hist.obtener(E["cot_id"])["xlsx"])
+        cargar(E["ruta"], "pedido")
         ir_a(2)
+    else:
+        persistir_borrador()
 
 
 def cotizacion_ui():
