@@ -186,7 +186,8 @@ def restaurar_borrador(registro: dict):
             elif clave not in ("pdf_bytes", "pdf_nombre", "informe"):
                 E[clave] = valor
         E.setdefault("paso", 1)
-        E.setdefault("vista", "🧾 Nueva cotización")
+        # Si había un borrador abierto, prioriza volver al flujo de cotización.
+        E["vista"] = "🧾 Nueva cotización"
     else:
         cliente = datos.get("cliente") or {}
         E.update(c_nombre=cliente.get("nombre", registro.get("cliente", "")),
@@ -538,16 +539,23 @@ def guardar_estado_borrador():
         if origen in E:
             cliente[clave] = E.get(origen, "")
     fecha = E.get("c_fecha", date.today())
+    cliente["fecha"] = _json_seguro(fecha)
     lineas = E.get("lineas", data.get("lineas", [])) or []
     tot = totales_lineas(lineas) if lineas else {"neto": 0, "iva": 0, "total": 0}
+    if lineas:
+        actualizar_inventario(lineas)
     if not lineas and isinstance(E.get("orden_df"), pd.DataFrame):
         con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
         vistas = []
         for fila in E["orden_df"].to_dict("records"):
             q = _numero(fila.get("Cantidad"), 0)
+            desc = str(fila.get("Producto") or "").strip()
             p = fila.get("Precio unitario")
-            if q > 0 and not _es_vacio(p):
-                vistas.append({"cantidad": q, "precio_neto": ct.neto_desde(_numero(p), con_iva)})
+            if q > 0 and desc and not _es_vacio(p):
+                neto = ct.neto_desde(_numero(p), con_iva)
+                vistas.append({"cantidad": q, "precio_neto": neto})
+                clave = bib.detectar(desc) or ct.clave_descriptiva(desc)
+                bib.registrar(clave, nombre=desc, alias=desc, precio_neto=neto if neto > 0 else None)
         if vistas:
             tot = rv.totales_de(vistas)
 
@@ -1149,6 +1157,8 @@ def generar_pdf():
                           precio_neto=ln["unitario"] if E.get("origen_pedido") == "pedido" else None)
         else:
             clave = ""
+        if not clave or clave == "NAN":
+            clave = ct.clave_descriptiva(str(ln.get("descripcion", "")))
         finales.append({**ln, "clave": clave})
     salida = ruta.with_name(f"{ruta.stem}_con_anexos.pdf")
     with st.spinner("Armando tu PDF…"):
