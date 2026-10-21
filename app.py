@@ -723,6 +723,17 @@ def pedido_ui():
                        "Producto": st.column_config.TextColumn("Producto", width="large"),
                        "Precio unitario": st.column_config.NumberColumn(min_value=0, format="$ %d")},
         key="orden_editor")
+    E["orden_df"] = orden
+    vista_totales = []
+    for fila in orden.to_dict("records"):
+        cantidad_vista = _numero(fila.get("Cantidad"), 0)
+        precio_vista = fila.get("Precio unitario")
+        if cantidad_vista > 0 and not _es_vacio(precio_vista):
+            vista_totales.append({"cantidad": cantidad_vista,
+                                  "precio_neto": ct.neto_desde(_numero(precio_vista), con_iva)})
+    st.subheader("Totales de la cotización")
+    mostrar_totales_vivos(rv.totales_de(vista_totales) if vista_totales else
+                          {"neto": 0, "iva": 0, "total": 0})
 
     st.subheader("Datos del cliente")
     guardados = hist.clientes()
@@ -746,9 +757,9 @@ def pedido_ui():
     fecha = st.date_input("Fecha de la cotización", key="c_fecha")
 
     cot_id = E.get("cot_id")
-    registro = hist.obtener(cot_id) if cot_id else None
-    st.info(f"🔢 N° de cotización: **{registro['numero'] if registro else hist.previsualizar_numero(fecha)}**"
-            + (" (se mantiene porque estás editando esta cotización)" if registro else ""))
+    registro = hist.obtener(int(cot_id)) if cot_id else None
+    numero_actual = E.get("cot_numero") or (registro["numero"] if registro else hist.previsualizar_numero(fecha))
+    st.caption(f"🔢 Número de cotización: **{numero_actual}**. Puedes cambiarlo en ⚙️ Ajustes → Número de esta cotización.")
 
     lineas_orden, sin_precio = [], []
     for _, f in orden.iterrows():
@@ -769,25 +780,29 @@ def pedido_ui():
         cliente = {"nombre": nombre, "rut": rut, "direccion": direccion, "ciudad": ciudad,
                    "telefono": telefono, "email": email, "fecha": fecha}
         totales = rv.totales_de(lineas_orden)
-        datos = {"lineas": lineas_orden, "cliente": cliente}
-        nueva = registro is None
-        if nueva:
-            cot_id, numero = hist.crear(cliente, lineas_orden, totales, con_iva, fecha)
+        datos = (registro.get("datos") or {}) if registro else {}
+        datos.update({"lineas": lineas_orden, "cliente": cliente})
+        if registro is None:
+            cot_id, numero = hist.crear(cliente, lineas_orden, totales, con_iva, fecha,
+                                        origen="pedido", numero=numero_actual)
         else:
-            hist.actualizar(cot_id, datos=datos, fecha=fecha, cliente=nombre, rut=rut, neto=totales["neto"],
-                            iva=totales["iva"], total=totales["total"], con_iva=int(con_iva))
-            numero = registro["numero"]
+            numero = numero_actual
+            hist.actualizar(int(cot_id), datos=datos, fecha=fecha, cliente=nombre, rut=rut,
+                            neto=totales["neto"], iva=totales["iva"], total=totales["total"],
+                            con_iva=int(con_iva), origen="pedido")
+        E["cot_id"], E["cot_numero"] = int(cot_id), numero
+        cliente["numero"] = numero
         base = re.sub(r"[^A-Za-z0-9]+", "_", nombre).strip("_")[:30] or "cliente"
         ruta = Path(tempfile.mkdtemp()) / f"Cotizacion_{re.sub(r'[^A-Za-z0-9._-]', '_', numero)}_{base}.xlsx"
-        try:
-            ct.crear_cotizacion_xlsx(lineas_orden, {**cliente, "numero": numero}, ruta)
-        except Exception:
-            if nueva:
-                hist.eliminar(cot_id)
-            raise
-        hist.guardar_archivos(cot_id, xlsx=ruta)
+        ct.crear_cotizacion_xlsx(lineas_orden, cliente, ruta)
+        hist.guardar_archivos(int(cot_id), xlsx=ruta)
+        guardado = hist.obtener(int(cot_id))
+        if guardado and guardado.get("xlsx"):
+            ruta = Path(guardado["xlsx"])
         hist.guardar_cliente(cliente)
-        E["cot_id"] = cot_id
+        E["c_fecha"] = fecha
+        E["cot_numero"] = numero
+        E["num_cot_edit"] = numero
         cargar(ruta, "pedido")
         ir_a(2)
 
