@@ -272,6 +272,345 @@ def datos_productos():
     return claves, descripciones
 
 
+def _esta_marcado(valor, defecto=False) -> bool:
+    try:
+        if pd.isna(valor):
+            return defecto
+    except (TypeError, ValueError):
+        pass
+    return bool(valor)
+
+
+def _texto_seguro(valor) -> str:
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(valor or "").strip()
+
+
+def tabla_desde_lineas(lineas: list[dict]) -> pd.DataFrame:
+    """Crea la tabla editable a partir de las líneas guardadas del borrador."""
+    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+    return pd.DataFrame({
+        COL_INCLUIR: [ln.get("incluir", ln.get("es_producto", True)) for ln in lineas],
+        COL_CANT: [ln.get("cantidad", 1) for ln in lineas],
+        COL_PROD: [ln.get("descripcion", "") for ln in lineas],
+        COL_COD: [ln.get("clave_auto", "") for ln in lineas],
+        COL_PRECIO: [ct.precio_para_mostrar(ln.get("unitario"), con_iva)
+                     if ln.get("unitario") is not None else None for ln in lineas],
+        COL_ORIGEN: [ORIGEN.get(ln.get("origen", ""), "") for ln in lineas],
+    })
+
+
+def cliente_actual() -> dict:
+    return {
+        "nombre": _texto_seguro(E.get("c_nombre")),
+        "rut": _texto_seguro(E.get("c_rut")),
+        "direccion": _texto_seguro(E.get("c_dir")),
+        "ciudad": _texto_seguro(E.get("c_ciudad")),
+        "telefono": _texto_seguro(E.get("c_tel")),
+        "email": _texto_seguro(E.get("c_email")),
+        "fecha": E.get("c_fecha", date.today()),
+    }
+
+
+def totales_actuales() -> dict:
+    lineas = [
+        {"cantidad": ln.get("cantidad", 0), "precio_neto": ln.get("unitario")}
+        for ln in E.get("lineas", [])
+        if _esta_marcado(ln.get("incluir", ln.get("es_producto", True)), True)
+    ]
+    return rv.totales_de(lineas)
+
+
+def mostrar_totales():
+    """Muestra neto, IVA y total actual sin esperar a generar el PDF."""
+    tot = totales_actuales()
+    a, b, c = st.columns(3)
+    a.metric("Neto", rv.clp(tot["neto"]))
+    b.metric("IVA (19 %)", rv.clp(tot["iva"]))
+    c.metric("Total", rv.clp(tot["total"]))
+
+
+def guardar_precios_inventario(lineas: list[dict]):
+    """Aprende/actualiza el último precio neto utilizado para cada producto."""
+    for ln in lineas:
+        if not ln.get("es_producto") or ln.get("unitario") is None:
+            continue
+        descripcion = _texto_seguro(ln.get("descripcion"))
+        clave = _texto_seguro(ln.get("clave_auto")).upper()
+        if not clave:
+            clave = ct.clave_descriptiva(descripcion) if descripcion else ""
+            ln["clave_auto"] = clave
+        if not clave:
+            continue
+        try:
+            bib.registrar(clave, nombre=descripcion or clave,
+                          alias=descripcion or None, precio_neto=float(ln["unitario"]))
+            bib.actualizar(clave, nombre=descripcion or clave, precio_neto=float(ln["unitario"]))
+        except (TypeError, ValueError):
+            # Una línea incompleta no debe impedir guardar el borrador.
+            continue
+
+
+def persistir_borrador():
+    """Persiste el trabajo actual en SQLite para recuperarlo tras reiniciar la app."""
+    cot_id = E.get("cot_id")
+    if not cot_id:
+        return
+    registro = hist.obtener(cot_id)
+    if not registro:
+        return
+    cliente = cliente_actual()
+    lineas = E.get("lineas", [])
+    tot = totales_actuales()
+    orden = None
+    if isinstance(E.get("orden_df"), pd.DataFrame):
+        try:
+            orden = E["orden_df"].astype(object).where(pd.notna(E["orden_df"]), None).to_dict("records")
+        except Exception:
+            orden = None
+    datos = {
+        "lineas": lineas,
+        "cliente": cliente,
+        "origen_pedido": E.get("origen_pedido", "pedido"),
+        "precios_modo": E.get("precios_modo", OPCIONES_PRECIO[0]),
+        "paso": int(E.get("paso", 1)),
+        "orden_df": orden,
+        "orden_texto": E.get("orden_texto", ""),
+        "fuente_orden": E.get("fuente_orden", ""),
+        "editado_manual": bool(E.get("editado_manual", False)),
+    }
+    fecha = cliente.get("fecha") or date.today()
+    hist.actualizar(
+        cot_id, datos=datos, fecha=fecha, cliente=cliente["nombre"], rut=cliente["rut"],
+        neto=tot["neto"], iva=tot["iva"], total=tot["total"],
+        con_iva=int(E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]),
+    )
+    guardar_precios_inventario(lineas)
+
+
+def widget_numero_cotizacion():
+    """Campo editable que actualiza el registro y renombra sus archivos si ya existen."""
+    cot_id = E.get("cot_id")
+    registro = hist.obtener(cot_id) if cot_id else None
+    if not registro:
+        st.info("El número se asignará al guardar este borrador.")
+        return
+    E.setdefault("cot_numero", registro["numero"])
+    numero = st.text_input("N° de cotización (editable)", key="cot_numero")
+    numero = _texto_seguro(numero)
+    if numero and numero != registro["numero"]:
+        try:
+            hist.renumerar(cot_id, numero)
+            E.pop("error_numero", None)
+            E["editado_manual"] = True
+            for k in ("pdf_bytes", "pdf_nombre", "informe"):
+                E.pop(k, None)
+            actualizado = hist.obtener(cot_id)
+            if actualizado and actualizado.get("xlsx"):
+                E["ruta"] = Path(actualizado["xlsx"])
+        except ValueError as exc:
+            E["error_numero"] = str(exc)
+    elif numero == registro["numero"]:
+        E.pop("error_numero", None)
+    if E.get("error_numero"):
+        st.error(E["error_numero"])
+    st.caption("Puedes cambiarlo durante la cotización, antes de crear el PDF.")
+
+
+def sincronizar_editor_productos(editada: pd.DataFrame):
+    """Copia cambios del editor a las líneas canónicas que usa el borrador y el PDF."""
+    anteriores = list(E.get("lineas", []))
+    tabla_anterior = E.get("tabla_edit")
+    cambio = isinstance(tabla_anterior, pd.DataFrame) and not tabla_anterior.equals(editada)
+    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+    nuevas = []
+    for i, (_, fila) in enumerate(editada.iterrows()):
+        descripcion = _texto_seguro(fila.get(COL_PROD))
+        cantidad = fila.get(COL_CANT)
+        try:
+            if pd.isna(cantidad):
+                continue
+            cantidad = float(cantidad)
+        except (TypeError, ValueError):
+            continue
+        if not descripcion or descripcion.lower() == "nan" or cantidad <= 0:
+            continue
+        previa = anteriores[i] if i < len(anteriores) else {}
+        precio_ui = fila.get(COL_PRECIO)
+        try:
+            precio_neto = None if pd.isna(precio_ui) or float(precio_ui) < 0 else ct.neto_desde(float(precio_ui), con_iva)
+        except (TypeError, ValueError):
+            precio_neto = None
+        clave = _texto_seguro(fila.get(COL_COD)).upper()
+        es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
+        origen = previa.get("origen", "descripcion")
+        if clave and clave != _texto_seguro(previa.get("clave_auto")).upper():
+            origen = "descripcion"
+        nuevas.append({
+            **previa,
+            "fila": previa.get("fila", i + 1),
+            "cantidad": ct._cantidad(cantidad),
+            "descripcion": ct.limpiar_descripcion(descripcion),
+            "unitario": precio_neto,
+            "es_producto": es_producto,
+            "clave_auto": clave,
+            "origen": origen,
+            "incluir": _esta_marcado(fila.get(COL_INCLUIR), es_producto),
+        })
+    E["tabla_edit"] = editada
+    E["lineas"] = nuevas
+    if cambio:
+        E["editado_manual"] = True
+        for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
+            E.pop(k, None)
+    guardar_precios_inventario(nuevas)
+    persistir_borrador()
+
+
+def editor_productos():
+    """Lista editable de cantidades, descripciones, códigos y precios para todos los pasos."""
+    base = E.get("tabla_edit", E.get("tabla"))
+    if base is None:
+        base = pd.DataFrame(columns=[COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_PRECIO, COL_ORIGEN])
+    version = int(E.get("editor_version", 0))
+    editada = editor(
+        base, num_rows="dynamic", hide_index=True, width="stretch",
+        key=f"editor_productos_{version}",
+        disabled=[COL_ORIGEN],
+        column_config={
+            COL_INCLUIR: st.column_config.CheckboxColumn("Incluir", width="small"),
+            COL_CANT: st.column_config.NumberColumn("Cantidad", min_value=0, step=1, width="small"),
+            COL_PROD: st.column_config.TextColumn("Producto", width="large"),
+            COL_COD: st.column_config.TextColumn("Código", width="medium"),
+            COL_PRECIO: st.column_config.NumberColumn("Precio unitario", min_value=0, format="$ %d", width="medium"),
+            COL_ORIGEN: st.column_config.TextColumn("Identificación", width="medium"),
+        },
+    )
+    sincronizar_editor_productos(editada)
+    return editada
+
+
+def refrescar_excel_actual():
+    """Genera una copia actualizada del Excel para que el PDF use la última edición."""
+    cot_id = E.get("cot_id")
+    if not cot_id or "lineas" not in E:
+        return
+    if E.get("origen_pedido") == "cotizacion" and not E.get("editado_manual", False):
+        return  # Si no se editó, se respeta el Excel original subido.
+    registro = hist.obtener(cot_id)
+    if not registro:
+        return
+    lineas_excel = []
+    for ln in E.get("lineas", []):
+        if not _esta_marcado(ln.get("incluir", ln.get("es_producto", True)), True):
+            continue
+        lineas_excel.append({
+            "cantidad": ln.get("cantidad", 1),
+            "descripcion": ln.get("descripcion", ""),
+            "precio_neto": ln.get("unitario"),
+        })
+    cliente = cliente_actual()
+    cliente["numero"] = registro["numero"]
+    ruta_tmp = Path(tempfile.mkdtemp()) / "cotizacion_actualizada.xlsx"
+    ct.crear_cotizacion_xlsx(lineas_excel, cliente, ruta_tmp)
+    hist.guardar_archivos(cot_id, xlsx=ruta_tmp)
+    registro = hist.obtener(cot_id)
+    if registro and registro.get("xlsx"):
+        E["ruta"] = Path(registro["xlsx"])
+
+
+def iniciar_borrador():
+    """Crea inmediatamente una cotización vacía, lista para guardar avances."""
+    E.clear()
+    fecha = date.today()
+    cliente = {"nombre": "", "rut": "", "direccion": "", "ciudad": "", "telefono": "", "email": "", "fecha": fecha}
+    cot_id, numero = hist.crear(cliente, [], {"neto": 0, "iva": 0, "total": 0},
+                                con_iva=True, fecha=fecha, origen="pedido")
+    E.update(
+        cot_id=cot_id, cot_numero=numero, c_fecha=fecha, precios_modo=OPCIONES_PRECIO[0],
+        paso=1, vista=VISTAS[0], lineas=[], orden_texto="", fuente_orden="",
+        editor_version=1, editado_manual=False, origen_pedido="pedido",
+    )
+    persistir_borrador()
+
+
+def restaurar_borrador(cot_id: int):
+    """Recupera desde SQLite una cotización incompleta, con su lista y precios."""
+    registro = hist.obtener(cot_id)
+    if not registro:
+        return
+    datos = registro.get("datos", {})
+    cliente = datos.get("cliente", {})
+    E.clear()
+    try:
+        fecha = date.fromisoformat(str(registro.get("fecha") or "")[:10])
+    except ValueError:
+        fecha = date.today()
+    E.update(
+        cot_id=cot_id, cot_numero=registro["numero"], c_fecha=fecha,
+        c_nombre=cliente.get("nombre", registro.get("cliente", "")),
+        c_rut=cliente.get("rut", registro.get("rut", "")),
+        c_dir=cliente.get("direccion", ""), c_ciudad=cliente.get("ciudad", ""),
+        c_tel=cliente.get("telefono", ""), c_email=cliente.get("email", ""),
+        precios_modo=datos.get("precios_modo", OPCIONES_PRECIO[0 if registro.get("con_iva", 1) else 1]),
+        origen_pedido=datos.get("origen_pedido", registro.get("origen", "pedido")),
+        paso=int(datos.get("paso", 1)), lineas=datos.get("lineas", []),
+        orden_texto=datos.get("orden_texto", ""), fuente_orden=datos.get("fuente_orden", ""),
+        editado_manual=bool(datos.get("editado_manual", False)), editor_version=1,
+        vista=VISTAS[0],
+    )
+    if isinstance(datos.get("orden_df"), list):
+        df = pd.DataFrame(datos["orden_df"], columns=["Cantidad", "Producto", "Precio unitario"])
+        if not df.empty:
+            df["Cantidad"] = pd.to_numeric(df["Cantidad"], errors="coerce")
+            df["Precio unitario"] = pd.to_numeric(df["Precio unitario"], errors="coerce")
+        E["orden_df"] = df
+    if E["lineas"]:
+        E["tabla"] = tabla_desde_lineas(E["lineas"])
+        E["tabla_edit"] = E["tabla"].copy()
+        if registro.get("xlsx") and Path(registro["xlsx"]).exists():
+            E["ruta"] = Path(registro["xlsx"])
+        else:
+            refrescar_excel_actual()
+    elif registro.get("xlsx") and Path(registro["xlsx"]).exists():
+        E["ruta"] = Path(registro["xlsx"])
+    E["paso"] = E["paso"] if E["lineas"] else 1
+    persistir_borrador()
+
+
+def selector_borradores():
+    """Pantalla de inicio para retomar un borrador o comenzar uno nuevo."""
+    borradores = []
+    for reg in hist.listar("", "Borrador"):
+        pdf = Path(reg["pdf"]) if reg.get("pdf") else None
+        if not pdf or not pdf.exists():
+            borradores.append(reg)
+    st.header("📝 Cotizaciones y borradores")
+    if borradores:
+        st.write("Encontré cotizaciones sin PDF terminado. Puedes retomar cualquiera; los cambios se guardan automáticamente.")
+        opciones = {
+            f"{r['numero']} · {r.get('cliente') or 'sin cliente'} · {fecha_corta(r.get('fecha') or '')}": r["id"]
+            for r in borradores
+        }
+        elegido = st.selectbox("Borrador que quieres retomar", list(opciones), key="borrador_a_retomar")
+        c1, c2 = st.columns(2)
+        if c1.button("↩️ Retomar borrador", type="primary", width="stretch"):
+            restaurar_borrador(opciones[elegido])
+            st.rerun()
+        if c2.button("➕ Iniciar otra cotización", width="stretch"):
+            iniciar_borrador()
+            st.rerun()
+    else:
+        st.write("Cuando comienzas, se crea un borrador automáticamente. Puedes volver a él si se cierra la aplicación.")
+        if st.button("➕ Iniciar nueva cotización", type="primary", width="stretch"):
+            iniciar_borrador()
+            st.rerun()
+
+
 # ============================================================== PASO 1: PEDIDO
 def aplicar_cliente_guardado():
     """Al elegir un cliente guardado, llena los datos de abajo."""
