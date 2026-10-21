@@ -132,13 +132,16 @@ class Historial:
             carpeta_nueva.parent.mkdir(parents=True, exist_ok=True)
             carpeta_anterior.rename(carpeta_nueva)
 
+        base_anterior = re.sub(r"[^A-Za-z0-9._-]", "_", anterior)
         base = re.sub(r"[^A-Za-z0-9._-]", "_", nuevo_numero)
         nuevos_archivos = {}
         for campo, extension in (("xlsx", ".xlsx"), ("pdf", ".pdf")):
             ruta = reg.get(campo)
             if ruta:
                 destino = carpeta_nueva / f"{base}{extension}"
-                origen = Path(ruta)
+                origen = carpeta_nueva / f"{base_anterior}{extension}"
+                if not origen.exists():
+                    origen = Path(ruta)
                 if origen.exists() and origen != destino:
                     origen.rename(destino)
                 nuevos_archivos[campo] = str(destino) if destino.exists() else None
@@ -243,7 +246,9 @@ class Historial:
         campos = {}
         if xlsx:
             destino = carpeta / f"{base}.xlsx"
-            shutil.copy(xlsx, destino)
+            origen = Path(xlsx)
+            if origen.resolve() != destino.resolve():
+                shutil.copy2(origen, destino)
             campos["xlsx"] = str(destino)
         if pdf:
             destino = carpeta / f"{base}.pdf"
