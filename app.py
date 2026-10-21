@@ -363,7 +363,7 @@ def cliente_actual() -> dict:
 
 def totales_actuales() -> dict:
     lineas = [
-        {"cantidad": ln.get("cantidad", 0), "precio_neto": ln.get("unitario")}
+        {"cantidad": ln.get("cantidad", 0), "precio_neto": (ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"))}
         for ln in E.get("lineas", [])
         if _esta_marcado(ln.get("incluir", ln.get("es_producto", True)), True)
     ]
@@ -382,7 +382,8 @@ def mostrar_totales():
 def guardar_precios_inventario(lineas: list[dict]):
     """Aprende/actualiza el último precio neto utilizado para cada producto."""
     for ln in lineas:
-        if not ln.get("es_producto") or ln.get("unitario") is None:
+        precio_neto = ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")
+        if not ln.get("es_producto") or precio_neto is None:
             continue
         descripcion = _texto_seguro(ln.get("descripcion"))
         clave = _texto_seguro(ln.get("clave_auto")).upper()
@@ -393,8 +394,8 @@ def guardar_precios_inventario(lineas: list[dict]):
             continue
         try:
             bib.registrar(clave, nombre=descripcion or clave,
-                          alias=descripcion or None, precio_neto=float(ln["unitario"]))
-            bib.actualizar(clave, nombre=descripcion or clave, precio_neto=float(ln["unitario"]))
+                          alias=descripcion or None, precio_neto=float(precio_neto))
+            bib.actualizar(clave, nombre=descripcion or clave, precio_neto=float(precio_neto))
         except (TypeError, ValueError):
             # Una línea incompleta no debe impedir guardar el borrador.
             continue
@@ -531,6 +532,8 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
             precio_neto = None
         clave = _texto_seguro(fila.get(COL_COD)).upper()
         es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
+        if es_producto and (not clave or clave == "NAN"):
+            clave = ct.clave_descriptiva(descripcion)
         origen = previa.get("origen", "descripcion")
         if clave and clave != _texto_seguro(previa.get("clave_auto")).upper():
             origen = "descripcion"
@@ -597,7 +600,7 @@ def refrescar_excel_actual():
         lineas_excel.append({
             "cantidad": ln.get("cantidad", 1),
             "descripcion": ln.get("descripcion", ""),
-            "precio_neto": ln.get("unitario"),
+            "precio_neto": (ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")),
         })
     cliente = cliente_actual()
     cliente["numero"] = registro["numero"]
@@ -631,6 +634,15 @@ def restaurar_borrador(cot_id: int):
         return
     datos = registro.get("datos", {})
     cliente = datos.get("cliente", {})
+    lineas_restauradas = datos.get("lineas", [])
+    for ln in lineas_restauradas:
+        if ln.get("unitario") is None and ln.get("precio_neto") is not None:
+            ln["unitario"] = ln["precio_neto"]
+        descripcion = _texto_seguro(ln.get("descripcion"))
+        ln.setdefault("es_producto", not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO))
+        ln.setdefault("incluir", True)
+        ln.setdefault("clave_auto", bib.detectar(descripcion) or (ct.clave_descriptiva(descripcion) if ln.get("es_producto") and descripcion else ""))
+        ln.setdefault("origen", "biblioteca" if bib.detectar(descripcion) else "descripcion")
     E.clear()
     try:
         fecha = date.fromisoformat(str(registro.get("fecha") or "")[:10])
@@ -644,7 +656,7 @@ def restaurar_borrador(cot_id: int):
         c_tel=cliente.get("telefono", ""), c_email=cliente.get("email", ""),
         precios_modo=datos.get("precios_modo", OPCIONES_PRECIO[0 if registro.get("con_iva", 1) else 1]),
         origen_pedido=datos.get("origen_pedido", registro.get("origen", "pedido")),
-        paso=int(datos.get("paso", 1)), lineas=datos.get("lineas", []),
+        paso=int(datos.get("paso", 1)), lineas=lineas_restauradas,
         orden_texto=datos.get("orden_texto", ""), fuente_orden=datos.get("fuente_orden", ""),
         editado_manual=bool(datos.get("editado_manual", False)), editor_version=1,
         vista=VISTAS[0],
@@ -1190,7 +1202,7 @@ def generar_pdf():
             bib.registrar(
                 clave, nombre=ln["descripcion"],
                 alias=ln["descripcion"] if ln.get("origen") != "biblioteca" else None,
-                precio_neto=ln.get("unitario"),
+                precio_neto=(ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")),
             )
         else:
             clave = ""
