@@ -862,57 +862,26 @@ def paso_1():
 
 # ============================================================== PASO 2: PRODUCTOS
 def paso_2():
-    st.header("2. Revisa tus productos")
-    st.write("Esta es la lista. Fíjate en el **código**: con él busco la foto y la ficha técnica. "
-             "Si ves uno equivocado o vacío, haz clic en la casilla y corrígelo. Yo lo recordaré para la próxima vez.")
+    st.header("2. Revisa tus productos y precios")
+    st.write("Puedes agregar, quitar o modificar cantidades, descripciones, códigos y precios aquí. "
+             "Lo que cambies se conserva al avanzar y se usa al crear el PDF.")
     if not api_key:
-        st.info("Sin la clave de OpenAI busco solo con el nombre del producto. Con la clave, deduzco la marca, "
-                "el modelo y el código, y la búsqueda funciona mucho mejor.")
+        st.info("Con la clave de OpenAI puedo deducir mejor la marca, el modelo y el código.")
 
-    # Usar la última versión editada si existe (evita perder checks al volver)
-    base = E.get("tabla_edit", E["tabla"])
-    editada = editor(
-        base, hide_index=True, width="stretch", key="editor",
-        disabled=[COL_CANT, COL_PROD, COL_ORIGEN],
-        column_config={
-            COL_INCLUIR: st.column_config.CheckboxColumn(COL_INCLUIR, width="small"),
-            COL_CANT: st.column_config.NumberColumn(COL_CANT, width="small"),
-            COL_PROD: st.column_config.TextColumn(COL_PROD, width="large"),
-            COL_COD: st.column_config.TextColumn(COL_COD, width="medium"),
-            COL_ORIGEN: st.column_config.TextColumn(COL_ORIGEN, width="medium"),
-        },
-    )
-    E["tabla_edit"] = editada
-
+    editor_productos()
+    editar_cabecera()
+    mostrar_totales()
     panel_revision()
+
     atras, sigue = st.columns(2)
     if atras.button("← Volver", width="stretch"):
         ir_a(1)
     if sigue.button("Siguiente: fotos y fichas →", type="primary", width="stretch"):
-        # Forzar que la tabla editada quede guardada y validar ANTES de cambiar de paso
-        E["tabla_edit"] = editada
         claves, _ = datos_productos()
         if not claves:
-            # Mensaje más claro: ¿falta el check o falta el código?
-            marcados = 0
-            sin_codigo = 0
-            for _, fila in editada.iterrows():
-                inc = fila[COL_INCLUIR]
-                if inc is not None and not (isinstance(inc, float) and pd.isna(inc)) and bool(inc):
-                    marcados += 1
-                    clave = str(fila[COL_COD] if pd.notna(fila[COL_COD]) else "").strip()
-                    if not clave or clave.upper() == "NAN":
-                        sin_codigo += 1
-            if marcados == 0:
-                st.error("No hay productos seleccionados. Marca al menos uno en la columna **Incluir**.")
-            elif sin_codigo:
-                st.error(
-                    f"Hay {sin_codigo} producto(s) marcado(s) pero **sin código**. "
-                    "Escribe un código en la columna Código (o déjalo y se generará solo) e inténtalo de nuevo."
-                )
-            else:
-                st.error("No hay productos seleccionados. Vuelve a marcar al menos uno.")
+            st.error("Marca al menos un producto en la columna **Incluir** para buscar sus fotos y fichas.")
             return
+        persistir_borrador()
         ir_a(3)
 
 
@@ -1069,13 +1038,17 @@ def tarjeta(clave: str, desc: str):
 
 def paso_3():
     st.header("3. Fotos y fichas técnicas")
+    st.caption("La lista y los precios siguen editables en esta etapa. Los cambios se guardan en el borrador.")
+    editor_productos()
+    editar_cabecera()
+    mostrar_totales()
     claves, descripciones = datos_productos()
     if not claves:
-        st.warning("No hay productos seleccionados. Vuelve al paso anterior y marca al menos uno.")
+        st.warning("No hay productos seleccionados. Marca al menos uno en el paso anterior.")
         if st.button("← Volver"):
             ir_a(2)
         return
-    for clave in claves:  # guarda lo que se haya subido en esta ronda
+    for clave in claves:
         for tipo in ("foto", "ficha"):
             subido = E.get(f"{tipo}_{clave}")
             if subido:
@@ -1085,15 +1058,19 @@ def paso_3():
     st.progress(listos / len(claves), text=f"{listos} de {len(claves)} productos tienen foto y ficha")
     faltan = [c for c in claves if not all(bib.archivos(c))]
     if faltan:
-        st.write("Presiona el botón y yo busco en internet. Después elige la foto y la ficha correctas en cada producto.")
+        st.write("Presiona el botón y yo busco en internet. Después elige la foto y la ficha correcta para cada producto.")
         if st.button(f"🔎 Buscar fotos y fichas de lo que falta ({len(faltan)})", type="primary", width="stretch"):
+            persistir_borrador()
             barra, hubo_error = st.progress(0.0, text="Buscando…"), False
-            for i, c in enumerate(faltan):
-                foto, ficha = bib.archivos(c)
-                sug_foto, sug_ficha = consultas_sugeridas(c, descripciones[c])
-                hubo_error |= bool(buscar_para(c, E.get(f"qf_{c}", sug_foto), E.get(f"qd_{c}", sug_ficha),
-                                               fotos=not foto, fichas=not ficha))
+            for i, clave in enumerate(faltan):
+                foto, ficha = bib.archivos(clave)
+                sug_foto, sug_ficha = consultas_sugeridas(clave, descripciones[clave])
+                hubo_error |= bool(buscar_para(
+                    clave, E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha),
+                    fotos=not foto, fichas=not ficha,
+                ))
                 barra.progress((i + 1) / len(faltan), text=f"Buscando… {i + 1} de {len(faltan)}")
+                persistir_borrador()
             barra.empty()
             if hubo_error:
                 st.warning("El buscador no respondió en algunos productos. Intenta de nuevo en un minuto.")
@@ -1110,7 +1087,8 @@ def paso_3():
     atras, sigue = st.columns(2)
     if atras.button("← Volver", width="stretch"):
         ir_a(2)
-    if sigue.button("Siguiente: crear el PDF →", type="primary", width="stretch"):
+    if sigue.button("Siguiente: revisar y crear el PDF →", type="primary", width="stretch"):
+        persistir_borrador()
         ir_a(4)
 
 
