@@ -2,8 +2,11 @@
 import re
 import tempfile
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from copy import copy
+
+from openpyxl import load_workbook
 from urllib.parse import quote_plus
 
 import pandas as pd
@@ -116,10 +119,110 @@ st.markdown("<style>" + CSS_BASE + (CSS_TINTA + (CSS_ANIMACION if ANIMAR_FONDO e
 
 E.setdefault("paso", 1)
 
-COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_ORIGEN = (
-    "Incluir", "Cantidad", "Producto", "Código", "¿Cómo lo identifiqué?")
+COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_ORIGEN, COL_PRECIO = (
+    "Incluir en anexo", "Cantidad", "Producto", "Código", "¿Cómo lo identifiqué?", "Precio unitario neto")
 ORIGEN = {"biblioteca": "📚 Ya lo conocía", "ia": "🧠 Lo deduje con IA", "texto": "🔤 Estaba en el texto",
           "descripcion": "✏️ Lo armé con el nombre", "": ""}
+
+def _es_vacio(v) -> bool:
+    try:
+        return v is None or bool(pd.isna(v))
+    except (TypeError, ValueError):
+        return v is None
+
+
+def _json_seguro(valor):
+    """Convierte valores de pandas/Path/fecha a tipos compatibles con JSON."""
+    if isinstance(valor, pd.DataFrame):
+        return [_json_seguro(x) for x in valor.to_dict("records")]
+    if isinstance(valor, dict):
+        return {str(k): _json_seguro(v) for k, v in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [_json_seguro(v) for v in valor]
+    if isinstance(valor, (datetime, date)):
+        return valor.isoformat()
+    if isinstance(valor, Path):
+        return str(valor)
+    if _es_vacio(valor):
+        return None
+    if hasattr(valor, "item"):
+        try:
+            return _json_seguro(valor.item())
+        except (ValueError, TypeError):
+            pass
+    if isinstance(valor, (str, int, float, bool)) or valor is None:
+        return valor
+    return str(valor)
+
+
+def iniciar_nueva_cotizacion():
+    """Inicia una sesión nueva sin borrar los borradores guardados en SQLite."""
+    E.clear()
+    E["_forzar_nuevo_borrador"] = True
+
+
+def restaurar_borrador(registro: dict):
+    """Restaura el estado de trabajo persistido para continuar tras un reinicio."""
+    datos = registro.get("datos") or {}
+    estado = datos.get("_app_state") or {}
+    E["cot_id"] = registro["id"]
+    E["cot_numero"] = registro["numero"]
+    E["num_cot_edit"] = registro["numero"]
+    if estado:
+        for clave, valor in estado.items():
+            if clave in ("tabla_edit", "tabla"):
+                E[clave] = pd.DataFrame(valor or [])
+            elif clave == "orden_df":
+                E[clave] = pd.DataFrame(valor or [], columns=["Cantidad", "Producto", "Precio unitario"])
+            elif clave == "ruta":
+                ruta = Path(valor) if valor else None
+                if ruta and ruta.exists():
+                    E["ruta"] = ruta
+            elif clave == "c_fecha":
+                try:
+                    E[clave] = date.fromisoformat(str(valor)[:10])
+                except ValueError:
+                    E[clave] = date.today()
+            elif clave not in ("pdf_bytes", "pdf_nombre", "informe"):
+                E[clave] = valor
+        E.setdefault("paso", 1)
+        E.setdefault("vista", "🧾 Nueva cotización")
+    else:
+        cliente = datos.get("cliente") or {}
+        E.update(c_nombre=cliente.get("nombre", registro.get("cliente", "")),
+                 c_rut=cliente.get("rut", registro.get("rut", "")),
+                 c_dir=cliente.get("direccion", ""), c_ciudad=cliente.get("ciudad", ""),
+                 c_tel=cliente.get("telefono", ""), c_email=cliente.get("email", ""),
+                 c_fecha=date.today(), paso=1, vista="🧾 Nueva cotización")
+        if registro.get("xlsx") and Path(registro["xlsx"]).exists():
+            E["_reanudar_xlsx"] = registro["xlsx"]
+    for clave in list(E.keys()):
+        if clave.startswith(("cand_foto_", "cand_ficha_", "diag_foto_", "diag_ficha_")):
+            E.pop(clave, None)
+
+
+def actualizar_numero_en_excel(ruta: Path, numero: str):
+    """Actualiza la celda contigua a la etiqueta N° Cotización, si existe."""
+    if not ruta or not ruta.exists():
+        return
+    try:
+        wb = load_workbook(ruta)
+        ws = wb.active
+        for fila in ws.iter_rows():
+            for celda in fila:
+                if isinstance(celda.value, str) and ct.normalizar(celda.value.rstrip(":")) in (
+                    "NCOTIZACION", "NUMEROCOTIZACION", "NUMERODECOTIZACION"
+                ):
+                    destino = ws.cell(celda.row, celda.column + 1)
+                    destino.value = numero
+                    destino.number_format = "@"
+                    wb.save(ruta)
+                    wb.close()
+                    return
+        wb.close()
+    except Exception:
+        return
+
 
 # ============================================================== AJUSTES (barra lateral)
 with st.sidebar:
@@ -128,6 +231,20 @@ with st.sidebar:
                             help="No hace falta cambiarla.")
     bib = ct.Biblioteca(carpeta)
     hist = hs.Historial(carpeta)
+    if not E.get("cot_id") or hist.obtener(E.get("cot_id")) is None:
+        forzar_nuevo = bool(E.pop("_forzar_nuevo_borrador", False))
+        borrador = None if forzar_nuevo else hist.borrador_reciente()
+        if borrador:
+            restaurar_borrador(borrador)
+        else:
+            cid, numero = hist.crear({}, [], {"neto": 0, "iva": 0, "total": 0},
+                                     con_iva=True, fecha=date.today(), origen="pedido")
+            E.update(cot_id=cid, cot_numero=numero, num_cot_edit=numero,
+                     paso=1, vista="🧾 Nueva cotización")
+    else:
+        registro_activo = hist.obtener(E["cot_id"])
+        E.setdefault("cot_numero", registro_activo["numero"])
+        E.setdefault("num_cot_edit", registro_activo["numero"])
     st.caption(f"📦 {len(bib.indice)} productos guardados")
     api_key, origen_key = li.buscar_api_key(APP_DIR)
     if api_key:
@@ -152,8 +269,23 @@ with st.sidebar:
             hist.set_config("formato_numero", fmt)
             hist.set_config("siguiente_correlativo", int(sig))
             st.success("Guardado.")
+    with st.expander("🔢 Número de esta cotización", expanded=False):
+        st.text_input("Número editable", key="num_cot_edit",
+                      disabled=("pdf_bytes" in E), help="Puedes cambiarlo antes de generar el PDF.")
+        if st.button("Aplicar número", key="aplicar_num_cot", disabled=("pdf_bytes" in E)):
+            try:
+                numero_nuevo = hist.cambiar_numero(int(E["cot_id"]), str(E.get("num_cot_edit", "")).strip())
+                E["cot_numero"] = numero_nuevo
+                registro_num = hist.obtener(int(E["cot_id"]))
+                if registro_num and registro_num.get("xlsx"):
+                    E["ruta"] = Path(registro_num["xlsx"])
+                    actualizar_numero_en_excel(E["ruta"], numero_nuevo)
+                    hist.guardar_archivos(int(E["cot_id"]), xlsx=E["ruta"])
+                st.success(f"Número guardado: {numero_nuevo}")
+            except ValueError as exc:
+                st.error(str(exc))
     st.divider()
-    st.button("🔄 Empezar una cotización nueva", on_click=lambda: E.clear())
+    st.button("🔄 Empezar una cotización nueva", on_click=iniciar_nueva_cotizacion)
 
 
 # ============================================================== FUNCIONES COMUNES
