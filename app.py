@@ -314,8 +314,9 @@ def tabla_desde_lineas(lineas: list[dict]) -> pd.DataFrame:
         COL_CANT: [ln.get("cantidad", 1) for ln in lineas],
         COL_PROD: [ln.get("descripcion", "") for ln in lineas],
         COL_COD: [ln.get("clave_auto", "") for ln in lineas],
-        COL_PRECIO: [ct.precio_para_mostrar(ln.get("unitario"), con_iva)
-                     if ln.get("unitario") is not None else None for ln in lineas],
+        COL_PRECIO: [ct.precio_para_mostrar(
+            ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"), con_iva)
+            if ln.get("unitario") is not None or ln.get("precio_neto") is not None else None for ln in lineas],
         COL_ORIGEN: [ORIGEN.get(ln.get("origen", ""), "") for ln in lineas],
     })
 
@@ -343,7 +344,8 @@ def lineas_desde_orden(orden: pd.DataFrame, con_iva: bool) -> list[dict]:
         es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
         salida.append({
             "cantidad": ct._cantidad(cantidad), "descripcion": descripcion, "unitario": precio_neto,
-            "precio_neto": precio_neto, "es_producto": es_producto, "incluir": True,
+            "precio_neto": precio_neto, "es_producto": es_producto,
+            "incluir": _esta_marcado(fila.get("Incluir"), True),
             "clave_auto": clave, "origen": "biblioteca" if clave else "descripcion",
         })
     return salida
@@ -662,7 +664,11 @@ def restaurar_borrador(cot_id: int):
         vista=VISTAS[0],
     )
     if isinstance(datos.get("orden_df"), list):
-        df = pd.DataFrame(datos["orden_df"], columns=["Cantidad", "Producto", "Precio unitario"])
+        df = pd.DataFrame(datos["orden_df"])
+        for columna, defecto in (("Incluir", True), ("Cantidad", None), ("Producto", ""), ("Precio unitario", None)):
+            if columna not in df:
+                df[columna] = defecto
+        df = df[["Incluir", "Cantidad", "Producto", "Precio unitario"]]
         if not df.empty:
             df["Cantidad"] = pd.to_numeric(df["Cantidad"], errors="coerce")
             df["Precio unitario"] = pd.to_numeric(df["Precio unitario"], errors="coerce")
@@ -771,6 +777,7 @@ def pedido_ui():
                 neto = bib.precio_sugerido(clave) or bib.indice.get(clave, {}).get("precio_neto")
                 precios.append(ct.precio_para_mostrar(neto, con_iva) if neto else None)
             E["orden_df"] = pd.DataFrame({
+                "Incluir": [True] * len(filas),
                 "Cantidad": [fila["cantidad"] for fila in filas],
                 "Producto": [fila["descripcion"] for fila in filas],
                 "Precio unitario": precios,
@@ -808,6 +815,7 @@ def pedido_ui():
     orden = editor(
         E["orden_df"], num_rows="dynamic", hide_index=True, width="stretch", key="orden_editor",
         column_config={
+            "Incluir": st.column_config.CheckboxColumn("Incluir", width="small"),
             "Cantidad": st.column_config.NumberColumn(min_value=0, step=1, width="small"),
             "Producto": st.column_config.TextColumn("Producto", width="large"),
             "Precio unitario": st.column_config.NumberColumn(min_value=0, format="$ %d"),
@@ -821,13 +829,14 @@ def pedido_ui():
     E["origen_pedido"] = "pedido"
     mostrar_totales()
 
-    sin_precio = [ln["descripcion"][:45] for ln in lineas_orden if ln.get("unitario") is None]
+    sin_precio = [ln["descripcion"][:45] for ln in lineas_orden
+                  if ln.get("incluir", True) and ln.get("unitario") is None]
     continuar_igual = True
     if sin_precio:
         st.warning("Faltan precios en: " + ", ".join(sin_precio))
         continuar_igual = st.checkbox("Quiero continuar igual y completar los precios después", key="ok_sin_precio")
     if st.button("Guardar pedido y continuar →", type="primary", width="stretch",
-                 disabled=not lineas_orden or not continuar_igual):
+                 disabled=not any(ln.get("incluir", True) for ln in lineas_orden) or not continuar_igual):
         cliente = cliente_actual()
         totales = rv.totales_de([
             {"cantidad": ln["cantidad"], "precio_neto": ln.get("unitario")}
@@ -918,6 +927,17 @@ def paso_2():
 
     atras, sigue = st.columns(2)
     if atras.button("← Volver", width="stretch"):
+        con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+        E["orden_df"] = pd.DataFrame({
+            "Incluir": [_esta_marcado(ln.get("incluir"), True) for ln in E.get("lineas", [])],
+            "Cantidad": [ln.get("cantidad", 1) for ln in E.get("lineas", [])],
+            "Producto": [ln.get("descripcion", "") for ln in E.get("lineas", [])],
+            "Precio unitario": [ct.precio_para_mostrar(
+                ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"), con_iva)
+                if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None
+                for ln in E.get("lineas", [])],
+        })
+        E.pop("orden_editor", None)
         ir_a(1)
     if sigue.button("Siguiente: fotos y fichas →", type="primary", width="stretch"):
         claves, _ = datos_productos()
@@ -1286,10 +1306,12 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         E.pop(k, None)
     E["precios_modo"] = OPCIONES_PRECIO[0 if con_iva else 1]
     E["orden_df"] = pd.DataFrame({
+        "Incluir": [_esta_marcado(ln.get("incluir"), True) for ln in lineas],
         "Cantidad": [ln["cantidad"] for ln in lineas],
         "Producto": [ln["descripcion"] for ln in lineas],
-        "Precio unitario": [ct.precio_para_mostrar(ln["precio_neto"], con_iva) if ln.get("precio_neto") else None
-                            for ln in lineas]})
+        "Precio unitario": [ct.precio_para_mostrar(
+            ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"), con_iva)
+            if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None for ln in lineas]})
     E.update(c_nombre=cli.get("nombre", ""), c_rut=cli.get("rut", ""), c_dir=cli.get("direccion", ""),
              c_ciudad=cli.get("ciudad", ""), c_tel=cli.get("telefono", ""), c_email=cli.get("email", ""))
     try:
