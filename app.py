@@ -470,7 +470,7 @@ def paso_2():
 def menciones_guardada(ruta: str, mtime: float, clave: str) -> int:
     """Veces que la ficha guardada nombra el código (-1 = no se pudo leer)."""
     try:
-        return bs.menciones_clave(Path(ruta).read_bytes(), clave)
+        return len(bs.menciones_clave(Path(ruta).read_bytes(), [clave]))
     except Exception:
         return -1
 
