@@ -98,6 +98,52 @@ class Historial:
         with self._con() as con:
             return con.execute("SELECT 1 FROM cotizaciones WHERE numero=?", (numero,)).fetchone() is not None
 
+    def renumerar(self, cot_id: int, nuevo_numero: str) -> str:
+        """Cambia el número de una cotización y renombra los archivos asociados."""
+        reg = self.obtener(cot_id)
+        if not reg:
+            raise ValueError("No encontré la cotización que quieres renumerar.")
+        nuevo_numero = _s(nuevo_numero)
+        if not nuevo_numero:
+            raise ValueError("El número de cotización no puede quedar vacío.")
+        if len(nuevo_numero) > 80 or any(ord(c) < 32 for c in nuevo_numero):
+            raise ValueError("El número de cotización no es válido.")
+        anterior = reg["numero"]
+        if nuevo_numero == anterior:
+            return anterior
+        if self._existe(nuevo_numero):
+            raise ValueError(f"Ya existe una cotización con el número «{nuevo_numero}».")
+
+        carpeta_anterior = self._carpeta(anterior)
+        carpeta_nueva = self._carpeta(nuevo_numero)
+        if carpeta_nueva.exists():
+            raise ValueError("Ya existe una carpeta con ese número. Elige otro número.")
+        campos = {"numero": nuevo_numero}
+        if carpeta_anterior.exists():
+            carpeta_anterior.rename(carpeta_nueva)
+            nombre_anterior = re.sub(r"[^A-Za-z0-9._-]", "_", anterior)
+            nombre_nuevo = re.sub(r"[^A-Za-z0-9._-]", "_", nuevo_numero)
+            for campo, extension in (("xlsx", ".xlsx"), ("pdf", ".pdf")):
+                archivo_anterior = carpeta_nueva / f"{nombre_anterior}{extension}"
+                if archivo_anterior.exists():
+                    archivo_nuevo = carpeta_nueva / f"{nombre_nuevo}{extension}"
+                    archivo_anterior.rename(archivo_nuevo)
+                    campos[campo] = str(archivo_nuevo)
+                elif reg.get(campo):
+                    ruta = Path(reg[campo])
+                    if ruta.exists() and ruta.parent == carpeta_anterior:
+                        campos[campo] = str(carpeta_nueva / ruta.name)
+        with self._con() as con:
+            columnas = ["numero=?", "actualizado=?"]
+            valores = [nuevo_numero, _ahora()]
+            for campo in ("xlsx", "pdf"):
+                if campo in campos:
+                    columnas.append(f"{campo}=?")
+                    valores.append(campos[campo])
+            valores.append(cot_id)
+            con.execute(f"UPDATE cotizaciones SET {', '.join(columnas)} WHERE id=?", valores)
+        return nuevo_numero
+
     def numero_libre(self, base: str) -> str:
         """Para cotizaciones externas: si el nombre ya existe, agrega -2, -3…"""
         numero, i = base, 2

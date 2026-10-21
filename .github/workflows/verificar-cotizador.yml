@@ -1,0 +1,51 @@
+name: Verificación del cotizador
+
+on:
+  push:
+    branches:
+      - main
+      - feat/cotizacion-borradores-edicion-inventario
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Comprobar sintaxis Python
+        run: python -m compileall -q .
+      - name: Comprobar persistencia y numeración
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from historial import Historial
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = Path(tmp)
+              h = Historial(root / "biblioteca")
+              fecha = __import__("datetime").date(2026, 10, 21)
+              cot_id, numero = h.crear(
+                  {"nombre": "Prueba", "rut": "1-9"},
+                  [{"cantidad": 2, "descripcion": "Producto", "precio_neto": 100}],
+                  {"neto": 200, "iva": 38, "total": 238},
+                  fecha=fecha,
+              )
+              origen = root / "origen.xlsx"
+              origen.write_bytes(b"excel de prueba")
+              h.guardar_archivos(cot_id, xlsx=origen)
+              assert Path(h.obtener(cot_id)["xlsx"]).exists()
+              assert h.renumerar(cot_id, "TEST-EDITABLE") == "TEST-EDITABLE"
+              reg = h.obtener(cot_id)
+              assert reg["numero"] == "TEST-EDITABLE"
+              assert Path(reg["xlsx"]).exists()
+              assert Path(reg["xlsx"]).name == "TEST-EDITABLE.xlsx"
+              h.actualizar(cot_id, datos={"lineas": [{"cantidad": 2, "precio_neto": 100}]})
+              assert h.obtener(cot_id)["datos"]["lineas"][0]["precio_neto"] == 100
+          print("OK: la numeración, los archivos y los datos se conservan.")
+          PY
