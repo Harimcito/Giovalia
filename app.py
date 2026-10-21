@@ -1145,53 +1145,69 @@ def registrar_en_historial(pdf_bytes: bytes):
 
 
 def generar_pdf():
-    lineas, ruta, tabla = E["lineas"], E["ruta"], E["tabla_edit"]
+    """Regenera el Excel con los datos actuales y genera el PDF/anexos."""
+    refrescar_excel_actual()
+    lineas = E.get("lineas", [])
     finales = []
-    for ln, (_, fila) in zip(lineas, tabla.iterrows()):
-        if not fila[COL_INCLUIR]:
+    for ln in lineas:
+        if not _esta_marcado(ln.get("incluir", True), True):
             continue
-        clave = str(fila[COL_COD]).strip().upper()
-        if clave and clave != "NAN":  # aprende: claves corregidas y último precio usado
-            aprender = ln.get("origen") != "biblioteca" or ct.normalizar(clave) != ct.normalizar(ln["clave_auto"])
-            bib.registrar(clave, nombre=ln["descripcion"], alias=ln["descripcion"] if aprender else None,
-                          precio_neto=ln["unitario"] if E.get("origen_pedido") == "pedido" else None)
+        if not ln.get("es_producto", True):
+            continue  # servicios/flete permanecen en el Excel, pero no llevan foto propia
+        clave = _texto_seguro(ln.get("clave_auto")).upper()
+        if clave and clave != "NAN":
+            bib.registrar(
+                clave, nombre=ln["descripcion"],
+                alias=ln["descripcion"] if ln.get("origen") != "biblioteca" else None,
+                precio_neto=ln.get("unitario"),
+            )
         else:
             clave = ""
         finales.append({**ln, "clave": clave})
+
+    ruta = E["ruta"]
     salida = ruta.with_name(f"{ruta.stem}_con_anexos.pdf")
     with st.spinner("Armando tu PDF…"):
-        informe = ct.generar_pdf_final(ruta, finales, bib, salida, motor="libreoffice" if usar_lo else "nativo")
+        informe = ct.generar_pdf_final(ruta, finales, bib, salida,
+                                       motor="libreoffice" if usar_lo else "nativo")
     pdf_bytes = salida.read_bytes()
     registrar_en_historial(pdf_bytes)
     E.update(pdf_bytes=pdf_bytes, pdf_nombre=salida.name, informe=informe)
+    persistir_borrador()
 
 
 def paso_4():
-    st.header("4. Tu PDF")
+    st.header("4. Revisa y crea tu PDF")
+    st.write("Este es el último paso para corregir los datos. Puedes seguir editando los productos, sus cantidades, códigos y precios hasta presionar **Crear el PDF**.")
+    editor_productos()
+    editar_cabecera()
+    mostrar_totales()
+
     claves, _ = datos_productos()
     con_foto = sum(1 for c in claves if bib.archivos(c)[0])
     con_ficha = sum(1 for c in claves if bib.archivos(c)[1])
-    registro = hist.obtener(E["cot_id"]) if E.get("cot_id") else None
-    if registro:
-        st.markdown(f"**Cotización N° {registro['numero']}** · {registro['cliente'] or 'sin cliente'}")
-    st.write(f"La cotización tiene **{len(E['lineas'])} líneas**. Fotos: **{con_foto}** de {len(claves)}. "
+    st.write(f"La cotización tiene **{len(E.get('lineas', []))} líneas**. Fotos: **{con_foto}** de {len(claves)}. "
              f"Fichas técnicas: **{con_ficha}** de {len(claves)}.")
     n_errores = panel_revision(en_paso_4=True)
-    permitido = True
+    permitido = not bool(E.get("error_numero"))
     if n_errores:
-        permitido = st.checkbox("Entiendo los problemas de arriba y quiero crear el PDF igual", key="ok_riesgo")
+        acepto = st.checkbox("Entiendo los problemas de arriba y quiero crear el PDF igual", key="ok_riesgo")
+        permitido = permitido and acepto
+    if E.get("error_numero"):
+        st.error("Corrige el número de cotización antes de generar el PDF.")
     if st.button("📄 Crear el PDF", type="primary", width="stretch", disabled=not permitido):
         try:
+            refrescar_excel_actual()
             generar_pdf()
-        except Exception as e:
-            st.error(f"No pude crear el PDF: {e}")
+        except Exception as exc:
+            st.error(f"No pude crear el PDF: {exc}")
     if "pdf_bytes" in E:
         st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
         st.download_button("⬇️ Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"],
                            mime="application/pdf", type="primary", width="stretch")
-        if E.get("origen_pedido") == "pedido":
-            st.download_button("⬇️ Descargar la cotización en Excel", E["ruta"].read_bytes(),
-                               file_name=E["ruta"].name, width="stretch")
+        if E.get("ruta") and Path(E["ruta"]).exists():
+            st.download_button("⬇️ Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(),
+                               file_name=Path(E["ruta"]).name, width="stretch")
         textos = (("sin_clave", "Estos productos no tienen código, así que no llevan foto ni ficha"),
                   ("sin_foto", "Les falta la foto"), ("sin_ficha", "Les falta la ficha técnica"),
                   ("ficha_dudosa", "Revisa estas fichas: no mencionan el código del producto"),
