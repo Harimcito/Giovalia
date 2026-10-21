@@ -154,7 +154,7 @@ with st.sidebar:
             hist.set_config("siguiente_correlativo", int(sig))
             st.success("Guardado.")
     st.divider()
-    st.button("🔄 Empezar una cotización nueva", on_click=lambda: E.clear())
+    st.button("📝 Volver a los borradores", on_click=lambda: E.clear())
 
 
 # ============================================================== FUNCIONES COMUNES
@@ -245,6 +245,16 @@ def cargar(ruta: Path, origen_pedido: str):
     E["tabla_edit"] = E["tabla"].copy()
     E["editor_version"] = int(E.get("editor_version", 0)) + 1
     E["ruta"] = Path(ruta)
+    if E.get("cot_id"):
+        registro_guardado = hist.obtener(E["cot_id"])
+        if registro_guardado and registro_guardado.get("xlsx") and Path(registro_guardado["xlsx"]).exists():
+            E["ruta"] = Path(registro_guardado["xlsx"])
+        elif Path(ruta).exists():
+            hist.guardar_archivos(E["cot_id"], xlsx=ruta)
+            registro_guardado = hist.obtener(E["cot_id"])
+            if registro_guardado and registro_guardado.get("xlsx"):
+                E["ruta"] = Path(registro_guardado["xlsx"])
+        hist.actualizar(E["cot_id"], origen=origen_pedido)
     persistir_borrador()
 
 
@@ -1457,8 +1467,11 @@ if vista == VISTAS[1]:
     vista_historial()
 elif vista == VISTAS[2]:
     vista_productos()
+elif not E.get("cot_id"):
+    selector_borradores()
 else:
-    if E["paso"] > 1 and "lineas" not in E:  # sesión nueva sin datos
+    E.setdefault("paso", 1)
+    if E["paso"] > 1 and "lineas" not in E:
         E["paso"] = 1
     mostrar_pasos(E["paso"])
     {1: paso_1, 2: paso_2, 3: paso_3, 4: paso_4}[E["paso"]]()
