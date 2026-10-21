@@ -813,9 +813,7 @@ def pedido_ui():
         if guardado and guardado.get("xlsx"):
             ruta = Path(guardado["xlsx"])
         hist.guardar_cliente(cliente)
-        E["c_fecha"] = fecha
         E["cot_numero"] = numero
-        E["num_cot_edit"] = numero
         cargar(ruta, "pedido")
         ir_a(2)
 
@@ -1441,8 +1439,7 @@ if E.get("_reanudar_xlsx"):
                                ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")}
             cargar(_ruta_reanudar, _reg_reanudar.get("origen", "pedido"))
             E.update(_cliente_previo, paso=2, vista=VISTAS[0],
-                     cot_id=int(_reg_reanudar["id"]), cot_numero=_reg_reanudar["numero"],
-                     num_cot_edit=_reg_reanudar["numero"])
+                     cot_id=int(_reg_reanudar["id"]), cot_numero=_reg_reanudar["numero"])
         except Exception as _error_reanudar:
             st.warning(f"Encontré un borrador anterior, pero no pude reconstruirlo automáticamente: {_error_reanudar}")
 
