@@ -123,7 +123,7 @@ if GIOVAL_REQUIRE_ACCESS:
             clave_ingresada = st.text_input("Clave de acceso", type="password", autocomplete="current-password")
             entrar = st.form_submit_button("Entrar a Gioval", type="primary", width="stretch")
         if entrar:
-            if hmac.compare_digest(clave_ingresada, GIOVAL_ACCESS_PASSWORD):
+            if hmac.compare_digest(clave_ingresada.encode("utf-8"), GIOVAL_ACCESS_PASSWORD.encode("utf-8")):
                 E["gioval_autenticado"] = True
                 st.rerun()
             else:
