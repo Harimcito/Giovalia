@@ -64,5 +64,17 @@ jobs:
               with ThreadPoolExecutor(max_workers=8) as pool:
                   numeros = list(pool.map(crear_concurrente, range(8)))
               assert len(numeros) == len(set(numeros)), numeros
-          print("OK: persistencia, archivos, numeración y concurrencia.")
+
+              # El índice de productos también debe combinar altas desde instancias independientes.
+              from cotizador import Biblioteca
+
+              def registrar_producto(i):
+                  productos = Biblioteca(root / "biblioteca")
+                  productos.registrar(f"TESTPROD{i}", nombre=f"Producto {i}", alias=f"Producto nuevo {i}")
+
+              with ThreadPoolExecutor(max_workers=8) as pool:
+                  list(pool.map(registrar_producto, range(8)))
+              claves = Biblioteca(root / "biblioteca").indice
+              assert all(f"TESTPROD{i}" in claves for i in range(8)), list(claves)
+          print("OK: persistencia, archivos, numeración e índice compartido concurrente.")
           PY
