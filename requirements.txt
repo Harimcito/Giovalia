@@ -1,4 +1,4 @@
-streamlit>=1.50
+streamlit[pdf]>=1.50
 openpyxl
 pypdf
 reportlab
