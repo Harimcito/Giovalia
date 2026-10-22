@@ -101,12 +101,31 @@ class HistorialLectura:
 
         salida = []
         for fila in filas:
-            registro = dict(fila)
+            registro = {"estado": fila["estado"], "total": fila["total"]}
             if estado and estado != "Todos" and registro.get("estado") != estado:
                 continue
+
+            # El JSON de una cotización puede contener datos del cliente. Devuelve solo
+            # las líneas comerciales consumidas por las métricas del Radar.
+            try:
+                datos = json.loads(fila["datos"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                datos = {}
+            lineas_seguras = []
+            for linea in datos.get("lineas") or [] if isinstance(datos, dict) else []:
+                if not isinstance(linea, dict):
+                    continue
+                descripcion = str(linea.get("descripcion") or "").strip()
+                if not descripcion:
+                    continue
+                lineas_seguras.append({
+                    "descripcion": descripcion[:300],
+                    "cantidad": linea.get("cantidad", 0),
+                })
+            registro["datos"] = json.dumps({"lineas": lineas_seguras}, ensure_ascii=False)
+
             if texto.strip():
-                # Para evitar usar o traer PII, la búsqueda solo considera datos comerciales.
-                buscable = f"{registro.get('estado', '')} {registro.get('datos', '')}"
+                buscable = f"{registro.get('estado', '')} {registro['datos']}"
                 if texto.casefold() not in buscable.casefold():
                     continue
             salida.append(registro)
