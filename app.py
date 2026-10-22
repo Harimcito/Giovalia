@@ -288,8 +288,25 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     color:#989DAC !important;
 }
 [data-testid="stMetric"] {
-    background:transparent; border:0 !important; border-top:2px solid var(--gioval-blue) !important;
-    border-radius:4px; padding:12px 13px; box-shadow:none;
+    background:transparent; border:0 !important; border-top:1px solid #353946 !important;
+    border-radius:4px; padding:10px 11px; box-shadow:none;
+}
+.st-key-resumen-totales {
+    margin:.55rem 0 1rem; padding:.35rem .6rem .45rem;
+    background:#101219; border:1px solid #292C38; border-radius:8px;
+}
+.st-key-resumen-totales [data-testid="stMetric"] {
+    border-top:0 !important; padding:.35rem .55rem;
+}
+.st-key-resumen-totales [data-testid="stMetricLabel"] { font-size:.78rem !important; }
+.st-key-resumen-totales [data-testid="stMetricValue"] { font-size:1.32rem !important; }
+.progress-label {
+    display:inline-flex; align-items:center; margin:.35rem 0 .45rem;
+    color:#C4C7D1; background:#151720; border:1px solid #30333D;
+    border-radius:5px; padding:.32rem .65rem; font-size:.83rem; font-weight:650;
+}
+.quote-save-status {
+    color:#989DAC; font-size:.82rem; margin:.2rem 0 .6rem;
 }
 [data-testid="stMetricLabel"] { color:var(--ui-muted) !important; font-size:.82rem; }
 [data-testid="stMetricValue"] { color:#F5F6FA !important; font-weight:750; }
@@ -348,8 +365,8 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     background:#171923 !important; color:#F3F4F8 !important;
 }
 .st-key-app-navigation [data-testid="stRadio"] label:has([aria-checked="true"]) {
-    color:#FFFFFF !important; border-bottom-color:var(--gioval-blue) !important;
-    background:rgba(1,14,208,.10) !important; font-weight:750;
+    color:#FFFFFF !important; border-bottom-color:#646A79 !important;
+    background:rgba(255,255,255,.035) !important; font-weight:750;
 }
 .st-key-app-navigation [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child { display:none !important; }
 .pasos { display:flex; gap:7px; flex-wrap:wrap; margin:8px 0 12px; }
@@ -359,8 +376,8 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 }
 .paso b { margin-right:7px; }
 .paso.activo {
-    border:1px solid var(--gioval-blue); background:rgba(1,14,208,.18); color:#FFFFFF;
-    font-weight:750; box-shadow:inset 3px 0 0 var(--gioval-blue);
+    border:1px solid #414553; background:#191C25; color:#FFFFFF;
+    font-weight:750; box-shadow:inset 3px 0 0 #6A7080;
 }
 .paso.hecho { border-color:#262A36; background:#10121A; color:#C7C9D3; }
 .marca-app {
@@ -661,9 +678,17 @@ def mostrar_pasos(actual: int):
         clase = "hecho" if i < actual else "activo" if i == actual else ""
         piezas.append(f'<div class="paso {clase}"><b>{"✓" if i < actual else i}</b>{n}</div>')
     st.markdown('<div class="pasos">' + "".join(piezas) + "</div>", unsafe_allow_html=True)
-    st.progress((actual - 1) / 3, text=f"Etapa {actual} de 4 · {nombres[actual - 1]}")
+    st.markdown(
+        f'<div class="progress-label">Etapa {actual} de 4 · {nombres[actual - 1]}</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress((actual - 1) / 3)
     if E.get("_ultima_guarda"):
-        st.caption(f"Borrador guardado en este computador · {E['_ultima_guarda']}")
+        etiqueta = "biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "este computador"
+        st.markdown(
+            f'<div class="quote-save-status">✓ Guardado en {etiqueta} · {E["_ultima_guarda"]}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def cargar(ruta: Path, origen_pedido: str):
@@ -886,12 +911,23 @@ def totales_actuales() -> dict:
 
 
 def mostrar_totales():
-    """Muestra neto, IVA y total actual sin esperar a generar el PDF."""
+    """Muestra neto, IVA y total en un panel consistente en cada etapa."""
     tot = totales_actuales()
-    a, b, c = st.columns(3)
-    a.metric("Neto", rv.clp(tot["neto"]))
-    b.metric("IVA (19 %)", rv.clp(tot["iva"]))
-    c.metric("Total", rv.clp(tot["total"]))
+    with st.container(key="resumen-totales"):
+        a, b, c = st.columns(3)
+        a.metric("Neto", rv.clp(tot["neto"]))
+        b.metric("IVA (19 %)", rv.clp(tot["iva"]))
+        c.metric("Total", rv.clp(tot["total"]))
+        pendientes = [
+            ln for ln in E.get("lineas", [])
+            if _esta_marcado(ln.get("incluir", ln.get("es_producto", True)), True)
+            and ln.get("unitario") is None and ln.get("precio_neto") is None
+        ]
+        if pendientes:
+            st.caption(
+                f"Pendiente de precio: {len(pendientes)} línea(s). "
+                "El total mostrado no suma los precios que faltan."
+            )
 
 
 def mostrar_resumen_lineas():
