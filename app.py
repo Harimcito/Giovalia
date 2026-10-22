@@ -1629,6 +1629,8 @@ def pedido_ui():
         if not cot_id:
             cot_id, numero = hist.crear(cliente, lineas_orden, totales, con_iva, cliente["fecha"], origen="pedido")
             E["cot_id"], E["cot_numero"] = cot_id, numero
+            registro_nuevo = hist.obtener(cot_id)
+            E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
         else:
             registro = hist.obtener(cot_id)
             if registro and _texto_seguro(E.get("cot_numero")) != registro["numero"]:
@@ -1672,6 +1674,11 @@ def pedido_ui():
                 E["_cotizacion_version"] = registro_nuevo.get("actualizado")
             hist.guardar_archivos(E["cot_id"], xlsx=ruta)
             hist.guardar_cliente(cliente)
+        except hs.ConflictoActualizacion as exc:
+            E["_conflicto_guardado"] = True
+            E["_conflicto_guardado_id"] = E.get("cot_id")
+            E["_conflicto_guardado_mensaje"] = str(exc)
+            st.rerun()
         except Exception as exc:
             st.error(f"No pude guardar el borrador. Los datos siguen en pantalla: {exc}")
             return
