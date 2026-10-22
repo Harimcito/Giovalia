@@ -19,6 +19,8 @@ jobs:
           python-version: "3.12"
       - name: Comprobar sintaxis Python
         run: python -m compileall -q .
+      - name: Instalar dependencias para la prueba de catálogo
+        run: python -m pip install openpyxl pillow pypdf reportlab requests
       - name: Comprobar persistencia y numeración
         run: |
           python - <<'PY'
