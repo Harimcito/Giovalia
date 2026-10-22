@@ -225,7 +225,7 @@ with st.sidebar:
                 E.pop("_respaldo_zip", None)
                 st.error(f"No pude preparar el respaldo: {exc}")
         if E.get("_respaldo_zip"):
-            st.download_button("Descargar respaldo ZIP", E["_respaldo_zip"],
+            st.download_button("Descargar respaldo ZIP", E["_respaldo_zip"], icon=":material/download:",
                                file_name=E.get("_respaldo_nombre", "respaldo_giovalia.zip"),
                                mime="application/zip", width="stretch", key="descargar_respaldo")
     st.divider()
@@ -939,10 +939,10 @@ def selector_borradores():
         elegido = st.selectbox("Selecciona una cotización sin terminar", list(opciones), key="borrador_a_retomar")
         c1, c2 = st.columns(2)
         c1.button(
-            "Retomar borrador", type="primary", width="stretch",
+            "Retomar borrador", icon=":material/play_arrow:", type="primary", width="stretch",
             on_click=restaurar_borrador, args=(opciones[elegido],), key="inicio_retomar_borrador",
         )
-        c2.button("Iniciar otro borrador", width="stretch",
+        c2.button("Iniciar otro borrador", icon=":material/add_circle:", width="stretch",
                   on_click=iniciar_borrador, key="inicio_otro_borrador")
     else:
         st.info("No tienes borradores pendientes. Cuando inicies una cotización, podrás retomarla desde aquí aunque se cierre la aplicación.")
@@ -1329,12 +1329,12 @@ def tarjeta(clave: str, desc: str):
     aviso_ficha = ""
     if ficha:
         n = menciones_guardada(str(ficha), ficha.stat().st_mtime, clave) if bs.es_codigo(clave) else -2
-        estado_ficha = "revisar" if n == 0 else "lista"
+        estado_ficha = "Revisar" if n == 0 else "Disponible"
         if n == 0:
             aviso_ficha = (f"La ficha guardada no menciona el código «{clave}». Puede ser de otro producto: "
                            "busca otra o revísala.")
     else:
-        estado_ficha = "falta"
+        estado_ficha = "Falta"
     with st.container(border=True):
         st.markdown('<span class="tarjeta-marca"></span>', unsafe_allow_html=True)
         c1, c2 = st.columns([1, 3])
@@ -1349,7 +1349,7 @@ def tarjeta(clave: str, desc: str):
         with c2:
             st.markdown(f"**{desc}**")
             st.caption(f"Código: {clave}")
-            st.markdown(f"Foto: {'lista' if foto else 'falta'} &nbsp;&nbsp;&nbsp; Ficha técnica: {estado_ficha}")
+            st.markdown(f"**Foto:** {'Disponible' if foto else 'Falta'} &nbsp; · &nbsp; **Ficha técnica:** {estado_ficha}")
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
@@ -1450,7 +1450,7 @@ def paso_3():
     faltan = [c for c in claves if not all(bib.archivos(c))]
     if faltan:
         st.write("Presiona el botón y yo busco en internet. Después elige la foto y la ficha correcta para cada producto.")
-        if st.button(f"Buscar fotos y fichas de lo que falta ({len(faltan)})", type="primary", width="stretch"):
+        if st.button(f"Buscar fotos y fichas de lo que falta ({len(faltan)})", icon=":material/search:", type="primary", width="stretch"):
             persistir_borrador()
             barra, hubo_error = st.progress(0.0, text="Buscando…"), False
             for i, clave in enumerate(faltan):
@@ -1640,10 +1640,10 @@ def paso_4():
 
     if "pdf_bytes" in E:
         st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
-        st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"],
+        st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"], icon=":material/download:",
                            mime="application/pdf", type="primary", width="stretch")
         if E.get("ruta") and Path(E["ruta"]).exists():
-            st.download_button("Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(),
+            st.download_button("Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(), icon=":material/download:",
                                file_name=Path(E["ruta"]).name, width="stretch")
         with st.expander("Vista previa del PDF completo", expanded=True):
             try:
@@ -1757,12 +1757,12 @@ def historial_cotizaciones():
         d1, d2 = st.columns(2)
         pdf, xlsx = Path(rec["pdf"] or ""), Path(rec["xlsx"] or "")
         if rec["pdf"] and pdf.exists():
-            d1.download_button("Descargar el PDF", pdf.read_bytes(), file_name=pdf.name, mime="application/pdf",
+            d1.download_button("Descargar el PDF", pdf.read_bytes(), file_name=pdf.name, mime="application/pdf", icon=":material/download:",
                                width="stretch", key=f"dp_{rec['id']}")
         else:
             d1.caption("Todavía no se ha creado el PDF de esta cotización.")
         if rec["xlsx"] and xlsx.exists():
-            d2.download_button("Descargar el Excel", xlsx.read_bytes(), file_name=xlsx.name,
+            d2.download_button("Descargar el Excel", xlsx.read_bytes(), file_name=xlsx.name, icon=":material/download:",
                                width="stretch", key=f"dx_{rec['id']}")
         b1, b2 = st.columns(2)
         b1.button("Usar como base de una cotización nueva", width="stretch", key=f"dup_{rec['id']}",
@@ -1899,7 +1899,7 @@ if TEMA_ACTIVO:
     st.markdown('<h1 class="titulo"><span class="gota"></span>Giovalia · Cotizador comercial</h1>',
                 unsafe_allow_html=True)
 else:
-    st.title("Giovalia · Cotizador comercial")
+    st.title("Giovalia · Cotizador comercial", icon=":material/receipt_long:")
     st.info("Instalé el nuevo diseño. Presiona la tecla **F5** (actualizar la página) para verlo. "
             "Si sigue igual, cierra la ventana negra y abre el programa de nuevo.")
 with st.container(key="app-navigation"):
