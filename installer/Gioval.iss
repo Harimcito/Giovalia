@@ -53,11 +53,9 @@ begin
 end;
 
 function IsWebView2Installed: Boolean;
-const
-  RuntimeGuid = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
 begin
   Result :=
-    WebView2InstalledAt(HKLM32, 'Software\Microsoft\EdgeUpdate\Clients\' + RuntimeGuid)
-    or WebView2InstalledAt(HKLM64, 'Software\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + RuntimeGuid)
-    or WebView2InstalledAt(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + RuntimeGuid);
+    WebView2InstalledAt(HKLM32, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}')
+    or WebView2InstalledAt(HKLM64, 'Software\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}')
+    or WebView2InstalledAt(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}');
 end;
