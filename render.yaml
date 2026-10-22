@@ -21,7 +21,5 @@ services:
         value: "true"
       - key: GIOVAL_ACCESS_PASSWORD
         sync: false
-      - key: OPENAI_API_KEY
-        sync: false
       - key: GIOVAL_ALLOW_INITIAL_IMPORT
         value: "false"
