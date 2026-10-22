@@ -1636,6 +1636,9 @@ def pedido_ui():
             if registro and _texto_seguro(E.get("cot_numero")) != registro["numero"]:
                 try:
                     hist.renumerar(cot_id, _texto_seguro(E.get("cot_numero")))
+                    registro_renumerado = hist.obtener(cot_id)
+                    if registro_renumerado:
+                        E["_cotizacion_version"] = registro_renumerado.get("actualizado")
                 except ValueError as exc:
                     st.error(str(exc))
                     return
@@ -2174,6 +2177,8 @@ def registrar_en_historial(pdf_bytes: bytes):
                                con_iva=False, origen="cotizacion", numero=numero)
         hist.guardar_archivos(cot_id, xlsx=E["ruta"], pdf=pdf_bytes)
         E["cot_id"] = cot_id
+        registro_nuevo = hist.obtener(cot_id)
+        E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
 
 
 def generar_pdf():
@@ -2353,6 +2358,9 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         )
         E["cot_id"] = nuevo_id
         E["cot_numero"] = nuevo_numero
+        for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
+            E.pop(clave_estado, None)
+        E["editado_manual"] = True
         nuevo_registro = hist.obtener(nuevo_id)
         E["_cotizacion_version"] = nuevo_registro.get("actualizado") if nuevo_registro else None
     E["lineas"] = lineas
