@@ -1,0 +1,86 @@
+name: Crear instalador de escritorio para Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "app.py"
+      - "buscador.py"
+      - "cotizador.py"
+      - "historial.py"
+      - "lector_ia.py"
+      - "pdf_cotizacion.py"
+      - "revisor.py"
+      - "plantilla_cotizacion.xlsx"
+      - "requirements.txt"
+      - "requirements-desktop.txt"
+      - "desktop_launcher.py"
+      - "gioval_desktop.spec"
+      - "installer/**"
+      - ".github/workflows/build-desktop.yml"
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-desktop.txt
+
+      - name: Instalar dependencias
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-desktop.txt
+
+      - name: Empaquetar aplicación de escritorio
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean gioval_desktop.spec
+          if (-not (Test-Path "dist/Gioval/Gioval.exe")) {
+            throw "PyInstaller no generó dist/Gioval/Gioval.exe"
+          }
+
+      - name: Obtener instalador oficial de WebView2
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "installer/webview2" | Out-Null
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "installer/webview2/MicrosoftEdgeWebview2Setup.exe"
+
+      - name: Instalar compilador Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo instalar Inno Setup" }
+
+      - name: Compilar instalador
+        shell: pwsh
+        run: |
+          $compiler = [System.IO.Path]::Combine([Environment]::GetFolderPath("ProgramFilesX86"), "Inno Setup 6\ISCC.exe")
+          if (-not (Test-Path $compiler)) {
+            $compiler = "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $compiler)) { throw "No encuentro ISCC.exe" }
+          & $compiler "installer/Gioval.iss"
+          if ($LASTEXITCODE -ne 0) { throw "La compilación de Inno Setup falló" }
+          if (-not (Test-Path "installer/Output/Gioval-Setup.exe")) {
+            throw "No se generó installer/Output/Gioval-Setup.exe"
+          }
+
+      - name: Publicar instalador como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gioval-Instalador-Windows-x64
+          path: installer/Output/Gioval-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
