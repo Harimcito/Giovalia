@@ -89,7 +89,14 @@ def tokens_relevantes(valor) -> set[str]:
 
 def normalizar_detalle(detalle: dict | None) -> dict:
     """Conserva datos comerciales públicos; excluye datos de proveedores y otros terceros."""
-    if not isinstance(detalle, dict):
+    if not isinstance(detalle, dict) or not detalle:
+        return {}
+    relevante = (
+        detalle.get("codigo") or detalle.get("nombre") or detalle.get("descripcion")
+        or detalle.get("productos_solicitados") or detalle.get("institucion")
+        or detalle.get("presupuesto") or detalle.get("fechas") or detalle.get("documentos")
+    )
+    if not relevante:
         return {}
     estado = detalle.get("estado") or {}
     convocatoria = detalle.get("convocatoria") or {}
@@ -504,7 +511,11 @@ def evaluar_rentabilidad(
         costo_neto = None
         if not ficha:
             faltan_equivalencias.append(str(ln.get("descripcion_solicitada") or "Línea sin producto de catálogo"))
-        else:
+        elif not ln.get("equivalencia_confirmada", False):
+            faltan_equivalencias.append(
+                f"{ln.get('descripcion_solicitada') or 'Producto'} (equivalencia aún no confirmada)"
+            )
+        if ficha:
             costo_base = numero_seguro(ficha.get("costo_neto"))
             if costo_base is None or costo_base < 0:
                 faltan_costos.append(str(ficha.get("nombre") or clave))
@@ -531,7 +542,7 @@ def evaluar_rentabilidad(
     equivalencias_completas = not faltan_equivalencias
     costos_completos = not faltan_costos and equivalencias_completas and costos_adicionales_confirmados
     precios_completos = not faltan_precios and ingresos_netos > 0
-    beneficio = ingresos_netos - costo_estimado_parcial if precios_completos else None
+    beneficio = ingresos_netos - costo_estimado_parcial if precios_completos and costos_completos else None
     margen_venta = (
         beneficio / ingresos_netos * 100
         if beneficio is not None and ingresos_netos > 0 and costos_completos else None
@@ -798,6 +809,8 @@ class RadarStore:
                 except (TypeError, json.JSONDecodeError):
                     r["detalle"] = {}
                 result.append(r)
+        for r in result:
+            r["evaluacion"] = self.evaluacion(r["codigo"])
         return result
 
     def total(self) -> int:
