@@ -2349,7 +2349,7 @@ def paso_4():
             ir_a(3)
         nueva.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
     else:
-        nueva = st.button("Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+        nueva = st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
 
 
 # ============================================================== HISTORIAL
@@ -2997,7 +2997,7 @@ def configuracion_compacta():
                         st.error(f"No pude importar el respaldo: {exc}")
 
         st.divider()
-        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=lambda: E.clear())
+        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=limpiar_estado_trabajo)
 
     # El contenido del popover se calcula también cuando está cerrado; reutilizamos sus servicios
     # para evitar abrir dos instancias del catálogo y del historial en cada ejecución.
