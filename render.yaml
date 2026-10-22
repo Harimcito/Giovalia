@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: gioval-cotizador-compartido
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true --global.developmentMode false --server.fileWatcherType none
+    healthCheckPath: /_stcore/health
+    autoDeploy: true
+    disk:
+      name: gioval-biblioteca-compartida
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: GIOVAL_DATA_DIR
+        value: /var/data/Gioval
+      - key: GIOVAL_REQUIRE_ACCESS
+        value: "true"
+      - key: GIOVAL_ACCESS_PASSWORD
+        sync: false
+      - key: GIOVAL_ALLOW_INITIAL_IMPORT
+        value: "false"
