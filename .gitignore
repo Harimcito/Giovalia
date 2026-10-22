@@ -1,0 +1,10 @@
+# Claves y configuración privada local
+.env
+.env.*
+!.env.example
+
+# Archivos temporales y Python
+__pycache__/
+*.py[cod]
+*.tmp
+*.log
