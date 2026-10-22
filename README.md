@@ -7,6 +7,10 @@ Dos formas de usarlo:
 2. **Tengo una orden en bruto** (solo productos y cantidades, pegada como texto o en Excel/CSV)
    → crea la cotización con tu plantilla (`plantilla_cotizacion.xlsx`), y luego sigue igual que (1).
 
+## App de escritorio y biblioteca compartida
+
+El instalador de Windows abre Gioval en una ventana independiente. Para compartir catálogo, clientes, cotizaciones, fotos, fichas y numeración entre todos los usuarios, usa el servicio central descrito en [SHARED_LIBRARY.md](SHARED_LIBRARY.md). Cada equipo debe conectarse a ese mismo servicio; las bibliotecas de instalaciones antiguas no se sincronizan automáticamente.
+
 ## Instalación en Windows (una vez)
 1. Python 3.10 o superior desde python.org (marca "Add python.exe to PATH" al instalar).
 2. (Opcional) LibreOffice, solo si quieres un PDF con formato idéntico al Excel (casilla en la barra lateral).
