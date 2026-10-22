@@ -35,31 +35,66 @@ if isinstance(_pendiente_importado, dict):
 ANIMAR_FONDO = False
 # La interfaz adopta el panel de trabajo oscuro de Graphify; el azul eléctrico y
 # los neutros de esta paleta siguen siendo los de Gioval.cl.
-TEMA_BASE = {"base": "dark", "primaryColor": "#010ED0", "backgroundColor": "#0A0B10",
-             "secondaryBackgroundColor": "#151720", "textColor": "#F3F4F8", "font": "sans serif"}
-TEMA_EXTRA = {"baseRadius": "small", "buttonRadius": "small", "borderColor": "#2A2D39",
-              "linkColor": "#010ED0", "dataframeHeaderBackgroundColor": "#1B1E28"}
+TEMA_BASE = {
+    "base": "dark",
+    "primaryColor": "#010ED0",
+    "backgroundColor": "#0A0B10",
+    "secondaryBackgroundColor": "#151720",
+    "textColor": "#F3F4F8",
+    "font": "sans serif",
+}
+TEMA_EXTRA = {
+    "baseRadius": "small",
+    "buttonRadius": "small",
+    "borderColor": "#2A2D39",
+    "dataframeBorderColor": "#2A2D39",
+    "dataframeHeaderBackgroundColor": "#1B1E28",
+    "dataframeHeaderTextColor": "#F3F4F8",
+    "codeBackgroundColor": "#151720",
+    "codeTextColor": "#F3F4F8",
+    "linkColor": "#7781FF",
+}
 
 
 def preparar_tema() -> None:
-    """Instala el tema oscuro tipo workspace y aplica los ajustes visuales de Gioval."""
-    try:  # queda guardado para las próximas veces que abras el programa
-        cfg = APP_DIR / ".streamlit" / "config.toml"
-        texto = cfg.read_text("utf-8") if cfg.exists() else ""
-        if "[theme]" not in texto:
-            cfg.parent.mkdir(exist_ok=True)
-            bloque = "[theme]\n" + "\n".join(f'{k} = "{v}"' for k, v in TEMA_BASE.items()) + "\n"
-            cfg.write_text(texto + ("\n" if texto else "") + bloque, "utf-8")
+    """Aplica el tema oscuro y actualiza un bloque [theme] previo si ya existía."""
+    cfg = APP_DIR / ".streamlit" / "config.toml"
+    try:
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        texto_original = cfg.read_text("utf-8") if cfg.exists() else ""
+        lineas = texto_original.splitlines()
+        inicio = next((i for i, linea in enumerate(lineas) if linea.strip() == "[theme]"), None)
+        if inicio is None:
+            if lineas and lineas[-1].strip():
+                lineas.append("")
+            lineas.append("[theme]")
+            inicio = len(lineas) - 1
+        fin = next(
+            (i for i in range(inicio + 1, len(lineas))
+             if re.match(r"^\s*\[[^]]+\]\s*(?:#.*)?$", lineas[i])),
+            len(lineas),
+        )
+        bloque_tema = lineas[inicio + 1:fin]
+        for clave, valor in {**TEMA_BASE, **TEMA_EXTRA}.items():
+            patron = re.compile(rf"^\s*{re.escape(clave)}\s*=")
+            indice = next((i for i, linea in enumerate(bloque_tema) if patron.match(linea)), None)
+            nueva = f'{clave} = "{valor}"'
+            if indice is None:
+                bloque_tema.append(nueva)
+            else:
+                bloque_tema[indice] = nueva
+        lineas[inicio + 1:fin] = bloque_tema
+        texto_nuevo = "\n".join(lineas).rstrip() + "\n"
+        if texto_nuevo != texto_original:
+            cfg.write_text(texto_nuevo, "utf-8")
     except OSError:
+        # En entornos de solo lectura, los valores de ejecución aún se aplican abajo.
         pass
-    for k, v in {**TEMA_BASE, **TEMA_EXTRA}.items():  # vale desde la próxima actualización de la página
+    for clave, valor in {**TEMA_BASE, **TEMA_EXTRA}.items():
         try:
-            st._config.set_option(f"theme.{k}", v)
+            st._config.set_option(f"theme.{clave}", valor)
         except Exception:
             pass
-    # No dependemos del tema activo antes del arranque: el CSS propio también se
-    # inyecta si el equipo tenía guardada la versión clara.
-    return None
 
 
 preparar_tema()
@@ -215,7 +250,22 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     background:#11131B; border:1px solid #292C38; border-radius:7px; box-shadow:0 4px 18px rgba(0,0,0,.16);
 }
 [data-testid="stDataFrame"], [data-testid="stDataEditor"], [data-testid="stTable"] {
-    border:1px solid var(--ui-line); border-radius:6px; overflow:hidden;
+    background:var(--ui-panel) !important;
+    color:var(--ui-text) !important;
+    border:1px solid var(--ui-line) !important;
+    border-radius:6px;
+    overflow:hidden;
+}
+[data-testid="stDataEditor"] > div, [data-testid="stDataFrame"] > div {
+    background:var(--ui-panel) !important;
+}
+[data-testid="stDataEditor"] canvas, [data-testid="stDataFrame"] canvas {
+    background-color:var(--ui-panel) !important;
+    color-scheme:dark;
+}
+[data-testid="stDataEditor"] [role="grid"], [data-testid="stDataFrame"] [role="grid"] {
+    background:var(--ui-panel) !important;
+    color:var(--ui-text) !important;
 }
 [data-testid="stAlert"] { background:#131520; border:1px solid #303341; border-radius:6px; color:#E5E6ED; }
 [data-testid="stAlert"] p { color:inherit; }
@@ -1037,7 +1087,6 @@ def restaurar_borrador(cot_id: int):
 
 def selector_borradores():
     """Panel de inicio: accesos rápidos, métricas y borradores para retomar."""
-    todas = hist.listar()
     borradores = []
     for reg in hist.listar("", "Borrador"):
         pdf = Path(reg["pdf"]) if reg.get("pdf") else None
@@ -1057,12 +1106,6 @@ def selector_borradores():
         '</div></section>',
         unsafe_allow_html=True,
     )
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Cotizaciones registradas", len(todas))
-    m2.metric("Borradores pendientes", len(borradores))
-    m3.metric("Monto aceptado", rv.clp(sum(float(r.get("total") or 0) for r in todas if r.get("estado") == "Aceptada")))
-    m4.metric("Productos en catálogo", len(bib.indice))
-
     a, b = st.columns([3, 2])
     with a:
         st.markdown('<div class="inicio-section-label">Empezar</div>', unsafe_allow_html=True)
@@ -1096,21 +1139,6 @@ def selector_borradores():
         st.info("No tienes borradores pendientes. Cuando inicies una cotización, podrás retomarla desde aquí aunque se cierre la aplicación.")
         st.button("Comenzar ahora →", type="primary", width="stretch",
                   on_click=iniciar_borrador, key="inicio_comenzar_ahora")
-
-    if todas:
-        st.divider()
-        st.subheader("Actividad reciente")
-        recientes = sorted(todas, key=lambda r: str(r.get("actualizado") or r.get("creado") or r.get("fecha") or ""), reverse=True)[:5]
-        df_recientes = pd.DataFrame({
-            "N° cotización": [r.get("numero", "") for r in recientes],
-            "Fecha": [fecha_corta(r.get("fecha") or "") for r in recientes],
-            "Cliente": [r.get("cliente") or "Sin cliente" for r in recientes],
-            "Total": [r.get("total") or 0 for r in recientes],
-            "Estado": [r.get("estado") or "Borrador" for r in recientes],
-        })
-        st.dataframe(df_recientes, hide_index=True, width="stretch",
-                     column_config={"Total": st.column_config.NumberColumn(format="$ %d")})
-
 
 # ============================================================== PASO 1: PEDIDO
 def aplicar_cliente_guardado():
@@ -2066,6 +2094,50 @@ def configuracion_compacta():
         bib_panel = ct.Biblioteca(carpeta)
         hist_panel = hs.Historial(carpeta)
         st.caption(f"{len(bib_panel.indice)} productos en el catálogo")
+
+        with st.expander("Resumen comercial", expanded=False):
+            registros = hist_panel.listar()
+            borradores_resumen = []
+            for registro in hist_panel.listar("", "Borrador"):
+                pdf_registro = Path(registro["pdf"]) if registro.get("pdf") else None
+                if not pdf_registro or not pdf_registro.exists():
+                    borradores_resumen.append(registro)
+
+            st.caption("Indicadores y actividad reciente. El resumen queda aquí para mantener despejada la pantalla principal.")
+            col_r1, col_r2 = st.columns(2)
+            col_r1.metric("Cotizaciones registradas", len(registros))
+            col_r2.metric("Borradores pendientes", len(borradores_resumen))
+            col_r3, col_r4 = st.columns(2)
+            col_r3.metric(
+                "Monto aceptado",
+                rv.clp(sum(float(registro.get("total") or 0) for registro in registros
+                           if registro.get("estado") == "Aceptada")),
+            )
+            col_r4.metric("Productos en catálogo", len(bib_panel.indice))
+
+            if registros:
+                recientes = sorted(
+                    registros,
+                    key=lambda registro: str(
+                        registro.get("actualizado") or registro.get("creado") or registro.get("fecha") or ""
+                    ),
+                    reverse=True,
+                )[:5]
+                df_recientes = pd.DataFrame({
+                    "N° cotización": [registro.get("numero", "") for registro in recientes],
+                    "Fecha": [fecha_corta(registro.get("fecha") or "") for registro in recientes],
+                    "Cliente": [registro.get("cliente") or "Sin cliente" for registro in recientes],
+                    "Total": [registro.get("total") or 0 for registro in recientes],
+                    "Estado": [registro.get("estado") or "Borrador" for registro in recientes],
+                })
+                st.dataframe(
+                    df_recientes,
+                    hide_index=True,
+                    width="stretch",
+                    column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
+                )
+            else:
+                st.caption("Todavía no hay cotizaciones registradas.")
 
         st.divider()
         st.markdown("**Conexión de inteligencia artificial**")
