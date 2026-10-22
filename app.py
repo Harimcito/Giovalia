@@ -260,10 +260,10 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 .marca-simbolo {
     position:relative; display:inline-flex; align-items:center; justify-content:center;
     flex:0 0 43px; width:43px; height:43px; border-radius:7px;
-    background:#10121B; border:1px solid #303341; box-shadow:inset 0 0 0 1px rgba(1,14,208,.10);
+    background:#FFFFFF; border:1px solid #FFFFFF; box-shadow:none;
 }
 .marca-simbolo::before {
-    content:"Gv"; color:#FFFFFF; font-size:1.55rem; font-weight:850; letter-spacing:-.12em;
+    content:"Gv"; color:var(--gioval-blue); font-size:1.55rem; font-weight:900; letter-spacing:-.12em;
     text-shadow:0 0 18px rgba(1,14,208,.55); transform:translateX(-1px);
 }
 .marca-simbolo::after {
