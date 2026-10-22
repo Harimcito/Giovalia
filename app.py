@@ -1868,6 +1868,7 @@ def guardar_candidato(clave: str, tipo: str, c: dict):
 
 def tarjeta(clave: str, desc: str):
     foto, ficha = bib.archivos(clave)
+    ficha_no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
     aviso_ficha = ""
     if ficha:
         n = menciones_guardada(str(ficha), ficha.stat().st_mtime, clave) if bs.es_codigo(clave) else -2
@@ -1876,7 +1877,7 @@ def tarjeta(clave: str, desc: str):
             aviso_ficha = (f"La ficha guardada no menciona el código «{clave}». Puede ser de otro producto: "
                            "busca otra o revísala.")
     else:
-        estado_ficha = "Falta"
+        estado_ficha = "No requerida" if ficha_no_requerida else "Falta"
     with st.container(border=True):
         st.markdown('<span class="tarjeta-marca"></span>', unsafe_allow_html=True)
         c1, c2 = st.columns([1, 3])
@@ -1891,7 +1892,19 @@ def tarjeta(clave: str, desc: str):
         with c2:
             st.markdown(f"**{desc}**")
             st.caption(f"Código: {clave}")
-            st.markdown(f"**Foto:** {'Disponible' if foto else 'Falta'} &nbsp; · &nbsp; **Ficha técnica:** {estado_ficha}")
+            st.markdown(
+                f"**Foto:** {'Disponible' if foto else 'Falta'} &nbsp; · &nbsp; "
+                f"**Ficha técnica:** {estado_ficha}"
+            )
+            nueva_no_requerida = st.checkbox(
+                "Este producto no requiere ficha técnica",
+                value=ficha_no_requerida,
+                key=f"ficha_no_requerida_{clave}",
+                help="Útil para artículos de librería u otros productos sin ficha técnica. Seguirá incluyendo la foto si existe.",
+            )
+            if nueva_no_requerida != ficha_no_requerida:
+                bib.actualizar(clave, ficha_no_requerida=nueva_no_requerida)
+                st.rerun()
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
@@ -1987,31 +2000,52 @@ def paso_3():
             if subido:
                 bib.guardar_archivo(clave, tipo, subido.name, subido.getvalue())
 
-    listos = sum(1 for c in claves if all(bib.archivos(c)))
-    st.progress(listos / len(claves), text=f"{listos} de {len(claves)} productos tienen foto y ficha")
-    faltan = [c for c in claves if not all(bib.archivos(c))]
+    def archivos_necesarios(clave):
+        foto, ficha = bib.archivos(clave)
+        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+        return bool(foto and (ficha or no_requerida))
+
+    listos = sum(1 for clave in claves if archivos_necesarios(clave))
+    st.markdown(
+        f'<div class="progress-label">{listos} de {len(claves)} productos completos '
+        '(foto y ficha técnica, o ficha marcada como no requerida)</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress(listos / len(claves))
+    faltan = []
+    for clave in claves:
+        foto, ficha = bib.archivos(clave)
+        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+        if not foto or (not ficha and not no_requerida):
+            faltan.append(clave)
     if faltan:
-        st.write("Presiona el botón y yo busco en internet. Después elige la foto y la ficha correcta para cada producto.")
-        if st.button(f"Buscar fotos y fichas de lo que falta ({len(faltan)})", icon=":material/search:", type="primary", width="stretch"):
+        st.caption("Primero se buscan los archivos que faltan; después puedes revisar cada resultado y confirmar si corresponde.")
+        if st.button(f"Buscar fotos y fichas pendientes ({len(faltan)})", icon=":material/search:", type="primary", width="stretch"):
             persistir_borrador()
-            barra, hubo_error = st.progress(0.0, text="Buscando…"), False
+            barra = st.progress(0.0)
+            estado_busqueda = st.empty()
+            estado_busqueda.caption("Buscando…")
+            hubo_error = False
             for i, clave in enumerate(faltan):
                 foto, ficha = bib.archivos(clave)
+                no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
                 sug_foto, sug_ficha = consultas_sugeridas(clave, descripciones[clave])
                 hubo_error |= bool(buscar_para(
                     clave, E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha),
-                    fotos=not foto, fichas=not ficha,
+                    fotos=not foto, fichas=(not ficha and not no_requerida),
                 ))
-                barra.progress((i + 1) / len(faltan), text=f"Buscando… {i + 1} de {len(faltan)}")
+                barra.progress((i + 1) / len(faltan))
+                estado_busqueda.caption(f"Buscando archivos… {i + 1} de {len(faltan)} productos")
                 persistir_borrador()
             barra.empty()
+            estado_busqueda.empty()
             if hubo_error:
-                st.warning("El buscador no respondió en algunos productos. Intenta de nuevo en un minuto.")
+                st.warning("El buscador no respondió para algunos productos. Revisa los pendientes e inténtalo de nuevo.")
             else:
-                st.success("Listo. Baja y elige la foto y la ficha de cada producto.")
+                st.success("Búsqueda terminada. Revisa las opciones encontradas y confirma los archivos correctos.")
     else:
-        st.success("¡Todos los productos tienen foto y ficha!")
-    st.caption("Si un producto no tiene ficha técnica, no pasa nada: el PDF llevará solo la foto.")
+        st.success("Todos los productos cotizados tienen foto y una ficha disponible o marcada como no requerida.")
+    st.caption("En artículos de librería puedes marcar «Este producto no requiere ficha técnica» desde su tarjeta.")
 
     st.divider()
     st.subheader("Productos y anexos")
@@ -2021,21 +2055,25 @@ def paso_3():
         placeholder="Código, marca o descripción",
     )
     estado_anexos = c_estado.selectbox(
-        "Mostrar", ["Todos", "Incompletos", "Sin foto", "Sin ficha", "Completos"],
+        "Mostrar",
+        ["Todos", "Incompletos", "Sin foto", "Sin ficha pendiente", "Ficha no requerida", "Completos"],
         key="filtro_anexos_estado",
     )
     consulta_anexos = busqueda_anexos.strip().casefold()
     visibles = []
     for clave in claves:
         foto, ficha = bib.archivos(clave)
-        completo = bool(foto and ficha)
+        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+        completo = bool(foto and (ficha or no_requerida))
         if consulta_anexos and consulta_anexos not in (clave + " " + descripciones[clave]).casefold():
             continue
         if estado_anexos == "Incompletos" and completo:
             continue
         if estado_anexos == "Sin foto" and foto:
             continue
-        if estado_anexos == "Sin ficha" and ficha:
+        if estado_anexos == "Sin ficha pendiente" and (ficha or no_requerida):
+            continue
+        if estado_anexos == "Ficha no requerida" and not no_requerida:
             continue
         if estado_anexos == "Completos" and not completo:
             continue
