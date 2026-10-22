@@ -10,7 +10,7 @@ import stat
 import tempfile
 import zipfile
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote_plus
 
@@ -288,8 +288,25 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     color:#989DAC !important;
 }
 [data-testid="stMetric"] {
-    background:transparent; border:0 !important; border-top:2px solid var(--gioval-blue) !important;
-    border-radius:4px; padding:12px 13px; box-shadow:none;
+    background:transparent; border:0 !important; border-top:1px solid #353946 !important;
+    border-radius:4px; padding:10px 11px; box-shadow:none;
+}
+.st-key-resumen-totales {
+    margin:.55rem 0 1rem; padding:.35rem .6rem .45rem;
+    background:#101219; border:1px solid #292C38; border-radius:8px;
+}
+.st-key-resumen-totales [data-testid="stMetric"] {
+    border-top:0 !important; padding:.35rem .55rem;
+}
+.st-key-resumen-totales [data-testid="stMetricLabel"] { font-size:.78rem !important; }
+.st-key-resumen-totales [data-testid="stMetricValue"] { font-size:1.32rem !important; }
+.progress-label {
+    display:inline-flex; align-items:center; margin:.35rem 0 .45rem;
+    color:#C4C7D1; background:#151720; border:1px solid #30333D;
+    border-radius:5px; padding:.32rem .65rem; font-size:.83rem; font-weight:650;
+}
+.quote-save-status {
+    color:#989DAC; font-size:.82rem; margin:.2rem 0 .6rem;
 }
 [data-testid="stMetricLabel"] { color:var(--ui-muted) !important; font-size:.82rem; }
 [data-testid="stMetricValue"] { color:#F5F6FA !important; font-weight:750; }
@@ -348,8 +365,8 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     background:#171923 !important; color:#F3F4F8 !important;
 }
 .st-key-app-navigation [data-testid="stRadio"] label:has([aria-checked="true"]) {
-    color:#FFFFFF !important; border-bottom-color:var(--gioval-blue) !important;
-    background:rgba(1,14,208,.10) !important; font-weight:750;
+    color:#FFFFFF !important; border-bottom-color:#646A79 !important;
+    background:rgba(255,255,255,.035) !important; font-weight:750;
 }
 .st-key-app-navigation [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child { display:none !important; }
 .pasos { display:flex; gap:7px; flex-wrap:wrap; margin:8px 0 12px; }
@@ -359,8 +376,8 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 }
 .paso b { margin-right:7px; }
 .paso.activo {
-    border:1px solid var(--gioval-blue); background:rgba(1,14,208,.18); color:#FFFFFF;
-    font-weight:750; box-shadow:inset 3px 0 0 var(--gioval-blue);
+    border:1px solid #414553; background:#191C25; color:#FFFFFF;
+    font-weight:750; box-shadow:inset 3px 0 0 #6A7080;
 }
 .paso.hecho { border-color:#262A36; background:#10121A; color:#C7C9D3; }
 .marca-app {
@@ -647,6 +664,19 @@ def editor(df, **kw):
         extra = 1 if kw.get("num_rows") == "dynamic" else 0
         return st.data_editor(df, height=min(35 * (len(df) + 1 + extra) + 8, 2400), **kw)
 
+def limpiar_estado_trabajo():
+    """Reinicia la cotización actual sin cerrar el login ni borrar preferencias útiles."""
+    conservar = (
+        "gioval_autenticado",
+        "config_usar_lo",
+        "config_api_key",
+        "_respaldo_zip",
+        "_respaldo_nombre",
+    )
+    valores = {clave: E[clave] for clave in conservar if clave in E}
+    E.clear()
+    E.update(valores)
+
 
 def ir_a(paso: int):
     E["paso"] = paso
@@ -661,9 +691,17 @@ def mostrar_pasos(actual: int):
         clase = "hecho" if i < actual else "activo" if i == actual else ""
         piezas.append(f'<div class="paso {clase}"><b>{"✓" if i < actual else i}</b>{n}</div>')
     st.markdown('<div class="pasos">' + "".join(piezas) + "</div>", unsafe_allow_html=True)
-    st.progress((actual - 1) / 3, text=f"Etapa {actual} de 4 · {nombres[actual - 1]}")
+    st.markdown(
+        f'<div class="progress-label">Etapa {actual} de 4 · {nombres[actual - 1]}</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress((actual - 1) / 3)
     if E.get("_ultima_guarda"):
-        st.caption(f"Borrador guardado en este computador · {E['_ultima_guarda']}")
+        etiqueta = "biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "este computador"
+        st.markdown(
+            f'<div class="quote-save-status">✓ Guardado en {etiqueta} · {E["_ultima_guarda"]}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def cargar(ruta: Path, origen_pedido: str):
@@ -755,7 +793,21 @@ def cargar(ruta: Path, origen_pedido: str):
             registro_guardado = hist.obtener(E["cot_id"])
             if registro_guardado and registro_guardado.get("xlsx"):
                 E["ruta"] = Path(registro_guardado["xlsx"])
-        hist.actualizar(E["cot_id"], origen=origen_pedido)
+        try:
+            if GIOVAL_REQUIRE_ACCESS:
+                hist.actualizar_si_version(
+                    E["cot_id"], E.get("_cotizacion_version"), origen=origen_pedido
+                )
+            else:
+                hist.actualizar(E["cot_id"], origen=origen_pedido)
+            registro_actual = hist.obtener(E["cot_id"])
+            if registro_actual:
+                E["_cotizacion_version"] = registro_actual.get("actualizado")
+        except hs.ConflictoActualizacion as exc:
+            E["_conflicto_guardado"] = True
+            E["_conflicto_guardado_id"] = E.get("cot_id")
+            E["_conflicto_guardado_mensaje"] = str(exc)
+            return
     persistir_borrador()
 
 
@@ -872,12 +924,23 @@ def totales_actuales() -> dict:
 
 
 def mostrar_totales():
-    """Muestra neto, IVA y total actual sin esperar a generar el PDF."""
+    """Muestra neto, IVA y total en un panel consistente en cada etapa."""
     tot = totales_actuales()
-    a, b, c = st.columns(3)
-    a.metric("Neto", rv.clp(tot["neto"]))
-    b.metric("IVA (19 %)", rv.clp(tot["iva"]))
-    c.metric("Total", rv.clp(tot["total"]))
+    with st.container(key="resumen-totales"):
+        a, b, c = st.columns(3)
+        a.metric("Neto", rv.clp(tot["neto"]))
+        b.metric("IVA (19 %)", rv.clp(tot["iva"]))
+        c.metric("Total", rv.clp(tot["total"]))
+        pendientes = [
+            ln for ln in E.get("lineas", [])
+            if _esta_marcado(ln.get("incluir", ln.get("es_producto", True)), True)
+            and ln.get("unitario") is None and ln.get("precio_neto") is None
+        ]
+        if pendientes:
+            st.caption(
+                f"Pendiente de precio: {len(pendientes)} línea(s). "
+                "El total mostrado no suma los precios que faltan."
+            )
 
 
 def mostrar_resumen_lineas():
@@ -968,9 +1031,9 @@ def guardar_precios_inventario(lineas: list[dict]):
 
 
 def persistir_borrador():
-    """Persiste el trabajo actual en SQLite para recuperarlo tras reiniciar la app."""
+    """Persiste el trabajo actual en SQLite y evita sobrescribir otra sesión."""
     cot_id = E.get("cot_id")
-    if not cot_id:
+    if not cot_id or E.get("_conflicto_guardado"):
         return
     registro = hist.obtener(cot_id)
     if not registro:
@@ -1007,11 +1070,34 @@ def persistir_borrador():
         "editado_manual": bool(E.get("editado_manual", False)),
     }
     fecha = cliente.get("fecha") or date.today()
-    hist.actualizar(
-        cot_id, datos=datos, fecha=fecha, cliente=cliente["nombre"], rut=cliente["rut"],
-        neto=tot["neto"], iva=tot["iva"], total=tot["total"],
-        con_iva=int(modo_precios == OPCIONES_PRECIO[0]),
-    )
+    campos_guardado = {
+        "fecha": fecha, "cliente": cliente["nombre"], "rut": cliente["rut"],
+        "neto": tot["neto"], "iva": tot["iva"], "total": tot["total"],
+        "con_iva": int(modo_precios == OPCIONES_PRECIO[0]),
+    }
+    try:
+        if GIOVAL_REQUIRE_ACCESS:
+            version_esperada = E.get("_cotizacion_version")
+            if not version_esperada:
+                E["_conflicto_guardado"] = True
+                E["_conflicto_guardado_id"] = cot_id
+                E["_conflicto_guardado_mensaje"] = (
+                    "Esta sesión no tiene una versión base de la cotización. Recárgala antes de guardar."
+                )
+                return
+            hist.actualizar_si_version(
+                cot_id, version_esperada, datos=datos, **campos_guardado
+            )
+        else:
+            hist.actualizar(cot_id, datos=datos, **campos_guardado)
+    except hs.ConflictoActualizacion as exc:
+        E["_conflicto_guardado"] = True
+        E["_conflicto_guardado_id"] = cot_id
+        E["_conflicto_guardado_mensaje"] = str(exc)
+        return
+    registro_actual = hist.obtener(cot_id)
+    if registro_actual:
+        E["_cotizacion_version"] = registro_actual.get("actualizado")
     guardar_precios_inventario(lineas)
     E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
@@ -1030,14 +1116,26 @@ def widget_numero_cotizacion():
         E["error_numero"] = "El número de cotización no puede quedar vacío."
     elif numero != registro["numero"]:
         try:
-            hist.renumerar(cot_id, numero)
+            if GIOVAL_REQUIRE_ACCESS:
+                hist.renumerar(
+                    cot_id, numero, version_esperada=E.get("_cotizacion_version")
+                )
+            else:
+                hist.renumerar(cot_id, numero)
             E.pop("error_numero", None)
             E["editado_manual"] = True
             for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
                 E.pop(k, None)
             actualizado = hist.obtener(cot_id)
-            if actualizado and actualizado.get("xlsx"):
-                E["ruta"] = Path(actualizado["xlsx"])
+            if actualizado:
+                E["_cotizacion_version"] = actualizado.get("actualizado")
+                if actualizado.get("xlsx"):
+                    E["ruta"] = Path(actualizado["xlsx"])
+        except hs.ConflictoActualizacion as exc:
+            E["_conflicto_guardado"] = True
+            E["_conflicto_guardado_id"] = cot_id
+            E["_conflicto_guardado_mensaje"] = str(exc)
+            return
         except ValueError as exc:
             E["error_numero"] = str(exc)
     else:
@@ -1230,7 +1328,7 @@ def refrescar_excel_actual():
 
 def iniciar_borrador():
     """Crea inmediatamente una cotización vacía, lista para guardar avances."""
-    E.clear()
+    limpiar_estado_trabajo()
     fecha = date.today()
     cliente = {"nombre": "", "rut": "", "direccion": "", "ciudad": "", "telefono": "", "email": "", "fecha": fecha}
     cot_id, numero = hist.crear(cliente, [], {"neto": 0, "iva": 0, "total": 0},
@@ -1239,6 +1337,7 @@ def iniciar_borrador():
         cot_id=cot_id, cot_numero=numero, c_fecha=fecha, precios_modo=OPCIONES_PRECIO[0],
         paso=1, vista=VISTAS[0], lineas=[], orden_texto="", fuente_orden="",
         editor_version=1, editado_manual=False, origen_pedido="pedido",
+        _cotizacion_version=(hist.obtener(cot_id) or {}).get("actualizado"),
     )
     persistir_borrador()
 
@@ -1259,7 +1358,7 @@ def restaurar_borrador(cot_id: int):
         ln.setdefault("incluir", True)
         ln.setdefault("clave_auto", bib.detectar(descripcion) or (ct.clave_descriptiva(descripcion) if ln.get("es_producto") and descripcion else ""))
         ln.setdefault("origen", "biblioteca" if bib.detectar(descripcion) else "descripcion")
-    E.clear()
+    limpiar_estado_trabajo()
     try:
         fecha = date.fromisoformat(str(registro.get("fecha") or "")[:10])
     except ValueError:
@@ -1270,6 +1369,7 @@ def restaurar_borrador(cot_id: int):
         c_rut=cliente.get("rut", registro.get("rut", "")),
         c_dir=cliente.get("direccion", ""), c_ciudad=cliente.get("ciudad", ""),
         c_tel=cliente.get("telefono", ""), c_email=cliente.get("email", ""),
+        _cotizacion_version=registro.get("actualizado"),
         precios_modo=datos.get("precios_modo", OPCIONES_PRECIO[0 if registro.get("con_iva", 1) else 1]),
         origen_pedido=datos.get("origen_pedido", registro.get("origen", "pedido")),
         paso=int(datos.get("paso", 1)), lineas=lineas_restauradas,
@@ -1320,59 +1420,100 @@ def restaurar_borrador(cot_id: int):
 
 
 def selector_borradores():
-    """Panel de inicio: accesos rápidos, métricas y borradores para retomar."""
-    borradores = []
-    for reg in hist.listar("", "Borrador"):
-        pdf = Path(reg["pdf"]) if reg.get("pdf") else None
-        if not pdf or not pdf.exists():
-            borradores.append(reg)
+    """Inicio operativo: atajos, indicadores, borradores y cotizaciones recientes."""
+    registros = hist.listar()
+    borradores = [r for r in registros if r.get("estado") == "Borrador"]
+    cotizaciones_aceptadas = sum(
+        float(r.get("total") or 0) for r in registros if r.get("estado") == "Aceptada"
+    )
 
     st.markdown(
         '<section class="inicio-hero">'
-        '<div class="inicio-kicker">WORKSPACE / GIOVAL&nbsp;&nbsp; · &nbsp;&nbsp;COTIZACIONES</div>'
-        '<h2>De tu pedido a una cotización lista.</h2>'
-        '<p>Gestiona pedidos, precios, fotos y fichas técnicas en un espacio de trabajo. '
-        'Prepara una propuesta ordenada, revisa los totales y descarga un PDF profesional para compartir.</p>'
-        '<div class="inicio-badges">'
-        '<span class="inicio-badge">Atención cercana</span>'
-        '<span class="inicio-badge">Soluciones para empresas y personas</span>'
-        '<span class="inicio-badge">Experiencia local en el norte</span>'
-        '</div></section>',
+        '<div class="inicio-kicker">GIOVAL / ESPACIO DE TRABAJO</div>'
+        '<h2>Tu jornada comercial empieza aquí.</h2>'
+        '<p>Prepara cotizaciones, consulta precios y completa la biblioteca de productos '
+        'desde un solo lugar.</p>'
+        '</section>',
         unsafe_allow_html=True,
     )
-    a, b = st.columns([3, 2])
-    with a:
-        st.markdown('<div class="inicio-section-label">Empezar</div>', unsafe_allow_html=True)
-        st.subheader("¿Preparamos una cotización?")
-        st.caption("Crea un pedido nuevo o continúa con un trabajo pendiente.")
-        st.button("Crear nueva cotización", icon=":material/add_circle:", type="primary", width="stretch", on_click=iniciar_borrador,
-                  key="inicio_nueva_cotizacion")
-    with b:
-        st.markdown('<div class="inicio-section-label">Control comercial</div>', unsafe_allow_html=True)
-        st.subheader("Revisa tu actividad")
-        st.caption("Consulta cotizaciones anteriores y vuelve a contactar a tus clientes.")
-        st.button("Abrir historial", icon=":material/history:", width="stretch",
-                  on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial")
+
+    a, b, c_btn = st.columns([1.5, 1, 1])
+    a.button(
+        "Nueva cotización", icon=":material/add_circle:", type="primary",
+        width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
+    )
+    b.button(
+        "Historial", icon=":material/history:", width="stretch",
+        on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial",
+    )
+    c_btn.button(
+        "Catálogo", icon=":material/inventory_2:", width="stretch",
+        on_click=lambda: E.update(vista=VISTAS[2]), key="inicio_abrir_catalogo",
+    )
 
     st.divider()
-    st.subheader("Retomar un borrador")
-    if borradores:
-        opciones = {
-            f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}": r["id"]
-            for r in borradores
-        }
-        elegido = st.selectbox("Selecciona una cotización sin terminar", list(opciones), key="borrador_a_retomar")
-        c1, c2 = st.columns(2)
-        c1.button(
-            "Retomar borrador", icon=":material/play_arrow:", type="primary", width="stretch",
-            on_click=restaurar_borrador, args=(opciones[elegido],), key="inicio_retomar_borrador",
-        )
-        c2.button("Iniciar otro borrador", icon=":material/add_circle:", width="stretch",
-                  on_click=iniciar_borrador, key="inicio_otro_borrador")
-    else:
-        st.info("No tienes borradores pendientes. Cuando inicies una cotización, podrás retomarla desde aquí aunque se cierre la aplicación.")
-        st.button("Comenzar ahora →", type="primary", width="stretch",
-                  on_click=iniciar_borrador, key="inicio_comenzar_ahora")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Cotizaciones", len(registros))
+    m2.metric("Borradores", len(borradores))
+    m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas))
+    m4.metric("Productos", len(bib.indice))
+
+    izq, der = st.columns([1.15, 1])
+    with izq:
+        st.subheader("Retomar trabajo")
+        if borradores:
+            opciones = {
+                (
+                    f"{r['numero']} · {fecha_corta(r.get('fecha') or '')}"
+                    if GIOVAL_REQUIRE_ACCESS
+                    else f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}"
+                ): r["id"]
+                for r in borradores
+            }
+            elegido = st.selectbox(
+                "Borradores pendientes", list(opciones),
+                key="borrador_a_retomar",
+                label_visibility="collapsed",
+            )
+            c1, c2 = st.columns(2)
+            c1.button(
+                "Continuar borrador", icon=":material/play_arrow:", type="primary",
+                width="stretch", on_click=restaurar_borrador, args=(opciones[elegido],),
+                key="inicio_retomar_borrador",
+            )
+            c2.button(
+                "Nuevo borrador", icon=":material/add:", width="stretch",
+                on_click=iniciar_borrador, key="inicio_otro_borrador",
+            )
+        else:
+            st.info("No hay borradores pendientes. Crea una cotización para comenzar.")
+            st.button(
+                "Crear cotización", icon=":material/add_circle:", type="primary",
+                width="stretch", on_click=iniciar_borrador, key="inicio_comenzar_ahora",
+            )
+    with der:
+        st.subheader("Cotizaciones recientes")
+        if registros:
+            recientes = registros[:5]
+            tabla = {
+                "N°": [r.get("numero", "") for r in recientes],
+                "Fecha": [fecha_corta(r.get("fecha") or "") for r in recientes],
+                "Total": [r.get("total") or 0 for r in recientes],
+                "Estado": [r.get("estado") or "Borrador" for r in recientes],
+            }
+            if not GIOVAL_REQUIRE_ACCESS:
+                tabla["Cliente"] = [r.get("cliente") or "Sin cliente" for r in recientes]
+            st.dataframe(
+                pd.DataFrame(tabla), hide_index=True, width="stretch",
+                column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
+            )
+            st.button(
+                "Ver todas las cotizaciones →", width="stretch",
+                on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_ver_todas",
+            )
+        else:
+            st.caption("Las cotizaciones que prepares aparecerán aquí.")
+
 
 # ============================================================== PASO 1: PEDIDO
 def aplicar_cliente_guardado():
@@ -1513,11 +1654,28 @@ def pedido_ui():
         if not cot_id:
             cot_id, numero = hist.crear(cliente, lineas_orden, totales, con_iva, cliente["fecha"], origen="pedido")
             E["cot_id"], E["cot_numero"] = cot_id, numero
+            registro_nuevo = hist.obtener(cot_id)
+            E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
         else:
             registro = hist.obtener(cot_id)
             if registro and _texto_seguro(E.get("cot_numero")) != registro["numero"]:
                 try:
-                    hist.renumerar(cot_id, _texto_seguro(E.get("cot_numero")))
+                    if GIOVAL_REQUIRE_ACCESS:
+                        hist.renumerar(
+                            cot_id,
+                            _texto_seguro(E.get("cot_numero")),
+                            version_esperada=E.get("_cotizacion_version"),
+                        )
+                    else:
+                        hist.renumerar(cot_id, _texto_seguro(E.get("cot_numero")))
+                    registro_renumerado = hist.obtener(cot_id)
+                    if registro_renumerado:
+                        E["_cotizacion_version"] = registro_renumerado.get("actualizado")
+                except hs.ConflictoActualizacion as exc:
+                    E["_conflicto_guardado"] = True
+                    E["_conflicto_guardado_id"] = cot_id
+                    E["_conflicto_guardado_mensaje"] = str(exc)
+                    st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
                     return
@@ -1535,14 +1693,32 @@ def pedido_ui():
                  for ln in lineas_orden if _esta_marcado(ln.get("incluir"), True)],
                 {**cliente, "numero": registro["numero"]}, ruta,
             )
-            hist.actualizar(
-                E["cot_id"], datos={"lineas": lineas_orden, "cliente": cliente, "precios_modo": E["precios_modo"],
-                                    "origen_pedido": "pedido", "paso": 2},
-                fecha=cliente["fecha"], cliente=nombre, rut=rut, neto=totales["neto"],
-                iva=totales["iva"], total=totales["total"], con_iva=int(con_iva), origen="pedido",
-            )
+            campos_cotizacion = {
+                "fecha": cliente["fecha"], "cliente": nombre, "rut": rut,
+                "neto": totales["neto"], "iva": totales["iva"], "total": totales["total"],
+                "con_iva": int(con_iva), "origen": "pedido",
+            }
+            datos_cotizacion = {
+                "lineas": lineas_orden, "cliente": cliente, "precios_modo": E["precios_modo"],
+                "origen_pedido": "pedido", "paso": 2,
+            }
+            if GIOVAL_REQUIRE_ACCESS:
+                hist.actualizar_si_version(
+                    E["cot_id"], E.get("_cotizacion_version"),
+                    datos=datos_cotizacion, **campos_cotizacion
+                )
+            else:
+                hist.actualizar(E["cot_id"], datos=datos_cotizacion, **campos_cotizacion)
+            registro_nuevo = hist.obtener(E["cot_id"])
+            if registro_nuevo:
+                E["_cotizacion_version"] = registro_nuevo.get("actualizado")
             hist.guardar_archivos(E["cot_id"], xlsx=ruta)
             hist.guardar_cliente(cliente)
+        except hs.ConflictoActualizacion as exc:
+            E["_conflicto_guardado"] = True
+            E["_conflicto_guardado_id"] = E.get("cot_id")
+            E["_conflicto_guardado_mensaje"] = str(exc)
+            st.rerun()
         except Exception as exc:
             st.error(f"No pude guardar el borrador. Los datos siguen en pantalla: {exc}")
             return
@@ -1739,6 +1915,7 @@ def guardar_candidato(clave: str, tipo: str, c: dict):
 
 def tarjeta(clave: str, desc: str):
     foto, ficha = bib.archivos(clave)
+    ficha_no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
     aviso_ficha = ""
     if ficha:
         n = menciones_guardada(str(ficha), ficha.stat().st_mtime, clave) if bs.es_codigo(clave) else -2
@@ -1747,7 +1924,7 @@ def tarjeta(clave: str, desc: str):
             aviso_ficha = (f"La ficha guardada no menciona el código «{clave}». Puede ser de otro producto: "
                            "busca otra o revísala.")
     else:
-        estado_ficha = "Falta"
+        estado_ficha = "No requerida" if ficha_no_requerida else "Falta"
     with st.container(border=True):
         st.markdown('<span class="tarjeta-marca"></span>', unsafe_allow_html=True)
         c1, c2 = st.columns([1, 3])
@@ -1762,7 +1939,19 @@ def tarjeta(clave: str, desc: str):
         with c2:
             st.markdown(f"**{desc}**")
             st.caption(f"Código: {clave}")
-            st.markdown(f"**Foto:** {'Disponible' if foto else 'Falta'} &nbsp; · &nbsp; **Ficha técnica:** {estado_ficha}")
+            st.markdown(
+                f"**Foto:** {'Disponible' if foto else 'Falta'} &nbsp; · &nbsp; "
+                f"**Ficha técnica:** {estado_ficha}"
+            )
+            nueva_no_requerida = st.checkbox(
+                "Este producto no requiere ficha técnica",
+                value=ficha_no_requerida,
+                key=f"ficha_no_requerida_{clave}",
+                help="Útil para artículos de librería u otros productos sin ficha técnica. Seguirá incluyendo la foto si existe.",
+            )
+            if nueva_no_requerida != ficha_no_requerida:
+                bib.actualizar(clave, ficha_no_requerida=nueva_no_requerida)
+                st.rerun()
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
@@ -1858,31 +2047,52 @@ def paso_3():
             if subido:
                 bib.guardar_archivo(clave, tipo, subido.name, subido.getvalue())
 
-    listos = sum(1 for c in claves if all(bib.archivos(c)))
-    st.progress(listos / len(claves), text=f"{listos} de {len(claves)} productos tienen foto y ficha")
-    faltan = [c for c in claves if not all(bib.archivos(c))]
+    def archivos_necesarios(clave):
+        foto, ficha = bib.archivos(clave)
+        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+        return bool(foto and (ficha or no_requerida))
+
+    listos = sum(1 for clave in claves if archivos_necesarios(clave))
+    st.markdown(
+        f'<div class="progress-label">{listos} de {len(claves)} productos completos '
+        '(foto y ficha técnica, o ficha marcada como no requerida)</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress(listos / len(claves))
+    faltan = []
+    for clave in claves:
+        foto, ficha = bib.archivos(clave)
+        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+        if not foto or (not ficha and not no_requerida):
+            faltan.append(clave)
     if faltan:
-        st.write("Presiona el botón y yo busco en internet. Después elige la foto y la ficha correcta para cada producto.")
-        if st.button(f"Buscar fotos y fichas de lo que falta ({len(faltan)})", icon=":material/search:", type="primary", width="stretch"):
+        st.caption("Primero se buscan los archivos que faltan; después puedes revisar cada resultado y confirmar si corresponde.")
+        if st.button(f"Buscar fotos y fichas pendientes ({len(faltan)})", icon=":material/search:", type="primary", width="stretch"):
             persistir_borrador()
-            barra, hubo_error = st.progress(0.0, text="Buscando…"), False
+            barra = st.progress(0.0)
+            estado_busqueda = st.empty()
+            estado_busqueda.caption("Buscando…")
+            hubo_error = False
             for i, clave in enumerate(faltan):
                 foto, ficha = bib.archivos(clave)
+                no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
                 sug_foto, sug_ficha = consultas_sugeridas(clave, descripciones[clave])
                 hubo_error |= bool(buscar_para(
                     clave, E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha),
-                    fotos=not foto, fichas=not ficha,
+                    fotos=not foto, fichas=(not ficha and not no_requerida),
                 ))
-                barra.progress((i + 1) / len(faltan), text=f"Buscando… {i + 1} de {len(faltan)}")
+                barra.progress((i + 1) / len(faltan))
+                estado_busqueda.caption(f"Buscando archivos… {i + 1} de {len(faltan)} productos")
                 persistir_borrador()
             barra.empty()
+            estado_busqueda.empty()
             if hubo_error:
-                st.warning("El buscador no respondió en algunos productos. Intenta de nuevo en un minuto.")
+                st.warning("El buscador no respondió para algunos productos. Revisa los pendientes e inténtalo de nuevo.")
             else:
-                st.success("Listo. Baja y elige la foto y la ficha de cada producto.")
+                st.success("Búsqueda terminada. Revisa las opciones encontradas y confirma los archivos correctos.")
     else:
-        st.success("¡Todos los productos tienen foto y ficha!")
-    st.caption("Si un producto no tiene ficha técnica, no pasa nada: el PDF llevará solo la foto.")
+        st.success("Todos los productos cotizados tienen foto y una ficha disponible o marcada como no requerida.")
+    st.caption("En artículos de librería puedes marcar «Este producto no requiere ficha técnica» desde su tarjeta.")
 
     st.divider()
     st.subheader("Productos y anexos")
@@ -1892,21 +2102,25 @@ def paso_3():
         placeholder="Código, marca o descripción",
     )
     estado_anexos = c_estado.selectbox(
-        "Mostrar", ["Todos", "Incompletos", "Sin foto", "Sin ficha", "Completos"],
+        "Mostrar",
+        ["Todos", "Incompletos", "Sin foto", "Sin ficha pendiente", "Ficha no requerida", "Completos"],
         key="filtro_anexos_estado",
     )
     consulta_anexos = busqueda_anexos.strip().casefold()
     visibles = []
     for clave in claves:
         foto, ficha = bib.archivos(clave)
-        completo = bool(foto and ficha)
+        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+        completo = bool(foto and (ficha or no_requerida))
         if consulta_anexos and consulta_anexos not in (clave + " " + descripciones[clave]).casefold():
             continue
         if estado_anexos == "Incompletos" and completo:
             continue
         if estado_anexos == "Sin foto" and foto:
             continue
-        if estado_anexos == "Sin ficha" and ficha:
+        if estado_anexos == "Sin ficha pendiente" and (ficha or no_requerida):
+            continue
+        if estado_anexos == "Ficha no requerida" and not no_requerida:
             continue
         if estado_anexos == "Completos" and not completo:
             continue
@@ -1936,24 +2150,47 @@ def hallazgos() -> list[dict]:
 
 
 def panel_revision(en_paso_4: bool = False) -> int:
-    """Muestra lo que encontró el revisor. Devuelve cuántos errores graves hay."""
+    """Muestra errores y avisos antes de crear el PDF; devuelve errores bloqueantes."""
     try:
-        hs_ = hallazgos()
-    except Exception:
-        st.info("No pude revisar la cotización automáticamente.")
+        hallazgos_actuales = hallazgos()
+    except Exception as exc:
+        st.warning(f"No pude terminar la revisión automática: {exc}")
         return 0
-    errores = [h["texto"] for h in hs_ if h["nivel"] == "error"]
-    avisos = [h["texto"] for h in hs_ if h["nivel"] == "aviso"]
-    if not hs_:
-        st.success("Revisé la cotización: los totales, el IVA, los precios y los datos del cliente están en orden.")
+    errores = [h["texto"] for h in hallazgos_actuales if h["nivel"] == "error"]
+    avisos = [h["texto"] for h in hallazgos_actuales if h["nivel"] == "aviso"]
+    if not hallazgos_actuales:
+        st.success("Revisión completada: totales, IVA, precios y datos del cliente en orden.")
         return 0
-    st.markdown("#### Revisión de la cotización")
+
+    st.markdown("#### Revisión antes de generar el PDF")
+    resumen = []
     if errores:
-        st.error("**Hay que corregir:**\n\n" + "\n".join(f"- {t}" for t in errores))
-        if not en_paso_4 and E.get("origen_pedido") == "pedido":
-            st.caption("Para corregir precios o datos del cliente, vuelve al paso 1: tu pedido sigue ahí.")
+        resumen.append(f"{len(errores)} error(es) por corregir")
     if avisos:
-        st.warning("**Conviene revisar:**\n\n" + "\n".join(f"- {t}" for t in avisos))
+        resumen.append(f"{len(avisos)} aviso(s) para revisar")
+    st.caption(" · ".join(resumen))
+
+    if errores:
+        st.error(f"{len(errores)} problema(s) que requieren atención.")
+        with st.expander("Ver errores de la cotización", expanded=True):
+            for problema in errores:
+                st.markdown(f"- {problema}")
+        if en_paso_4:
+            st.button(
+                "Volver a productos y precios",
+                icon=":material/edit:",
+                width="stretch",
+                on_click=ir_a,
+                args=(2,),
+                key="revision_volver_productos",
+            )
+        elif E.get("origen_pedido") == "pedido":
+            st.caption("El pedido sigue guardado. Puedes volver a los pasos anteriores para corregirlo.")
+
+    if avisos:
+        with st.expander(f"Ver avisos de revisión ({len(avisos)})", expanded=bool(not errores)):
+            for aviso in avisos:
+                st.markdown(f"- {aviso}")
     return len(errores)
 
 
@@ -1977,6 +2214,8 @@ def registrar_en_historial(pdf_bytes: bytes):
                                con_iva=False, origen="cotizacion", numero=numero)
         hist.guardar_archivos(cot_id, xlsx=E["ruta"], pdf=pdf_bytes)
         E["cot_id"] = cot_id
+        registro_nuevo = hist.obtener(cot_id)
+        E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
 
 
 def generar_pdf():
@@ -2023,10 +2262,23 @@ def paso_4():
         editar_cabecera()
 
         claves, _ = datos_productos()
-        con_foto = sum(1 for c in claves if bib.archivos(c)[0])
-        con_ficha = sum(1 for c in claves if bib.archivos(c)[1])
-        st.write(f"La cotización tiene **{len(E.get('lineas', []))} líneas**. Fotos: **{con_foto}** de {len(claves)}. "
-                 f"Fichas técnicas: **{con_ficha}** de {len(claves)}.")
+        con_foto = sum(1 for clave in claves if bib.archivos(clave)[0])
+        con_ficha = sum(1 for clave in claves if bib.archivos(clave)[1])
+        sin_ficha_requerida = sum(
+            1 for clave in claves
+            if not bib.archivos(clave)[1]
+            and not bib.indice.get(clave, {}).get("ficha_no_requerida", False)
+        )
+        ficha_no_requerida = sum(
+            1 for clave in claves if bib.indice.get(clave, {}).get("ficha_no_requerida", False)
+        )
+        st.write(
+            f"La cotización tiene **{len(E.get('lineas', []))} líneas**. "
+            f"Fotos: **{con_foto}** de {len(claves)} · "
+            f"Fichas disponibles: **{con_ficha}** · "
+            f"Fichas pendientes: **{sin_ficha_requerida}** · "
+            f"No requeridas: **{ficha_no_requerida}**."
+        )
         n_errores = panel_revision(en_paso_4=True)
         permitido = not bool(E.get("error_numero"))
         if n_errores:
@@ -2046,9 +2298,22 @@ def paso_4():
         if st.button("Volver a editar y regenerar el PDF", type="primary", width="stretch"):
             for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
                 E.pop(clave_estado, None)
-            if E.get("cot_id") and hist.obtener(E["cot_id"]):
-                hist.actualizar(E["cot_id"], pdf=None, estado="Borrador")
-            E["editado_manual"] = True
+            try:
+                if E.get("cot_id") and hist.obtener(E["cot_id"]):
+                    if GIOVAL_REQUIRE_ACCESS:
+                        hist.actualizar_si_version(
+                            E["cot_id"], E.get("_cotizacion_version"), estado="Borrador"
+                        )
+                    else:
+                        hist.actualizar(E["cot_id"], pdf=None, estado="Borrador")
+                    registro_actual = hist.obtener(E["cot_id"])
+                    if registro_actual:
+                        E["_cotizacion_version"] = registro_actual.get("actualizado")
+                E["editado_manual"] = True
+            except hs.ConflictoActualizacion as exc:
+                E["_conflicto_guardado"] = True
+                E["_conflicto_guardado_id"] = E.get("cot_id")
+                E["_conflicto_guardado_mensaje"] = str(exc)
             st.rerun()
 
     if "pdf_bytes" in E:
@@ -2082,9 +2347,9 @@ def paso_4():
         atras, nueva = st.columns(2)
         if atras.button("← Volver a fotos y fichas", width="stretch"):
             ir_a(3)
-        nueva.button("Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+        nueva.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
     else:
-        nueva = st.button("Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+        nueva = st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
 
 
 # ============================================================== HISTORIAL
@@ -2124,9 +2389,36 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         E["c_fecha"] = date.today()
     if mantener:
         E["cot_id"] = cot_id
+        E["cot_numero"] = rec["numero"]
+        E["_cotizacion_version"] = rec.get("actualizado")
     else:
-        E.pop("cot_id", None)
+        lineas_totales = [
+            {
+                "cantidad": ln.get("cantidad", 1),
+                "precio_neto": ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"),
+            }
+            for ln in lineas if _esta_marcado(ln.get("incluir"), True)
+        ]
+        totales_nuevos = rv.totales_de(lineas_totales)
+        cliente_nuevo = cliente_actual()
+        nuevo_id, nuevo_numero = hist.crear(
+            cliente_nuevo, lineas, totales_nuevos, con_iva=con_iva,
+            fecha=E.get("c_fecha", date.today()),
+            origen=datos.get("origen_pedido", rec.get("origen", "pedido")),
+        )
+        E["cot_id"] = nuevo_id
+        E["cot_numero"] = nuevo_numero
+        for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
+            E.pop(clave_estado, None)
+        E["editado_manual"] = True
+        nuevo_registro = hist.obtener(nuevo_id)
+        E["_cotizacion_version"] = nuevo_registro.get("actualizado") if nuevo_registro else None
+    E["lineas"] = lineas
+    E.pop("_conflicto_guardado", None)
+    E.pop("_conflicto_guardado_id", None)
+    E.pop("_conflicto_guardado_mensaje", None)
     E["paso"], E["vista"] = 1, VISTAS[0]
+    persistir_borrador()
 
 
 def historial_cotizaciones():
@@ -2139,16 +2431,30 @@ def historial_cotizaciones():
     m1.metric("Cotizaciones", len(todos))
     m2.metric("Monto cotizado", rv.clp(sum(r["total"] or 0 for r in todos)))
     m3.metric("Monto aceptado", rv.clp(sum(r["total"] or 0 for r in todos if r["estado"] == "Aceptada")))
-    f1, f2 = st.columns([3, 2])
+    f1, f2, f3 = st.columns([2.5, 1, 1.4])
     texto = f1.text_input(
         "Buscar",
         placeholder="Número de cotización" if GIOVAL_REQUIRE_ACCESS else "Número, cliente, RUT o notas",
         key="h_texto",
     )
     estado = f2.selectbox("Estado", ["Todos"] + hs.ESTADOS, key="h_estado")
+    periodo = f3.selectbox(
+        "Período", ["Todas las fechas", "Últimos 30 días", "Últimos 90 días", "Este año"],
+        key="h_periodo",
+    )
     regs = hist.listar(texto, estado)
+    hoy = date.today()
+    if periodo == "Últimos 30 días":
+        minimo = hoy - timedelta(days=30)
+        regs = [r for r in regs if str(r.get("fecha") or "")[:10] >= minimo.isoformat()]
+    elif periodo == "Últimos 90 días":
+        minimo = hoy - timedelta(days=90)
+        regs = [r for r in regs if str(r.get("fecha") or "")[:10] >= minimo.isoformat()]
+    elif periodo == "Este año":
+        regs = [r for r in regs if str(r.get("fecha") or "")[:4] == str(hoy.year)]
+    st.caption(f"Mostrando {len(regs)} cotización(es) con los filtros seleccionados.")
     if not regs:
-        st.warning("No encontré cotizaciones con ese filtro.")
+        st.info("No encontré cotizaciones con esos filtros. Cambia el estado, período o búsqueda.")
         return
     datos_tabla = {
         "id": [r["id"] for r in regs], "N°": [r["numero"] for r in regs],
@@ -2165,20 +2471,35 @@ def historial_cotizaciones():
         column_config={"id": None, "Total": st.column_config.NumberColumn(format="$ %d"),
                        "Estado": st.column_config.SelectboxColumn(options=hs.ESTADOS, required=True)})
     if st.button("Guardar estados" if GIOVAL_REQUIRE_ACCESS else "Guardar estados y notas", icon=":material/save:"):
-        cambios = 0
+        cambios, conflictos = 0, 0
         for (_, fila), reg in zip(editado.iterrows(), regs):
             nuevo_estado = fila["Estado"]
             if GIOVAL_REQUIRE_ACCESS:
                 if nuevo_estado != reg["estado"]:
-                    hist.actualizar(reg["id"], estado=nuevo_estado)
-                    cambios += 1
+                    try:
+                        hist.actualizar_si_version(reg["id"], reg.get("actualizado"), estado=nuevo_estado)
+                        cambios += 1
+                        if E.get("cot_id") == reg["id"]:
+                            actual = hist.obtener(reg["id"])
+                            E["_cotizacion_version"] = actual.get("actualizado") if actual else None
+                    except hs.ConflictoActualizacion:
+                        conflictos += 1
+                        if E.get("cot_id") == reg["id"]:
+                            E["_conflicto_guardado"] = True
+                            E["_conflicto_guardado_id"] = reg["id"]
+                            E["_conflicto_guardado_mensaje"] = (
+                                "Otra sesión modificó esta cotización; no cambié su estado. Recarga antes de editarla."
+                            )
             else:
                 nuevas_notas = str(fila["Notas"] or "")
                 if nuevo_estado != reg["estado"] or nuevas_notas != (reg["notas"] or ""):
                     hist.actualizar(reg["id"], estado=nuevo_estado, notas=nuevas_notas)
                     cambios += 1
         E["h_ver"] += 1
-        st.success(f"Guardado ({cambios} cambios).")
+        if conflictos:
+            st.warning(f"Guardé {cambios} cambios. No se pudieron guardar {conflictos} porque otra sesión modificó esas cotizaciones.")
+        else:
+            st.success(f"Guardado ({cambios} cambios).")
         st.rerun()
 
     st.divider()
@@ -2278,73 +2599,183 @@ def borrar_producto(clave: str):
 def vista_productos():
     E.setdefault("p_ver", 0)
     st.header("Catálogo de productos")
-    st.write("Aquí están los productos que he aprendido. Puedes corregir nombres, anotar el **costo** y el **margen** "
-             "para que te sugiera el precio de venta, y cambiar su foto o su ficha.")
+    st.caption("Precios, costos, márgenes y archivos de producto se comparten desde la biblioteca central.")
     if "p_msg" in E:
         nivel, texto = E.pop("p_msg")
         (st.success if nivel == "ok" else st.error)(texto)
-    with st.expander("Agregar un producto a mano"):
-        n1, n2 = st.columns(2)
+
+    with st.expander("Agregar un producto", expanded=False):
+        n1, n2 = st.columns([1, 2])
         nuevo_cod = n1.text_input("Código del producto", key="np_cod")
-        nuevo_nom = n2.text_input("Nombre", key="np_nom")
-        if st.button("Agregar", disabled=not nuevo_cod.strip()):
-            bib.registrar(nuevo_cod.strip().upper(), nombre=nuevo_nom.strip() or nuevo_cod.strip())
+        nuevo_nom = n2.text_input("Nombre o descripción", key="np_nom")
+        if st.button("Agregar producto", icon=":material/add:", disabled=not nuevo_cod.strip(),
+                     key="cat_agregar_producto"):
+            clave_nueva = nuevo_cod.strip().upper()
+            bib.registrar(clave_nueva, nombre=nuevo_nom.strip() or clave_nueva)
             E["p_ver"] += 1
+            st.success(f"Producto {clave_nueva} agregado al catálogo.")
             st.rerun()
 
-    filas = bib.filas_catalogo()
-    if not filas:
-        st.info("Todavía no hay productos guardados. Se irán agregando solos a medida que armes cotizaciones.")
+    todas = bib.filas_catalogo()
+    if not todas:
+        st.info("Todavía no hay productos. Agrega uno aquí o se irán incorporando al preparar cotizaciones.")
         return
-    f1, f2 = st.columns([3, 2])
-    texto = f1.text_input("Buscar", placeholder="Código o nombre", key="p_texto")
-    solo = f2.checkbox("Solo los incompletos (sin foto o sin ficha)", key="p_solo")
-    filas = [f for f in filas if (not texto or texto.lower() in (f["clave"] + " " + f["nombre"]).lower())
-             and (not solo or not (f["foto"] and f["ficha"]))]
+
+    total_sin_foto = sum(not f["foto"] for f in todas)
+    total_sin_ficha = sum(not f["ficha"] and not f.get("ficha_no_requerida", False) for f in todas)
+    total_sin_precio = sum(f.get("precio_neto") is None for f in todas)
+    total_margen_pendiente = sum(f.get("costo_neto") is None or f.get("margen_pct") is None for f in todas)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Productos", len(todas))
+    m2.metric("Sin foto", total_sin_foto)
+    m3.metric("Sin ficha pendiente", total_sin_ficha)
+    m4.metric("Sin precio reciente", total_sin_precio)
+
+    f1, f2 = st.columns([1.5, 1])
+    texto = f1.text_input("Buscar producto", placeholder="Código, modelo, marca o nombre", key="p_texto")
+    filtro = f2.selectbox(
+        "Filtrar por estado",
+        ["Todos", "Incompletos", "Sin foto", "Sin ficha pendiente", "Sin precio",
+         "Margen pendiente", "Ficha no requerida"],
+        key="p_filtro_estado",
+    )
+    consulta = texto.strip().casefold()
+    filas = []
+    for producto in todas:
+        clave, nombre = producto["clave"], producto["nombre"]
+        sin_ficha = not producto["ficha"] and not producto.get("ficha_no_requerida", False)
+        sin_precio = producto.get("precio_neto") is None
+        margen_pendiente = producto.get("costo_neto") is None or producto.get("margen_pct") is None
+        incompleto = not producto["foto"] or sin_ficha
+        coincide_texto = not consulta or consulta in f"{clave} {nombre}".casefold()
+        coincide_filtro = (
+            filtro == "Todos"
+            or (filtro == "Incompletos" and incompleto)
+            or (filtro == "Sin foto" and not producto["foto"])
+            or (filtro == "Sin ficha pendiente" and sin_ficha)
+            or (filtro == "Sin precio" and sin_precio)
+            or (filtro == "Margen pendiente" and margen_pendiente)
+            or (filtro == "Ficha no requerida" and producto.get("ficha_no_requerida", False))
+        )
+        if coincide_texto and coincide_filtro:
+            filas.append(producto)
+
+    st.caption(
+        f"Mostrando {len(filas)} de {len(todas)} productos · "
+        f"{total_margen_pendiente} con costo o margen pendiente."
+    )
     if not filas:
-        st.warning("No hay productos con ese filtro.")
+        st.info("No hay productos que coincidan con esos filtros.")
         return
-    mostrar = pd.DataFrame({
-        "Código": [f["clave"] for f in filas], "Producto": [f["nombre"] for f in filas],
-        "Foto": ["Disponible" if f["foto"] else "Falta" for f in filas], "Ficha": ["Disponible" if f["ficha"] else "Falta" for f in filas],
-        "Último precio neto": [f["precio_neto"] for f in filas], "Costo neto": [f["costo_neto"] for f in filas],
+
+    mostrar_detalles = st.checkbox(
+        "Mostrar notas y sugerencia con IVA", value=False, key="p_mostrar_detalles"
+    )
+    mostrar = {
+        "Código": [f["clave"] for f in filas],
+        "Producto": [f["nombre"] for f in filas],
+        "Foto": ["Disponible" if f["foto"] else "Falta" for f in filas],
+        "Ficha": [
+            "Disponible" if f["ficha"] else
+            "No requerida" if f.get("ficha_no_requerida", False) else "Falta"
+            for f in filas
+        ],
+        "Último precio neto": [f["precio_neto"] for f in filas],
+        "Costo neto": [f["costo_neto"] for f in filas],
         "Margen %": [f["margen_pct"] for f in filas],
         "Sugerido neto": [f["sugerido_neto"] for f in filas],
-        "Sugerido con IVA": [None if f["sugerido_neto"] is None else f["sugerido_neto"] * (1 + rv.IVA) for f in filas],
-        "Notas": [f["notas"] for f in filas]})
+    }
+    if mostrar_detalles:
+        mostrar["Sugerido con IVA"] = [
+            None if f["sugerido_neto"] is None else f["sugerido_neto"] * (1 + rv.IVA)
+            for f in filas
+        ]
+        mostrar["Notas"] = [f["notas"] or "" for f in filas]
+
+    mostrar_df = pd.DataFrame(mostrar)
+    cols_numero = ["Último precio neto", "Costo neto", "Sugerido neto"]
+    if mostrar_detalles:
+        cols_numero.append("Sugerido con IVA")
+    configuracion_columnas = {
+        col: st.column_config.NumberColumn(format="$ %d", width="small")
+        for col in cols_numero
+    }
+    configuracion_columnas["Margen %"] = st.column_config.NumberColumn(
+        format="%.1f %%", min_value=0, step=1, width="small"
+    )
+    configuracion_columnas["Código"] = st.column_config.TextColumn(width="medium")
+    configuracion_columnas["Producto"] = st.column_config.TextColumn(width="large")
+    configuracion_columnas["Foto"] = st.column_config.TextColumn(width="small")
+    configuracion_columnas["Ficha"] = st.column_config.TextColumn(width="small")
+
     editado = editor(
-        mostrar, hide_index=True, width="stretch", key=f"p_tabla_{E['p_ver']}_{texto}_{solo}",
-        disabled=["Código", "Foto", "Ficha", "Último precio neto", "Sugerido neto", "Sugerido con IVA"],
-        column_config={c: st.column_config.NumberColumn(format="$ %d") for c in
-                       ("Último precio neto", "Costo neto", "Sugerido neto", "Sugerido con IVA")}
-                      | {"Margen %": st.column_config.NumberColumn(format="%.1f %%", min_value=0, step=1)})
-    st.caption("Precio sugerido = costo × (1 + margen). El margen es sobre el costo: con costo $10.000 y margen 30 % "
-               "el precio neto sugerido es $13.000. Al crear un pedido, estos productos aparecen con su precio ya puesto.")
-    if st.button("Guardar cambios de la tabla", icon=":material/save:"):
+        mostrar_df, hide_index=True, width="stretch",
+        key=f"p_tabla_{E['p_ver']}_{texto}_{filtro}_{mostrar_detalles}",
+        disabled=[
+            "Código", "Foto", "Ficha", "Último precio neto", "Sugerido neto",
+            *(["Sugerido con IVA"] if mostrar_detalles else []),
+        ],
+        column_config=configuracion_columnas,
+    )
+    with st.expander("Cómo se calcula el precio sugerido"):
+        st.caption(
+            "Precio sugerido neto = costo neto × (1 + margen sobre el costo). "
+            "Por ejemplo, un costo de $10.000 con margen de 30 % produce un precio neto "
+            "sugerido de $13.000. La sugerencia con IVA se calcula aparte al 19 %."
+        )
+
+    if st.button("Guardar cambios", icon=":material/save:", type="primary", key="cat_guardar_cambios"):
         cambios = 0
-        for (_, fila), f in zip(editado.iterrows(), filas):
-            nuevos = {"nombre": fila["Producto"], "costo_neto": fila["Costo neto"], "margen_pct": fila["Margen %"],
-                      "notas": fila["Notas"] if isinstance(fila["Notas"], str) else ""}
-            viejos = {"nombre": f["nombre"], "costo_neto": f["costo_neto"], "margen_pct": f["margen_pct"],
-                      "notas": f["notas"] or ""}
-            if any(not (pd.isna(nuevos[k]) and viejos[k] is None) and nuevos[k] != viejos[k] for k in nuevos):
-                bib.actualizar(f["clave"], **nuevos)
+        for (_, fila), producto in zip(editado.iterrows(), filas):
+            notas = (
+                fila["Notas"] if "Notas" in fila.index and isinstance(fila["Notas"], str)
+                else producto.get("notas") or ""
+            )
+            nuevos = {
+                "nombre": str(fila["Producto"] or "").strip() or producto["clave"],
+                "costo_neto": fila["Costo neto"],
+                "margen_pct": fila["Margen %"],
+                "notas": notas,
+            }
+            viejos = {
+                "nombre": producto["nombre"],
+                "costo_neto": producto["costo_neto"],
+                "margen_pct": producto["margen_pct"],
+                "notas": producto["notas"] or "",
+            }
+            distintos = False
+            for campo in nuevos:
+                nuevo, viejo = nuevos[campo], viejos[campo]
+                try:
+                    ambos_vacios = pd.isna(nuevo) and viejo is None
+                except (TypeError, ValueError):
+                    ambos_vacios = False
+                if not ambos_vacios and nuevo != viejo:
+                    distintos = True
+                    break
+            if distintos:
+                bib.actualizar(producto["clave"], **nuevos)
                 cambios += 1
         E["p_ver"] += 1
-        st.success(f"Guardado ({cambios} productos actualizados).")
+        E["p_msg"] = ("ok", f"Guardado: {cambios} producto(s) actualizado(s) en la biblioteca compartida.")
         st.rerun()
 
     st.divider()
+    st.subheader("Detalle del producto")
     codigos = [f["clave"] for f in filas]
-    elegido = st.selectbox("Elige un producto para ver o cambiar su foto y su ficha", codigos, key="p_sel")
-    nombre = next(f["nombre"] for f in filas if f["clave"] == elegido)
-    tarjeta(elegido, nombre)
-    with st.expander("Cambiar el código o eliminar este producto"):
+    elegido = st.selectbox("Selecciona un producto", codigos, key="p_sel")
+    producto_elegido = next(f for f in filas if f["clave"] == elegido)
+    tarjeta(elegido, producto_elegido["nombre"])
+    with st.expander("Acciones avanzadas: cambiar código o eliminar"):
         st.text_input("Nuevo código", key=f"ren_{elegido}")
-        st.checkbox("Si ya existe un producto con ese código, combinarlos", key=f"comb_{elegido}")
-        st.button("Cambiar el código", key=f"renb_{elegido}", on_click=renombrar_producto, args=(elegido,))
+        st.checkbox("Combinar si ese código ya existe", key=f"comb_{elegido}")
+        st.button("Cambiar el código", key=f"renb_{elegido}",
+                  on_click=renombrar_producto, args=(elegido,))
         st.divider()
-        seguro = st.checkbox("Sí, quiero eliminar este producto con su foto y su ficha", key=f"delp_{elegido}")
+        seguro = st.checkbox(
+            "Confirmo que quiero eliminar el producto y sus archivos",
+            key=f"delp_{elegido}",
+        )
         st.button("Eliminar producto", disabled=not seguro, key=f"delpb_{elegido}",
                   on_click=borrar_producto, args=(elegido,))
 
@@ -2415,13 +2846,17 @@ def configuracion_compacta():
                     ),
                     reverse=True,
                 )[:5]
-                df_recientes = pd.DataFrame({
+                datos_recientes = {
                     "N° cotización": [registro.get("numero", "") for registro in recientes],
                     "Fecha": [fecha_corta(registro.get("fecha") or "") for registro in recientes],
-                    "Cliente": [registro.get("cliente") or "Sin cliente" for registro in recientes],
                     "Total": [registro.get("total") or 0 for registro in recientes],
                     "Estado": [registro.get("estado") or "Borrador" for registro in recientes],
-                })
+                }
+                if not GIOVAL_REQUIRE_ACCESS:
+                    datos_recientes["Cliente"] = [
+                        registro.get("cliente") or "Sin cliente" for registro in recientes
+                    ]
+                df_recientes = pd.DataFrame(datos_recientes)
                 st.dataframe(
                     df_recientes,
                     hide_index=True,
@@ -2487,12 +2922,29 @@ def configuracion_compacta():
                 st.success("Numeración guardada.")
 
         with st.expander("Copia de seguridad", expanded=False):
-            st.caption("Incluye la base de datos, catálogo, fotos, fichas y cotizaciones guardadas.")
+            if GIOVAL_REQUIRE_ACCESS:
+                st.caption(
+                    "El ZIP incluye productos, fotos, fichas y el historial comercial compartido; "
+                    "no incluye la libreta de clientes ni PDF/Excel finales con datos personales."
+                )
+            else:
+                st.caption("El ZIP incluye la base de datos, catálogo, fotos, fichas y archivos de cotizaciones.")
+            ultimo_respaldo = hist_panel.config("ultimo_respaldo_preparado")
+            if ultimo_respaldo:
+                try:
+                    fecha_respaldo = datetime.fromisoformat(ultimo_respaldo).strftime("%d/%m/%Y a las %H:%M")
+                except (TypeError, ValueError):
+                    fecha_respaldo = str(ultimo_respaldo)
+                st.caption(f"Último ZIP preparado: {fecha_respaldo}.")
+            else:
+                st.caption("Todavía no se ha preparado un respaldo desde este equipo.")
             if st.button("Preparar respaldo", icon=":material/archive:", key="preparar_respaldo", width="stretch"):
                 try:
                     E["_respaldo_zip"] = crear_respaldo_biblioteca(bib_panel.dir)
-                    E["_respaldo_nombre"] = f"respaldo_giovalia_{datetime.now():%Y%m%d_%H%M%S}.zip"
-                    st.success("Respaldo preparado. Descárgalo y guárdalo fuera de la carpeta del programa.")
+                    ahora_respaldo = datetime.now()
+                    E["_respaldo_nombre"] = f"respaldo_giovalia_{ahora_respaldo:%Y%m%d_%H%M%S}.zip"
+                    hist_panel.set_config("ultimo_respaldo_preparado", ahora_respaldo.isoformat(timespec="seconds"))
+                    st.success("ZIP preparado. Descárgalo y guarda una copia fuera del computador central.")
                 except Exception as exc:
                     E.pop("_respaldo_zip", None)
                     st.error(f"No pude preparar el respaldo: {exc}")
@@ -2505,6 +2957,10 @@ def configuracion_compacta():
                     mime="application/zip",
                     width="stretch",
                     key="descargar_respaldo",
+                )
+                st.caption(
+                    "La fecha indica cuándo se generó el ZIP, no confirma que lo hayas descargado. "
+                    "Guárdalo también en otro disco o ubicación segura."
                 )
 
             if GIOVAL_REQUIRE_ACCESS and GIOVAL_ALLOW_INITIAL_IMPORT:
@@ -2541,7 +2997,7 @@ def configuracion_compacta():
                         st.error(f"No pude importar el respaldo: {exc}")
 
         st.divider()
-        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=lambda: E.clear())
+        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=limpiar_estado_trabajo)
 
     # El contenido del popover se calcula también cuando está cerrado; reutilizamos sus servicios
     # para evitar abrir dos instancias del catálogo y del historial en cada ejecución.
@@ -2550,6 +3006,31 @@ def configuracion_compacta():
         api_key_actual = E.get("config_api_key", "")
     usar_lo = bool(E.get("config_usar_lo", False))
     return carpeta, bib_panel, hist_panel, api_key_actual, usar_lo
+
+
+def guardar_conflicto_como_nueva():
+    """Conserva el trabajo de esta sesión como una cotización nueva sin tocar la versión compartida."""
+    lineas = list(E.get("lineas", []))
+    cliente = cliente_actual()
+    totales = totales_actuales()
+    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+    try:
+        nuevo_id, nuevo_numero = hist.crear(
+            cliente, lineas, totales, con_iva=con_iva,
+            fecha=cliente.get("fecha") or date.today(),
+            origen=E.get("origen_pedido", "pedido"),
+        )
+        E["cot_id"] = nuevo_id
+        E["cot_numero"] = nuevo_numero
+        nuevo_registro = hist.obtener(nuevo_id)
+        E["_cotizacion_version"] = nuevo_registro.get("actualizado") if nuevo_registro else None
+        E.pop("_conflicto_guardado", None)
+        E.pop("_conflicto_guardado_id", None)
+        E.pop("_conflicto_guardado_mensaje", None)
+        E["_mensaje_guardado"] = f"Guardé tus cambios como la cotización nueva {nuevo_numero}. La versión anterior no se modificó."
+        persistir_borrador()
+    except Exception as exc:
+        E["_conflicto_guardado_mensaje"] = f"No pude crear la copia de tus cambios: {exc}"
 
 
 # ============================================================== PANTALLA
@@ -2576,6 +3057,35 @@ if GIOVAL_REQUIRE_ACCESS:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
             E.pop("gioval_autenticado", None)
             st.rerun()
+
+if E.get("_conflicto_guardado"):
+    st.error(
+        "Esta cotización cambió en otra sesión. Para proteger el trabajo del otro usuario, "
+        "Gioval detuvo el guardado de tus cambios. Tu edición sigue abierta en esta pantalla."
+    )
+    if E.get("_conflicto_guardado_mensaje"):
+        st.caption(E["_conflicto_guardado_mensaje"])
+    st.warning("Puedes recargar la versión central —descartando los cambios de esta sesión— o guardarlos como una cotización nueva.")
+    cc1, cc2 = st.columns(2)
+    conflicto_id = E.get("_conflicto_guardado_id") or E.get("cot_id")
+    cc1.button(
+        "Recargar versión compartida",
+        icon=":material/refresh:",
+        width="stretch",
+        on_click=restaurar_borrador,
+        args=(conflicto_id,),
+        key="conflicto_recargar",
+    )
+    cc2.button(
+        "Guardar mis cambios como cotización nueva",
+        icon=":material/content_copy:",
+        type="primary",
+        width="stretch",
+        on_click=guardar_conflicto_como_nueva,
+        key="conflicto_guardar_copia",
+    )
+if E.get("_mensaje_guardado"):
+    st.success(E.pop("_mensaje_guardado"))
 
 with st.container(key="app-navigation"):
     vista = st.radio("Secciones", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
