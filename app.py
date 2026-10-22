@@ -487,7 +487,8 @@ def mostrar_resumen_lineas():
 
 
 def guardar_precios_inventario(lineas: list[dict]):
-    """Aprende/actualiza el último precio neto utilizado para cada producto."""
+    """Aprende precios y alias, guardando el índice una sola vez si hubo cambios."""
+    cambio_indice = False
     for ln in lineas:
         precio_neto = ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")
         if not ln.get("es_producto") or precio_neto is None:
@@ -500,12 +501,31 @@ def guardar_precios_inventario(lineas: list[dict]):
         if not clave:
             continue
         try:
-            bib.registrar(clave, nombre=descripcion or clave,
-                          alias=descripcion or None, precio_neto=float(precio_neto))
-            bib.actualizar(clave, nombre=descripcion or clave, precio_neto=float(precio_neto))
+            precio_neto = float(precio_neto)
+            if pd.isna(precio_neto):
+                continue
         except (TypeError, ValueError):
-            # Una línea incompleta no debe impedir guardar el borrador.
             continue
+
+        ficha = bib.indice.setdefault(clave, {"nombre": descripcion or clave, "aliases": []})
+        nombre = descripcion or clave
+        if ficha.get("nombre") != nombre:
+            ficha["nombre"] = nombre
+            cambio_indice = True
+        if ficha.get("precio_neto") != precio_neto:
+            ficha["precio_neto"] = precio_neto
+            cambio_indice = True
+        aliases = ficha.setdefault("aliases", [])
+        if not isinstance(aliases, list):
+            aliases = ficha["aliases"] = []
+            cambio_indice = True
+        alias = ct.normalizar(descripcion)
+        if len(alias) >= 6 and alias not in aliases:
+            aliases.append(alias)
+            cambio_indice = True
+
+    if cambio_indice:
+        bib._guardar_indice()
 
 
 def persistir_borrador():
@@ -598,8 +618,7 @@ def marcar_cambios_cabecera():
         E["editado_manual"] = True
         for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
             E.pop(k, None)
-        if E.get("lineas") and E.get("ruta"):
-            refrescar_excel_actual()
+        # El Excel se actualiza al pedir el recálculo o antes de generar el PDF.
     E["_snapshot_cabecera"] = estado_actual
     return cambio
 
@@ -675,10 +694,10 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
         E["editado_manual"] = True
         for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
             E.pop(k, None)
-    guardar_precios_inventario(nuevas)
-    persistir_borrador()
-    if cambio:
-        refrescar_excel_actual()
+        guardar_precios_inventario(nuevas)
+        # El Excel se regenera al pulsar "Actualizar totales" o al crear el PDF.
+        # Evita operaciones de disco pesadas durante la edición normal de cada celda.
+        persistir_borrador()
 
 
 def editor_productos():
@@ -702,6 +721,32 @@ def editor_productos():
     )
     sincronizar_editor_productos(editada)
     return editada
+
+
+def boton_actualizar_totales():
+    """Fuerza el recálculo visible y guarda los datos actuales del borrador."""
+    c_boton, c_ayuda = st.columns([1.25, 3])
+    with c_boton:
+        actualizar = st.button(
+            "↻ Actualizar totales",
+            key=f"actualizar_totales_{int(E.get('paso', 1))}",
+            help="Confirma el precio editado, recalcula los importes y guarda el borrador.",
+            width="stretch",
+        )
+    with c_ayuda:
+        st.caption("Si el importe no cambia al editar una celda, confirma con Enter o haz clic fuera y pulsa «Actualizar totales».")
+
+    if actualizar:
+        persistir_borrador()
+        # Actualiza el Excel intermedio solo a petición del usuario; nunca se hace
+        # durante cada cambio de celda. En la generación final se vuelve a actualizar.
+        try:
+            if E.get("lineas") and E.get("ruta"):
+                refrescar_excel_actual()
+        except Exception as exc:
+            st.warning(f"El cálculo está actualizado, pero el Excel intermedio no se regeneró: {exc}")
+        E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        st.success("Totales recalculados y borrador guardado.")
 
 
 def refrescar_excel_actual():
@@ -983,6 +1028,7 @@ def pedido_ui():
     E["tabla"] = tabla_desde_lineas(lineas_orden)
     E["tabla_edit"] = E["tabla"].copy()
     E["origen_pedido"] = "pedido"
+    boton_actualizar_totales()
     mostrar_totales()
 
     sin_precio = [ln["descripcion"][:45] for ln in lineas_orden
@@ -1142,9 +1188,10 @@ def paso_2():
 
     agregar_desde_catalogo()
     editor_productos()
+    boton_actualizar_totales()
+    mostrar_totales()
     mostrar_resumen_lineas()
     editar_cabecera()
-    mostrar_totales()
     panel_revision()
 
     atras, sigue = st.columns(2)
@@ -1325,9 +1372,10 @@ def paso_3():
     st.header("3. Fotos y fichas técnicas")
     st.caption("La lista y los precios siguen editables en esta etapa. Los cambios se guardan en el borrador.")
     editor_productos()
+    boton_actualizar_totales()
+    mostrar_totales()
     mostrar_resumen_lineas()
     editar_cabecera()
-    mostrar_totales()
     claves, descripciones = datos_productos()
     if not claves:
         st.warning("No hay productos seleccionados. Marca al menos uno en el paso anterior.")
@@ -1499,9 +1547,10 @@ def paso_4():
     if "pdf_bytes" not in E:
         st.write("Esta es la última oportunidad para corregir los productos, cantidades, códigos, precios y datos del cliente antes de crear el PDF.")
         editor_productos()
+        boton_actualizar_totales()
+        mostrar_totales()
         mostrar_resumen_lineas()
         editar_cabecera()
-        mostrar_totales()
 
         claves, _ = datos_productos()
         con_foto = sum(1 for c in claves if bib.archivos(c)[0])
