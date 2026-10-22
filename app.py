@@ -2334,14 +2334,33 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         E["c_fecha"] = date.today()
     if mantener:
         E["cot_id"] = cot_id
+        E["cot_numero"] = rec["numero"]
         E["_cotizacion_version"] = rec.get("actualizado")
     else:
-        E.pop("cot_id", None)
-        E.pop("_cotizacion_version", None)
+        lineas_totales = [
+            {
+                "cantidad": ln.get("cantidad", 1),
+                "precio_neto": ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"),
+            }
+            for ln in lineas if _esta_marcado(ln.get("incluir"), True)
+        ]
+        totales_nuevos = rv.totales_de(lineas_totales)
+        cliente_nuevo = cliente_actual()
+        nuevo_id, nuevo_numero = hist.crear(
+            cliente_nuevo, lineas, totales_nuevos, con_iva=con_iva,
+            fecha=E.get("c_fecha", date.today()),
+            origen=datos.get("origen_pedido", rec.get("origen", "pedido")),
+        )
+        E["cot_id"] = nuevo_id
+        E["cot_numero"] = nuevo_numero
+        nuevo_registro = hist.obtener(nuevo_id)
+        E["_cotizacion_version"] = nuevo_registro.get("actualizado") if nuevo_registro else None
+    E["lineas"] = lineas
     E.pop("_conflicto_guardado", None)
     E.pop("_conflicto_guardado_id", None)
     E.pop("_conflicto_guardado_mensaje", None)
     E["paso"], E["vista"] = 1, VISTAS[0]
+    persistir_borrador()
 
 
 def historial_cotizaciones():
