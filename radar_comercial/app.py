@@ -668,7 +668,7 @@ elif vista_actual == "Radar de oportunidades":
             hide_index=True, width="stretch",
             column_config={"Presupuesto ref. CLP": st.column_config.NumberColumn(format="$ %d")},
         )
-        claves = [r["codigo"] for r in lista]
+        claves = [r["codigo"] for r in lista[:limite_tabla]]
         if st.session_state.get("radar_opportunity_selected") not in claves:
             st.session_state["radar_opportunity_selected"] = claves[0]
         elegido = st.selectbox(
