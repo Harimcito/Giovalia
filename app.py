@@ -61,7 +61,7 @@ def preparar_tema() -> bool:
 
 TEMA_ACTIVO = preparar_tema()
 
-st.set_page_config(page_title="Giovalia · Cotizador comercial", page_icon=":material/description:",
+st.set_page_config(page_title="Gioval · Cotizador comercial", page_icon=":material/description:",
                    layout="wide", initial_sidebar_state="collapsed")
 
 CSS_BASE = """
@@ -127,71 +127,56 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 """
 
 CSS_TINTA = """
-.stApp {
-    background:
-        radial-gradient(circle at 8% 0%, rgba(33,140,141,.10), transparent 28rem),
-        radial-gradient(circle at 96% 16%, rgba(61,129,187,.07), transparent 26rem),
-        #F5F7FA;
-    color: #193344;
-}
-[data-testid="stHeader"] { background: rgba(245,247,250,.94); }
-[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none !important; }
-h1, h2, h3 { color: #193344; letter-spacing: -.012em; }
-h1.titulo { font-size: 2.15rem; font-weight: 780; margin: 0 0 .75rem 0; padding: 0; color: #17394F; }
-.gota { display: inline-flex; align-items: center; justify-content: center; width: 1.2em; height: 1.2em; margin-right: .5rem; vertical-align: -.08em; border-radius: 6px; background: #176B7A; box-shadow: 0 3px 9px rgba(23,107,122,.2); }
-.gota::after { content: "G"; color: #FFFFFF; font-size: .65em; font-weight: 800; line-height: 1; }
-button[kind="primary"], [data-testid="stBaseButton-primary"] {
-    background: linear-gradient(115deg, #176B7A 0%, #218C8D 100%);
-    border: 1px solid #176B7A; color: #FFFFFF;
-    box-shadow: 0 3px 8px rgba(23,107,122,.17);
-}
-button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
-    background: linear-gradient(115deg, #125967 0%, #176B7A 100%);
-    border-color: #125967; color: #FFFFFF; transform: translateY(-1px);
-    box-shadow: 0 5px 12px rgba(23,107,122,.2);
-}
-button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled { opacity: .5; box-shadow: none; transform: none; }
-button[kind="secondary"], [data-testid="stBaseButton-secondary"] {
-    background: rgba(255,255,255,.88); border: 1px solid #CDD8E1; color: #193344;
-}
-button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #EFF8F7; border-color: #63A7A5; }
-[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) {
-    background: #FFFFFF; border: 1px solid #DCE6EC; border-radius: 14px;
-    box-shadow: 0 4px 15px rgba(25,51,68,.045);
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-testid="stMetric"]) {
-    background: linear-gradient(155deg, #FFFFFF 0%, #F8FCFC 100%);
-    border-radius: 13px;
-}
-[data-testid="stMetric"] {
-    border-top: 3px solid #73B9AF !important;
-    box-shadow: 0 3px 10px rgba(25,51,68,.025);
-    transition: box-shadow .16s ease, transform .16s ease;
-}
-[data-testid="stMetric"]:hover { box-shadow: 0 5px 14px rgba(25,51,68,.075); transform: translateY(-1px); }
-[data-testid="stTabs"] [data-baseweb="tab-list"] { gap: .35rem; border-bottom: 1px solid #D7E0E7; }
-[data-testid="stTabs"] button[role="tab"] { font-size: 1rem; font-weight: 650; padding: .7rem .95rem; }
-[data-testid="stProgress"] > div > div { background: linear-gradient(90deg, #176B7A, #52AFA6); }
-.inicio-hero {
-    position: relative; overflow: hidden;
-    background:
-        radial-gradient(circle at 92% 5%, rgba(255,255,255,.19) 0, transparent 13rem),
-        radial-gradient(circle at 80% 115%, rgba(92,199,183,.23) 0, transparent 18rem),
-        linear-gradient(118deg, #17394F 0%, #176B7A 62%, #238D8A 100%);
-    border: 1px solid rgba(255,255,255,.18); border-radius: 17px;
-    padding: 29px 30px; margin: 4px 0 22px;
-    box-shadow: 0 10px 24px rgba(23,75,91,.14);
-}
-.inicio-hero h2 { margin: 5px 0 8px; color: #FFFFFF; font-size: 1.82rem !important; }
-.inicio-hero p { margin: 0; color: rgba(255,255,255,.88); font-size: 1.02rem; line-height: 1.62; max-width: 850px; }
-.inicio-kicker { color: #BCECE3; font-size: .78rem; font-weight: 800; letter-spacing: .12em; }
-.st-key-settings-popover button { border-radius: 9px; min-height: 2.65rem; box-shadow: 0 2px 6px rgba(25,51,68,.04); }
-[data-testid="stPopover"] { border-radius: 13px; }
-@media (max-width: 800px) {
-    h1.titulo { font-size: 1.8rem; }
-    .inicio-hero { padding: 22px 21px; }
-    .inicio-hero h2 { font-size: 1.55rem !important; }
-}
+:root { --gioval-ink:#15354B; --gioval-blue:#176B7A; --gioval-teal:#2B9691; --gioval-mint:#DFF2ED; --gioval-paper:#F4F7FA; --gioval-line:#DCE5EC; --gioval-muted:#5D7180; --gioval-warm:#F1A64A; }
+.stApp { background:radial-gradient(ellipse at 0% 0%,rgba(43,150,145,.12),transparent 34rem),radial-gradient(ellipse at 100% 9%,rgba(241,166,74,.09),transparent 25rem),linear-gradient(180deg,#F8FAFC 0%,#F2F6F9 100%); color:var(--gioval-ink); }
+[data-testid="stHeader"] { background:rgba(248,250,252,.94); }
+[data-testid="stSidebar"],[data-testid="stSidebarCollapsedControl"] { display:none !important; }
+h1,h2,h3 { color:var(--gioval-ink); letter-spacing:-.018em; }
+h1.titulo { font-size:1.92rem; font-weight:800; margin:0; padding:0; color:var(--gioval-ink); line-height:1.15; }
+.marca-app { display:flex; align-items:center; gap:13px; min-height:58px; }
+.marca-simbolo { position:relative; display:inline-flex; align-items:center; justify-content:center; flex:0 0 47px; width:47px; height:47px; border-radius:14px; background:linear-gradient(145deg,#15354B 0%,#176B7A 76%,#2B9691 100%); box-shadow:0 6px 14px rgba(21,53,75,.18); }
+.marca-simbolo::before { content:"G"; color:#FFFFFF; font-size:1.65rem; font-weight:850; letter-spacing:-.09em; transform:translateX(-1px); }
+.marca-simbolo::after { content:""; position:absolute; width:8px; height:8px; border-radius:50%; background:var(--gioval-warm); right:8px; top:8px; border:2px solid #15354B; }
+.marca-texto { display:flex; flex-direction:column; gap:3px; }
+.marca-nombre { color:var(--gioval-ink); font-size:1.48rem; font-weight:850; letter-spacing:-.04em; line-height:1.05; }
+.marca-descripcion { color:var(--gioval-muted); font-size:.88rem; font-weight:550; line-height:1.3; }
+.marca-pill { display:inline-flex; width:fit-content; align-items:center; margin-top:4px; padding:3px 9px; border:1px solid #C9E6DE; border-radius:999px; background:#E8F5F1; color:#28695F; font-size:.74rem; font-weight:750; }
+button[kind="primary"],[data-testid="stBaseButton-primary"] { background:linear-gradient(115deg,#176B7A 0%,#238D8A 100%); border:1px solid #176B7A; color:#FFFFFF; box-shadow:0 4px 10px rgba(23,107,122,.16); }
+button[kind="primary"]:hover,[data-testid="stBaseButton-primary"]:hover { background:linear-gradient(115deg,#125967 0%,#176B7A 100%); border-color:#125967; color:#FFFFFF; transform:translateY(-1px); box-shadow:0 6px 15px rgba(23,107,122,.2); }
+button[kind="primary"]:disabled,[data-testid="stBaseButton-primary"]:disabled { opacity:.48; box-shadow:none; transform:none; }
+button[kind="secondary"],[data-testid="stBaseButton-secondary"] { background:#FFFFFF; border:1px solid #CFDCE5; color:var(--gioval-ink); box-shadow:0 2px 6px rgba(21,53,75,.035); }
+button[kind="secondary"]:hover,[data-testid="stBaseButton-secondary"]:hover { background:#EDF7F5; border-color:#7DBAB2; }
+.stButton > button,.stDownloadButton > button { border-radius:10px; }
+.st-key-settings-popover button { border-radius:11px; min-height:2.55rem; box-shadow:0 2px 6px rgba(21,53,75,.045); }
+[data-testid="stPopover"] { border-radius:13px; }
+[data-testid="stPopoverBody"] { border:1px solid var(--gioval-line); box-shadow:0 14px 38px rgba(21,53,75,.14); }
+[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) { background:#FFFFFF; border:1px solid var(--gioval-line); border-radius:15px; box-shadow:0 5px 18px rgba(21,53,75,.055); }
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-testid="stMetric"]) { background:linear-gradient(155deg,#FFFFFF 0%,#F8FCFC 100%); border:1px solid #E1E9EE; border-radius:15px; box-shadow:0 4px 14px rgba(21,53,75,.035); }
+[data-testid="stMetric"] { border:0 !important; border-top:3px solid #75BDB2 !important; border-radius:12px; background:transparent; padding:13px 15px; transition:box-shadow .16s ease,transform .16s ease; }
+[data-testid="stMetric"]:hover { box-shadow:0 5px 14px rgba(21,53,75,.075); transform:translateY(-1px); }
+[data-testid="stMetricLabel"] { color:var(--gioval-muted); font-weight:650; }
+[data-testid="stMetricValue"] { color:var(--gioval-ink); font-weight:820; }
+[data-testid="stTabs"] [data-baseweb="tab-list"] { gap:.45rem; border-bottom:1px solid var(--gioval-line); }
+[data-testid="stTabs"] button[role="tab"] { font-size:1rem; font-weight:700; padding:.72rem 1rem; border-radius:10px 10px 0 0; }
+[data-testid="stProgress"] > div > div { background:linear-gradient(90deg,#176B7A,#48AAA0); }
+[data-testid="stAlert"] { border-radius:12px; }
+[data-testid="stExpander"] { background:rgba(255,255,255,.75); border-radius:12px; }
+.st-key-app-navigation { margin:.65rem 0 1.35rem; padding:.35rem .45rem 0; border:1px solid #E0E8EE; border-bottom:2px solid #D5E4E8; border-radius:13px 13px 0 0; background:rgba(255,255,255,.76); }
+.st-key-app-navigation [data-testid="stRadio"] div[role="radiogroup"] { gap:.3rem; border:0; background:transparent; align-items:stretch; }
+.st-key-app-navigation [data-testid="stRadio"] label { border:0 !important; border-bottom:3px solid transparent !important; border-radius:9px 9px 0 0 !important; background:transparent !important; padding:.75rem 1.05rem .65rem !important; margin:0 !important; color:#617583; font-weight:650; min-height:2.85rem; }
+.st-key-app-navigation [data-testid="stRadio"] label:hover { background:#EAF5F3 !important; color:#176B7A !important; }
+.st-key-app-navigation [data-testid="stRadio"] label:has([aria-checked="true"]) { color:#15354B !important; border-bottom-color:#F1A64A !important; background:#F3FAF8 !important; font-weight:800; }
+.st-key-app-navigation [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child { display:none !important; }
+.inicio-hero { position:relative; overflow:hidden; background:radial-gradient(circle at 90% 0%,rgba(255,255,255,.17) 0,transparent 13rem),radial-gradient(circle at 82% 120%,rgba(91,201,180,.23) 0,transparent 18rem),linear-gradient(118deg,#15354B 0%,#176B7A 58%,#238D8A 100%); border:1px solid rgba(255,255,255,.22); border-radius:20px; padding:30px 32px; margin:6px 0 20px; box-shadow:0 12px 26px rgba(21,53,75,.15); }
+.inicio-hero::after { content:""; position:absolute; width:190px; height:190px; right:-54px; bottom:-102px; border:1px solid rgba(255,255,255,.18); border-radius:50%; box-shadow:0 0 0 24px rgba(255,255,255,.045),0 0 0 50px rgba(255,255,255,.035); pointer-events:none; }
+.inicio-kicker { color:#BCECE3; font-size:.78rem; font-weight:850; letter-spacing:.13em; }
+.inicio-hero h2 { margin:7px 0 9px; color:#FFFFFF; font-size:1.9rem !important; line-height:1.2; }
+.inicio-hero p { margin:0; color:rgba(255,255,255,.91); font-size:1.02rem; line-height:1.65; max-width:780px; }
+.inicio-badges { display:flex; flex-wrap:wrap; gap:8px; margin-top:17px; }
+.inicio-badge { display:inline-flex; align-items:center; border:1px solid rgba(255,255,255,.28); background:rgba(255,255,255,.10); color:#FFFFFF; border-radius:999px; padding:5px 10px; font-size:.82rem; font-weight:650; }
+.inicio-section-label { color:#617583; font-size:.78rem; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
+[data-testid="stDataFrame"],[data-testid="stDataEditor"] { border-radius:11px; }
+@media (max-width:800px) { h1.titulo{font-size:1.7rem;} .marca-app{gap:10px;} .marca-simbolo{flex-basis:41px;width:41px;height:41px;} .marca-nombre{font-size:1.28rem;} .marca-descripcion{font-size:.8rem;} .inicio-hero{padding:22px 21px;} .inicio-hero h2{font-size:1.55rem !important;} .st-key-app-navigation{padding:.2rem .2rem 0;} .st-key-app-navigation [data-testid="stRadio"] label{padding:.58rem .68rem !important;} }
 """
 CSS_ANIMACION = """
 @keyframes tinta { 0% { background-position: 0% 0%, 100% 0%, 60% 100%, 0% 100%, 0 0; }
@@ -231,8 +216,10 @@ ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
 
 
 # ============================================================== FUNCIONES COMUNES
-VISTAS = ["Nueva cotización", "Historial", "Mis productos"]
+VISTAS = ["Nueva cotización", "Historial", "Catálogo"]
 OPCIONES_PRECIO = ["Incluyen IVA (lo que paga el cliente)", "Son netos (sin IVA)"]
+if E.get("vista") == "Mis productos":
+    E["vista"] = "Catálogo"
 E.setdefault("vista", VISTAS[0])
 
 
@@ -906,9 +893,16 @@ def selector_borradores():
             borradores.append(reg)
 
     st.markdown(
-        '<div class="inicio-hero"><div class="inicio-kicker">ESPACIO DE TRABAJO</div>'
-        '<h2>Tu cotizador comercial</h2>'
-        '<p>Prepara una cotización, completa sus anexos técnicos y conserva el trabajo en tu biblioteca local.</p></div>',
+        '<section class="inicio-hero">'
+        '<div class="inicio-kicker">COTIZADOR COMERCIAL · GIOVAL</div>'
+        '<h2>Cotizaciones claras, listas para tus clientes.</h2>'
+        '<p>Gestiona pedidos, precios, fotos y fichas técnicas en un solo lugar. '
+        'Prepara una propuesta ordenada, revisa los totales y descarga un PDF profesional para compartir.</p>'
+        '<div class="inicio-badges">'
+        '<span class="inicio-badge">Atención cercana</span>'
+        '<span class="inicio-badge">Soluciones para empresas y personas</span>'
+        '<span class="inicio-badge">Experiencia local en el norte</span>'
+        '</div></section>',
         unsafe_allow_html=True,
     )
     m1, m2, m3, m4 = st.columns(4)
@@ -919,11 +913,15 @@ def selector_borradores():
 
     a, b = st.columns([3, 2])
     with a:
-        st.subheader("Acciones rápidas")
-        st.button("Nueva cotización", icon=":material/add_circle:", type="primary", width="stretch", on_click=iniciar_borrador,
+        st.markdown('<div class="inicio-section-label">Empezar</div>', unsafe_allow_html=True)
+        st.subheader("¿Preparamos una cotización?")
+        st.caption("Crea un pedido nuevo o continúa con un trabajo pendiente.")
+        st.button("Crear nueva cotización", icon=":material/add_circle:", type="primary", width="stretch", on_click=iniciar_borrador,
                   key="inicio_nueva_cotizacion")
     with b:
-        st.subheader("Seguimiento")
+        st.markdown('<div class="inicio-section-label">Control comercial</div>', unsafe_allow_html=True)
+        st.subheader("Revisa tu actividad")
+        st.caption("Consulta cotizaciones anteriores y vuelve a contactar a tus clientes.")
         st.button("Abrir historial", icon=":material/history:", width="stretch",
                   on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial")
 
@@ -995,7 +993,7 @@ def pedido_ui():
                                        accept_multiple_files=True, key="orden_ia")
         st.caption("El pedido se envía a OpenAI para leerlo. Después revisa que haya quedado bien.")
         if not api_key:
-            st.warning("Para leer PDF o fotos necesito la clave de OpenAI (Ajustes, arriba a la izquierda).")
+            st.warning("Para leer PDF o fotos necesito la clave de OpenAI (Ajustes, arriba a la derecha).")
 
     if st.button("Leer el pedido", icon=":material/description:", type="primary", width="stretch"):
         try:
@@ -1158,7 +1156,7 @@ def cotizacion_ui():
 def paso_1():
     st.header("1. ¿Qué tienes?")
     if not api_key:
-        st.info("Con la clave de OpenAI (en Ajustes, arriba a la izquierda) entiendo mucho mejor los "
+        st.info("Con la clave de OpenAI (en Ajustes, arriba a la derecha) entiendo mucho mejor los "
                 "productos y puedo leer pedidos en PDF o foto.")
     tab_pedido, tab_cot = st.tabs(["Tengo un pedido", "Ya tengo la cotización hecha"])
     with tab_pedido:
@@ -1172,7 +1170,7 @@ def agregar_desde_catalogo():
     with st.expander("Agregar producto desde mi catálogo", expanded=False):
         filas = bib.filas_catalogo()
         if not filas:
-            st.info("Todavía no hay productos en el catálogo. Puedes agregarlos en «Mis productos».")
+            st.info("Todavía no hay productos en el catálogo. Puedes agregarlos aquí o desde una cotización.")
             return
         busqueda = st.text_input("Buscar por código o nombre", key="catalogo_busqueda",
                                  placeholder="Ej.: CF283A, tóner HP, resma oficio")
@@ -1820,7 +1818,7 @@ def borrar_producto(clave: str):
 
 def vista_productos():
     E.setdefault("p_ver", 0)
-    st.header("Mis productos")
+    st.header("Catálogo de productos")
     st.write("Aquí están los productos que he aprendido. Puedes corregir nombres, anotar el **costo** y el **margen** "
              "para que te sugiera el precio de venta, y cambiar su foto o su ficha.")
     if "p_msg" in E:
@@ -2000,20 +1998,24 @@ def configuracion_compacta():
 
 
 # ============================================================== PANTALLA
-# Barra superior compacta: identidad a la izquierda y ajustes a demanda a la derecha.
+# Identidad visual alineada con Gioval.cl: marca, rubro y configuración secundaria.
 col_marca, col_ajustes = st.columns([6, 1])
 with col_marca:
-    if TEMA_ACTIVO:
-        st.markdown('<h1 class="titulo"><span class="gota"></span>Giovalia · Cotizador comercial</h1>',
-                    unsafe_allow_html=True)
-    else:
-        st.title("Giovalia · Cotizador comercial", icon=":material/receipt_long:")
-        st.info("El diseño se acaba de instalar. Actualiza la página si los cambios aún no aparecen.")
+    st.markdown(
+        '<div class="marca-app">'
+        '<span class="marca-simbolo" aria-hidden="true"></span>'
+        '<div class="marca-texto">'
+        '<div class="marca-nombre">Gioval</div>'
+        '<div class="marca-descripcion">Tintas, tóners y artículos de oficina</div>'
+        '<div class="marca-pill">Cotizador comercial</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
 with col_ajustes:
     carpeta, bib, hist, api_key, usar_lo = configuracion_compacta()
 
 with st.container(key="app-navigation"):
-    vista = st.radio("Ir a", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
+    vista = st.radio("Secciones", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
 if vista == VISTAS[1]:
     vista_historial()
 elif vista == VISTAS[2]:
