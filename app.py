@@ -1395,59 +1395,100 @@ def restaurar_borrador(cot_id: int):
 
 
 def selector_borradores():
-    """Panel de inicio: accesos rápidos, métricas y borradores para retomar."""
-    borradores = []
-    for reg in hist.listar("", "Borrador"):
-        pdf = Path(reg["pdf"]) if reg.get("pdf") else None
-        if not pdf or not pdf.exists():
-            borradores.append(reg)
+    """Inicio operativo: atajos, indicadores, borradores y cotizaciones recientes."""
+    registros = hist.listar()
+    borradores = [r for r in registros if r.get("estado") == "Borrador"]
+    cotizaciones_aceptadas = sum(
+        float(r.get("total") or 0) for r in registros if r.get("estado") == "Aceptada"
+    )
 
     st.markdown(
         '<section class="inicio-hero">'
-        '<div class="inicio-kicker">WORKSPACE / GIOVAL&nbsp;&nbsp; · &nbsp;&nbsp;COTIZACIONES</div>'
-        '<h2>De tu pedido a una cotización lista.</h2>'
-        '<p>Gestiona pedidos, precios, fotos y fichas técnicas en un espacio de trabajo. '
-        'Prepara una propuesta ordenada, revisa los totales y descarga un PDF profesional para compartir.</p>'
-        '<div class="inicio-badges">'
-        '<span class="inicio-badge">Atención cercana</span>'
-        '<span class="inicio-badge">Soluciones para empresas y personas</span>'
-        '<span class="inicio-badge">Experiencia local en el norte</span>'
-        '</div></section>',
+        '<div class="inicio-kicker">GIOVAL / ESPACIO DE TRABAJO</div>'
+        '<h2>Tu jornada comercial empieza aquí.</h2>'
+        '<p>Prepara cotizaciones, consulta precios y completa la biblioteca de productos '
+        'desde un solo lugar.</p>'
+        '</section>',
         unsafe_allow_html=True,
     )
-    a, b = st.columns([3, 2])
-    with a:
-        st.markdown('<div class="inicio-section-label">Empezar</div>', unsafe_allow_html=True)
-        st.subheader("¿Preparamos una cotización?")
-        st.caption("Crea un pedido nuevo o continúa con un trabajo pendiente.")
-        st.button("Crear nueva cotización", icon=":material/add_circle:", type="primary", width="stretch", on_click=iniciar_borrador,
-                  key="inicio_nueva_cotizacion")
-    with b:
-        st.markdown('<div class="inicio-section-label">Control comercial</div>', unsafe_allow_html=True)
-        st.subheader("Revisa tu actividad")
-        st.caption("Consulta cotizaciones anteriores y vuelve a contactar a tus clientes.")
-        st.button("Abrir historial", icon=":material/history:", width="stretch",
-                  on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial")
+
+    a, b, c_btn = st.columns([1.5, 1, 1])
+    a.button(
+        "Nueva cotización", icon=":material/add_circle:", type="primary",
+        width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
+    )
+    b.button(
+        "Historial", icon=":material/history:", width="stretch",
+        on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial",
+    )
+    c_btn.button(
+        "Catálogo", icon=":material/inventory_2:", width="stretch",
+        on_click=lambda: E.update(vista=VISTAS[2]), key="inicio_abrir_catalogo",
+    )
 
     st.divider()
-    st.subheader("Retomar un borrador")
-    if borradores:
-        opciones = {
-            f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}": r["id"]
-            for r in borradores
-        }
-        elegido = st.selectbox("Selecciona una cotización sin terminar", list(opciones), key="borrador_a_retomar")
-        c1, c2 = st.columns(2)
-        c1.button(
-            "Retomar borrador", icon=":material/play_arrow:", type="primary", width="stretch",
-            on_click=restaurar_borrador, args=(opciones[elegido],), key="inicio_retomar_borrador",
-        )
-        c2.button("Iniciar otro borrador", icon=":material/add_circle:", width="stretch",
-                  on_click=iniciar_borrador, key="inicio_otro_borrador")
-    else:
-        st.info("No tienes borradores pendientes. Cuando inicies una cotización, podrás retomarla desde aquí aunque se cierre la aplicación.")
-        st.button("Comenzar ahora →", type="primary", width="stretch",
-                  on_click=iniciar_borrador, key="inicio_comenzar_ahora")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Cotizaciones", len(registros))
+    m2.metric("Borradores", len(borradores))
+    m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas))
+    m4.metric("Productos", len(bib.indice))
+
+    izq, der = st.columns([1.15, 1])
+    with izq:
+        st.subheader("Retomar trabajo")
+        if borradores:
+            opciones = {
+                (
+                    f"{r['numero']} · {fecha_corta(r.get('fecha') or '')}"
+                    if GIOVAL_REQUIRE_ACCESS
+                    else f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}"
+                ): r["id"]
+                for r in borradores
+            }
+            elegido = st.selectbox(
+                "Borradores pendientes", list(opciones),
+                key="borrador_a_retomar",
+                label_visibility="collapsed",
+            )
+            c1, c2 = st.columns(2)
+            c1.button(
+                "Continuar borrador", icon=":material/play_arrow:", type="primary",
+                width="stretch", on_click=restaurar_borrador, args=(opciones[elegido],),
+                key="inicio_retomar_borrador",
+            )
+            c2.button(
+                "Nuevo borrador", icon=":material/add:", width="stretch",
+                on_click=iniciar_borrador, key="inicio_otro_borrador",
+            )
+        else:
+            st.info("No hay borradores pendientes. Crea una cotización para comenzar.")
+            st.button(
+                "Crear cotización", icon=":material/add_circle:", type="primary",
+                width="stretch", on_click=iniciar_borrador, key="inicio_comenzar_ahora",
+            )
+    with der:
+        st.subheader("Cotizaciones recientes")
+        if registros:
+            recientes = registros[:5]
+            tabla = {
+                "N°": [r.get("numero", "") for r in recientes],
+                "Fecha": [fecha_corta(r.get("fecha") or "") for r in recientes],
+                "Total": [r.get("total") or 0 for r in recientes],
+                "Estado": [r.get("estado") or "Borrador" for r in recientes],
+            }
+            if not GIOVAL_REQUIRE_ACCESS:
+                tabla["Cliente"] = [r.get("cliente") or "Sin cliente" for r in recientes]
+            st.dataframe(
+                pd.DataFrame(tabla), hide_index=True, width="stretch",
+                column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
+            )
+            st.button(
+                "Ver todas las cotizaciones →", width="stretch",
+                on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_ver_todas",
+            )
+        else:
+            st.caption("Las cotizaciones que prepares aparecerán aquí.")
+
 
 # ============================================================== PASO 1: PEDIDO
 def aplicar_cliente_guardado():
