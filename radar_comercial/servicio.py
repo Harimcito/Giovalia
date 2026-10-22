@@ -833,10 +833,11 @@ class RadarStore:
                 archivo_zip.write(copia_db, arcname="radar_comercial.db")
                 archivo_zip.writestr(
                     "LEEME.txt",
-                    "Respaldo de Radar Comercial Gioval.\\n"
-                    "Contiene oportunidades, seguimiento y evaluaciones.\\n"
-                    "No contiene el catálogo ni el historial del cotizador, que se respaldan por separado.\\n"
-                    "Para restaurarlo, detén Radar y reemplaza radar_comercial.db en el directorio de datos.\\n",
+                    """Respaldo de Radar Comercial Gioval.
+Contiene oportunidades, seguimiento y evaluaciones.
+No contiene el catálogo ni el historial del cotizador, que se respaldan por separado.
+Para restaurarlo, detén Radar y reemplaza radar_comercial.db en el directorio de datos.
+""",
                 )
             return salida.getvalue()
 
