@@ -1177,8 +1177,8 @@ def refrescar_excel_actual():
     cot_id = E.get("cot_id")
     if not cot_id or "lineas" not in E:
         return
-    if E.get("origen_pedido") == "cotizacion" and not E.get("editado_manual", False):
-        return  # Si no se editó, se respeta el Excel original subido.
+    if E.get("origen_pedido") == "cotizacion" and not E.get("editado_manual", False) and not GIOVAL_REQUIRE_ACCESS:
+        return  # En modo local se respeta el Excel subido; el espacio compartido lo regenera sin datos de cliente.
     registro = hist.obtener(cot_id)
     if not registro:
         return
@@ -1195,10 +1195,14 @@ def refrescar_excel_actual():
     cliente["numero"] = registro["numero"]
     ruta_tmp = Path(tempfile.mkdtemp()) / "cotizacion_actualizada.xlsx"
     ct.crear_cotizacion_xlsx(lineas_excel, cliente, ruta_tmp)
-    hist.guardar_archivos(cot_id, xlsx=ruta_tmp)
-    registro = hist.obtener(cot_id)
-    if registro and registro.get("xlsx"):
-        E["ruta"] = Path(registro["xlsx"])
+    if GIOVAL_REQUIRE_ACCESS:
+        # El Excel contiene los datos del cliente de esta sesión: queda temporal y solo se descarga.
+        E["ruta"] = ruta_tmp
+    else:
+        hist.guardar_archivos(cot_id, xlsx=ruta_tmp)
+        registro = hist.obtener(cot_id)
+        if registro and registro.get("xlsx"):
+            E["ruta"] = Path(registro["xlsx"])
 
 
 def iniciar_borrador():
@@ -1259,6 +1263,22 @@ def restaurar_borrador(cot_id: int):
         if not df.empty:
             df["Cantidad"] = pd.to_numeric(df["Cantidad"], errors="coerce")
             df["Precio unitario"] = pd.to_numeric(df["Precio unitario"], errors="coerce")
+        E["orden_df"] = df
+        E["orden_df_base"] = df.copy()
+        E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
+    elif lineas_restauradas:
+        # Reconstruye la tabla desde la lista comercial saneada, sin requerir
+        # el pedido fuente ni un Excel que pudiera contener datos del cliente.
+        df = pd.DataFrame({
+            "Incluir": [_esta_marcado(ln.get("incluir"), True) for ln in lineas_restauradas],
+            "Cantidad": [ln.get("cantidad", 1) for ln in lineas_restauradas],
+            "Producto": [ln.get("descripcion", "") for ln in lineas_restauradas],
+            "Precio unitario": [ct.precio_para_mostrar(
+                ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"),
+                bool(registro.get("con_iva", 1)))
+                if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None
+                for ln in lineas_restauradas],
+        })
         E["orden_df"] = df
         E["orden_df_base"] = df.copy()
         E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
@@ -1503,7 +1523,10 @@ def pedido_ui():
         except Exception as exc:
             st.error(f"No pude guardar el borrador. Los datos siguen en pantalla: {exc}")
             return
-        E["ruta"] = Path(hist.obtener(E["cot_id"])["xlsx"])
+        registro_guardado = hist.obtener(E["cot_id"])
+        ruta_guardada = registro_guardado.get("xlsx") if registro_guardado else None
+        # El modo compartido no archiva Excel con datos personales: usa el temporal de esta sesión.
+        E["ruta"] = Path(ruta_guardada) if ruta_guardada and Path(ruta_guardada).exists() else ruta
         cargar(E["ruta"], "pedido")
         ir_a(2)
     else:
@@ -2006,7 +2029,13 @@ def paso_4():
             st.rerun()
 
     if "pdf_bytes" in E:
-        st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
+        if GIOVAL_REQUIRE_ACCESS:
+            st.success(
+                f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas. La cotización comercial quedó en el historial compartido; "
+                "el PDF conserva los datos de cliente ingresados en esta sesión y no se almacena en la biblioteca común."
+            )
+        else:
+            st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
         st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"], icon=":material/download:",
                            mime="application/pdf", type="primary", width="stretch")
         if E.get("ruta") and Path(E["ruta"]).exists():
@@ -2088,49 +2117,77 @@ def historial_cotizaciones():
     m2.metric("Monto cotizado", rv.clp(sum(r["total"] or 0 for r in todos)))
     m3.metric("Monto aceptado", rv.clp(sum(r["total"] or 0 for r in todos if r["estado"] == "Aceptada")))
     f1, f2 = st.columns([3, 2])
-    texto = f1.text_input("Buscar", placeholder="Número, cliente, RUT o notas", key="h_texto")
+    texto = f1.text_input(
+        "Buscar",
+        placeholder="Número de cotización" if GIOVAL_REQUIRE_ACCESS else "Número, cliente, RUT o notas",
+        key="h_texto",
+    )
     estado = f2.selectbox("Estado", ["Todos"] + hs.ESTADOS, key="h_estado")
     regs = hist.listar(texto, estado)
     if not regs:
         st.warning("No encontré cotizaciones con ese filtro.")
         return
-    df = pd.DataFrame({"id": [r["id"] for r in regs], "N°": [r["numero"] for r in regs],
-                       "Fecha": [fecha_corta(r["fecha"]) for r in regs], "Cliente": [r["cliente"] for r in regs],
-                       "Total": [r["total"] for r in regs], "Estado": [r["estado"] for r in regs],
-                       "Notas": [r["notas"] or "" for r in regs]})
+    datos_tabla = {
+        "id": [r["id"] for r in regs], "N°": [r["numero"] for r in regs],
+        "Fecha": [fecha_corta(r["fecha"]) for r in regs],
+        "Total": [r["total"] for r in regs], "Estado": [r["estado"] for r in regs],
+    }
+    if not GIOVAL_REQUIRE_ACCESS:
+        datos_tabla["Cliente"] = [r["cliente"] for r in regs]
+        datos_tabla["Notas"] = [r["notas"] or "" for r in regs]
+    df = pd.DataFrame(datos_tabla)
     editado = editor(
         df, hide_index=True, width="stretch", key=f"h_tabla_{E['h_ver']}_{texto}_{estado}",
-        disabled=["N°", "Fecha", "Cliente", "Total"],
+        disabled=[c for c in ("N°", "Fecha", "Total", "Cliente") if c in df.columns],
         column_config={"id": None, "Total": st.column_config.NumberColumn(format="$ %d"),
                        "Estado": st.column_config.SelectboxColumn(options=hs.ESTADOS, required=True)})
-    if st.button("Guardar estados y notas", icon=":material/save:"):
+    if st.button("Guardar estados" if GIOVAL_REQUIRE_ACCESS else "Guardar estados y notas", icon=":material/save:"):
         cambios = 0
         for (_, fila), reg in zip(editado.iterrows(), regs):
-            nuevo_estado, nuevas_notas = fila["Estado"], str(fila["Notas"] or "")
-            if nuevo_estado != reg["estado"] or nuevas_notas != (reg["notas"] or ""):
-                hist.actualizar(reg["id"], estado=nuevo_estado, notas=nuevas_notas)
-                cambios += 1
+            nuevo_estado = fila["Estado"]
+            if GIOVAL_REQUIRE_ACCESS:
+                if nuevo_estado != reg["estado"]:
+                    hist.actualizar(reg["id"], estado=nuevo_estado)
+                    cambios += 1
+            else:
+                nuevas_notas = str(fila["Notas"] or "")
+                if nuevo_estado != reg["estado"] or nuevas_notas != (reg["notas"] or ""):
+                    hist.actualizar(reg["id"], estado=nuevo_estado, notas=nuevas_notas)
+                    cambios += 1
         E["h_ver"] += 1
         st.success(f"Guardado ({cambios} cambios).")
         st.rerun()
 
     st.divider()
-    opciones = {f"{r['numero']} · {r['cliente'] or 'sin cliente'} · {rv.clp(r['total'] or 0)}": r["id"] for r in regs}
+    opciones = {
+        (f"{r['numero']} · {rv.clp(r['total'] or 0)}" if GIOVAL_REQUIRE_ACCESS
+         else f"{r['numero']} · {r['cliente'] or 'sin cliente'} · {rv.clp(r['total'] or 0)}"): r["id"]
+        for r in regs
+    }
     elegida = st.selectbox("Elige una cotización para ver qué puedes hacer con ella", list(opciones))
     rec = hist.obtener(opciones[elegida])
     with st.container(border=True):
-        st.markdown(f"**{rec['numero']}** · {rec['cliente'] or 'sin cliente'} · {rec['estado']} · "
-                    f"{fecha_corta(rec['fecha'])}")
+        if GIOVAL_REQUIRE_ACCESS:
+            st.markdown(f"**{rec['numero']}** · Cotización comercial compartida · {rec['estado']} · "
+                        f"{fecha_corta(rec['fecha'])}")
+        else:
+            st.markdown(f"**{rec['numero']}** · {rec['cliente'] or 'sin cliente'} · {rec['estado']} · "
+                        f"{fecha_corta(rec['fecha'])}")
         d1, d2 = st.columns(2)
         pdf, xlsx = Path(rec["pdf"] or ""), Path(rec["xlsx"] or "")
         if rec["pdf"] and pdf.exists():
             d1.download_button("Descargar el PDF", pdf.read_bytes(), file_name=pdf.name, mime="application/pdf", icon=":material/download:",
                                width="stretch", key=f"dp_{rec['id']}")
         else:
-            d1.caption("Todavía no se ha creado el PDF de esta cotización.")
+            d1.caption(
+                "El PDF no se archiva para proteger los datos del cliente. Abre la cotización y vuelve a generarlo."
+                if GIOVAL_REQUIRE_ACCESS else "Todavía no se ha creado el PDF de esta cotización."
+            )
         if rec["xlsx"] and xlsx.exists():
             d2.download_button("Descargar el Excel", xlsx.read_bytes(), file_name=xlsx.name, icon=":material/download:",
                                width="stretch", key=f"dx_{rec['id']}")
+        if GIOVAL_REQUIRE_ACCESS:
+            d2.caption("El Excel se genera en tu sesión y se descarga; no se guarda en la biblioteca común.")
         b1, b2 = st.columns(2)
         b1.button("Usar como base de una cotización nueva", width="stretch", key=f"dup_{rec['id']}",
                   on_click=cargar_en_pedido, args=(rec["id"], False))
@@ -2164,11 +2221,19 @@ def clientes_ui():
 
 def vista_historial():
     st.header("Historial")
-    tab_cot, tab_cli = st.tabs(["Cotizaciones", "Clientes"])
-    with tab_cot:
+    if GIOVAL_REQUIRE_ACCESS:
+        st.caption(
+            "Biblioteca compartida: se sincronizan los productos y el historial comercial "
+            "(líneas, precios, totales y estado). Los datos de cliente se ingresan en cada "
+            "sesión y no se guardan aquí; los PDF y Excel se descargan, pero no se archivan."
+        )
         historial_cotizaciones()
-    with tab_cli:
-        clientes_ui()
+    else:
+        tab_cot, tab_cli = st.tabs(["Cotizaciones", "Clientes"])
+        with tab_cot:
+            historial_cotizaciones()
+        with tab_cli:
+            clientes_ui()
 
 
 # ============================================================== MIS PRODUCTOS

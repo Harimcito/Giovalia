@@ -2,11 +2,13 @@
 
 ## Objetivo
 
-Compartir una sola biblioteca entre todos los usuarios sin pagar alojamiento. Un computador Windows que ya tengas funciona como servidor central. La aplicación, la base SQLite y los archivos de cotizaciones permanecen en ese computador; los demás equipos se conectan por la red, sin guardar copias comerciales independientes.
+Compartir una sola biblioteca entre los dos trabajadores sin pagar alojamiento. Un computador Windows que ya tengas funciona como servidor central. El catálogo con fotos/fichas y el historial comercial de cotizaciones permanecen ahí; cada computador se conecta al mismo servidor. Los datos personales del cliente se introducen en cada sesión, no se guardan en la base compartida y los PDF/Excel generados se descargan, pero no se archivan en el servidor.
 
 **Costo adicional de plataforma: $0.** Se usa un equipo, conexión a internet y dominio que ya tengas. No es un servicio con garantía de disponibilidad: si el computador central se apaga, duerme o pierde internet, la aplicación deja de estar disponible hasta que vuelva a funcionar.
 
 ## 1. Preparar el computador central (Windows)
+
+**Privacidad del modo compartido:** el servidor conserva el número/fecha de cotización, productos, cantidades, precios, totales y estado. No conserva nombre, RUT, dirección, teléfono, correo ni notas del cliente; tampoco conserva los PDF/Excel de cotizaciones porque incluyen esos datos. Al retomar una cotización guardada, tendrás que ingresar los datos del cliente de nuevo y volver a generar el PDF.
 
 1. Elige un computador fiable que pueda quedarse encendido durante el horario de trabajo.
 2. Instala Python 3.12 desde https://www.python.org/downloads/ y activa **Add python.exe to PATH**. No necesitas instalar Python en los computadores que solo usarán el cliente de escritorio.
@@ -17,11 +19,13 @@ Compartir una sola biblioteca entre todos los usuarios sin pagar alojamiento. Un
 
 ### Importar datos ya existentes
 
-1. En tu instalación actual, abre Ajustes → Copia de seguridad → Preparar respaldo y descarga el ZIP.
+1. En tu instalación actual, abre Ajustes → Copia de seguridad → Preparar respaldo y descarga el ZIP. Conserva la instalación original por si necesitas consultar documentos antiguos.
 2. Copia el ZIP al computador central.
 3. Detén el servidor con Ctrl+C. Vuelve a iniciarlo una sola vez con `iniciar_servidor_gioval.bat -PermitirImportacionInicial`.
 4. En Gioval, abre Ajustes → Copia de seguridad → Importar respaldo inicial, carga el ZIP y confirma.
 5. Detén el servidor y vuelve a iniciarlo normalmente con `iniciar_servidor_gioval.bat` (sin argumento). Así la importación inicial vuelve a quedar desactivada.
+
+Al iniciar con el modo de privacidad, Gioval elimina los datos personales de los clientes del historial central y los PDF/Excel archivados en esa biblioteca. Conserva productos, líneas de cotización y totales. Esta limpieza es intencional; guarda fuera del servidor todo documento antiguo que necesites conservar.
 
 Los datos se guardan en `%LOCALAPPDATA%\Gioval\Datos\biblioteca`, fuera de la carpeta del código. Actualizar o volver a descargar la aplicación no debería reemplazar esa biblioteca.
 

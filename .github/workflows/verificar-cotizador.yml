@@ -80,3 +80,6 @@ jobs:
               assert all(f"TESTPROD{i}" in claves for i in range(8)), list(claves)
           print("OK: persistencia, archivos, numeración e índice compartido concurrente.")
           PY
+
+      - name: Verificar aislamiento de datos personales en modo compartido
+        run: python -m unittest discover -s tests -v
