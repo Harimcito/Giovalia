@@ -126,10 +126,17 @@ class Historial:
             con.execute(
                 "INSERT INTO config(clave, valor) VALUES('privacidad_compartida_v1', '1')"
             )
+        # Compacta SQLite para que la migración no deje registros antiguos en páginas libres.
+        # El archivo y sus posibles WAL quedan reducidos a la versión saneada de la biblioteca.
+        with self._con() as con:
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            con.execute("VACUUM")
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def _con(self):
         con = sqlite3.connect(self.db, timeout=30)
         con.execute("PRAGMA busy_timeout=30000")
+        con.execute("PRAGMA secure_delete=ON")
         con.row_factory = sqlite3.Row
         return con
 
