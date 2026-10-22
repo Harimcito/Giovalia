@@ -22,6 +22,12 @@ on:
       - "desktop_launcher.py"
       - "render.yaml"
       - "SHARED_LIBRARY.md"
+      - "GIOVAL_GRATIS.md"
+      - "configurar_cliente_gioval.ps1"
+      - "instalar_servidor_gioval.ps1"
+      - "iniciar_servidor_gioval.ps1"
+      - "instalar_servidor_gioval.bat"
+      - "iniciar_servidor_gioval.bat"
       - "gioval_desktop.spec"
       - "installer/**"
       - ".github/workflows/build-desktop.yml"
@@ -41,6 +47,21 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-desktop.txt
+
+      - name: Validar scripts PowerShell del servidor y cliente
+        shell: pwsh
+        run: |
+          $files = @("instalar_servidor_gioval.ps1", "iniciar_servidor_gioval.ps1", "configurar_cliente_gioval.ps1")
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host $_.Message }
+              throw "Sintaxis PowerShell inválida: $file"
+            }
+          }
+          Write-Host "OK: scripts PowerShell válidos."
 
       - name: Instalar dependencias
         shell: pwsh
