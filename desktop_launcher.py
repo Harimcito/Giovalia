@@ -85,6 +85,7 @@ def run_streamlit_server() -> None:
         "--server.address=127.0.0.1",
         f"--server.port={int(port_text)}",
         "--server.headless=true",
+        "--global.developmentMode=false",
         "--server.fileWatcherType=none",
         "--browser.gatherUsageStats=false",
     ]
