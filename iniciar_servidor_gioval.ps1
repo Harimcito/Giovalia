@@ -1,3 +1,5 @@
+param([switch]$PermitirImportacionInicial)
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = $PSScriptRoot
@@ -53,7 +55,7 @@ if (-not (Test-Path $secretFile)) {
 
 $env:GIOVAL_DATA_DIR = $dataDir
 $env:GIOVAL_REQUIRE_ACCESS = "true"
-$env:GIOVAL_ALLOW_INITIAL_IMPORT = "false"
+$env:GIOVAL_ALLOW_INITIAL_IMPORT = if ($PermitirImportacionInicial) { "true" } else { "false" }
 $env:GIOVAL_ACCESS_PASSWORD = Convert-SecureStringToPlainText $securePassword
 $env:PYTHONUTF8 = "1"
 
