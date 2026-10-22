@@ -2889,8 +2889,12 @@ def configuracion_compacta():
                 key="config_guardar_api",
                 width="stretch",
             ):
-                li.guardar_api_key(APP_DIR, api_key)
-                st.success("Clave guardada en este computador.")
+                try:
+                    li.guardar_api_key(APP_DIR, api_key)
+                    E["config_api_key"] = api_key.strip()
+                    st.success("Clave guardada en este computador.")
+                except (OSError, ValueError) as exc:
+                    st.error(f"No pude guardar la clave en el archivo .env. Comprueba los permisos de esta carpeta. Detalle: {exc}")
 
         with st.expander("Opciones para crear el PDF", expanded=False):
             st.checkbox(
