@@ -262,8 +262,28 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
     color:#FFFFFF; border-bottom-color:var(--gioval-blue); background:rgba(1,14,208,.09);
 }
-[data-testid="stProgress"] > div { background:#20232E; border-radius:999px; }
-[data-testid="stProgress"] > div > div { background:var(--gioval-blue); border-radius:999px; }
+/* Barras de progreso: mantener la paleta oscura sin alterar los botones primarios. */
+[data-testid="stProgress"] {
+    background:transparent !important;
+}
+[data-testid="stProgress"] > div,
+[data-testid="stProgress"] [role="progressbar"],
+[data-testid="stProgress"] [data-testid="stProgressBar"] {
+    background:#20232E !important;
+    border-radius:999px !important;
+}
+[data-testid="stProgress"] > div > div,
+[data-testid="stProgress"] [role="progressbar"] > div,
+[data-testid="stProgress"] [data-testid="stProgressBar"] > div {
+    background:#3A3E49 !important;
+    border-radius:999px !important;
+}
+[data-testid="stProgress"] [data-testid="stMarkdownContainer"],
+[data-testid="stProgress"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stProgress"] p {
+    background:transparent !important;
+    color:#989DAC !important;
+}
 [data-testid="stMetric"] {
     background:transparent; border:0 !important; border-top:2px solid var(--gioval-blue) !important;
     border-radius:4px; padding:12px 13px; box-shadow:none;
