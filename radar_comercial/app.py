@@ -19,30 +19,53 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-RAIZ = Path(__file__).resolve().parents[1]
+RUTA_APP = Path(__file__).resolve().parent
+# Funciona en Giovalia y en el repositorio independiente extraído desde radar_comercial/.
+RAIZ = RUTA_APP.parent if RUTA_APP.name == "radar_comercial" else RUTA_APP
 if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
-import cotizador as ct
-import historial as hs
-from radar_comercial.servicio import (
-    APICompraAgilError,
-    ESTADOS_API,
-    ESTADOS_SEGUIMIENTO,
-    PALABRAS_BUSQUEDA_DEFAULT,
-    PORTAL_URL,
-    REGIONES,
-    RadarStore,
-    buscar_compras_agiles,
-    evaluar_rentabilidad,
-    importe_catalogo_a_neto,
-    normalizar_detalle,
-    normalizar_importacion,
-    obtener_detalle_compra_agil,
-    parsear_lineas_productos,
-    resumen_historial_cotizador,
-    sugerir_productos_catalogo,
-)
+try:
+    from radar_comercial.integracion import BibliotecaLectura, HistorialLectura
+    from radar_comercial.servicio import (
+        APICompraAgilError,
+        ESTADOS_API,
+        ESTADOS_SEGUIMIENTO,
+        PALABRAS_BUSQUEDA_DEFAULT,
+        PORTAL_URL,
+        REGIONES,
+        RadarStore,
+        buscar_compras_agiles,
+        evaluar_rentabilidad,
+        importe_catalogo_a_neto,
+        normalizar_detalle,
+        normalizar_importacion,
+        obtener_detalle_compra_agil,
+        parsear_lineas_productos,
+        resumen_historial_cotizador,
+        sugerir_productos_catalogo,
+    )
+except ModuleNotFoundError:
+    # Estructura del nuevo repo después de extraer radar_comercial/ a su raíz.
+    from integracion import BibliotecaLectura, HistorialLectura
+    from servicio import (
+        APICompraAgilError,
+        ESTADOS_API,
+        ESTADOS_SEGUIMIENTO,
+        PALABRAS_BUSQUEDA_DEFAULT,
+        PORTAL_URL,
+        REGIONES,
+        RadarStore,
+        buscar_compras_agiles,
+        evaluar_rentabilidad,
+        importe_catalogo_a_neto,
+        normalizar_detalle,
+        normalizar_importacion,
+        obtener_detalle_compra_agil,
+        parsear_lineas_productos,
+        resumen_historial_cotizador,
+        sugerir_productos_catalogo,
+    )
 
 st.set_page_config(
     page_title="Gioval · Radar Comercial",
@@ -51,7 +74,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DATA_DIR = Path(os.environ.get("GIOVAL_DATA_DIR") or RAIZ).expanduser().resolve()
+_DATA_DIR_CONFIG = os.environ.get("RADAR_DATA_DIR") or os.environ.get("GIOVAL_DATA_DIR")
+if _DATA_DIR_CONFIG:
+    DATA_DIR = Path(_DATA_DIR_CONFIG).expanduser().resolve()
+elif (RAIZ / "cotizador.py").is_file():
+    # Conserva el comportamiento histórico dentro del repositorio Giovalia.
+    DATA_DIR = RAIZ.resolve()
+else:
+    # En el repo independiente, los datos viven fuera del código para evitar perderlos al actualizar.
+    _datos_usuario = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / ".local" / "share"))
+    DATA_DIR = (_datos_usuario / "RadarComercialGioval" / "Datos").resolve()
 BIBLIOTECA_DIR = DATA_DIR / "biblioteca"
 RADAR_DB = DATA_DIR / "radar_comercial.db"
 GIOVAL_REQUIRE_ACCESS = os.environ.get("GIOVAL_REQUIRE_ACCESS", "false").strip().lower() in {
@@ -118,8 +150,8 @@ if GIOVAL_REQUIRE_ACCESS:
 
 try:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    catalogo = ct.Biblioteca(BIBLIOTECA_DIR)
-    historial = hs.Historial(BIBLIOTECA_DIR)
+    catalogo = BibliotecaLectura(BIBLIOTECA_DIR)
+    historial = HistorialLectura(BIBLIOTECA_DIR)
     store = RadarStore(RADAR_DB)
 except Exception as exc:
     st.error(f"No pude abrir la biblioteca compartida. No se modificarán las cotizaciones. Detalle: {exc}")
@@ -191,13 +223,13 @@ with st.expander("Conexiones y criterios económicos", expanded=False):
 @st.cache_data(ttl=5, show_spinner=False)
 def filas_catalogo_cache(directorio: str) -> list[dict]:
     """Reduce lecturas del sistema de archivos; los cambios se reflejan en unos segundos."""
-    return ct.Biblioteca(directorio).filas_catalogo()
+    return BibliotecaLectura(directorio).filas_catalogo()
 
 
 @st.cache_data(ttl=15, show_spinner=False)
 def resumen_historial_cache(ruta_db: str, firma_db: str) -> dict:
     """Resume el historial comercial y evita recorrer SQLite en cada interacción."""
-    h = hs.Historial(Path(ruta_db).parent)
+    h = HistorialLectura(Path(ruta_db).parent)
     return resumen_historial_cotizador(h.listar())
 
 
