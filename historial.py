@@ -61,7 +61,8 @@ class Historial:
             """)
 
     def _con(self):
-        con = sqlite3.connect(self.db)
+        con = sqlite3.connect(self.db, timeout=30)
+        con.execute("PRAGMA busy_timeout=30000")
         con.row_factory = sqlite3.Row
         return con
 
@@ -154,16 +155,49 @@ class Historial:
     # ------------------------------------------------------------ cotizaciones
     def crear(self, cliente: dict, lineas: list[dict], totales: dict, con_iva: bool = True,
               fecha: date | None = None, origen: str = "pedido", numero: str | None = None) -> tuple[int, str]:
-        """Registra una cotización nueva. Si no se da número, asigna el siguiente correlativo."""
+        """Registra una cotización con numeración atómica cuando hay varios usuarios simultáneos."""
         fecha = fecha or date.today()
-        if numero is None:
-            n = self.siguiente_correlativo()
-            while self._existe(self.formatear(n, fecha)):
-                n += 1
-            numero = self.formatear(n, fecha)
-            self.set_config("siguiente_correlativo", n + 1)
         datos = _json({"lineas": lineas, "cliente": cliente})
         with self._con() as con:
+            # Reservar el correlativo y crear la cotización en la misma transacción evita que
+            # dos sesiones lean el mismo número antes de que alguna de ellas lo guarde.
+            con.execute("BEGIN IMMEDIATE")
+            if numero is None:
+                fila_sig = con.execute(
+                    "SELECT valor FROM config WHERE clave='siguiente_correlativo'"
+                ).fetchone()
+                n = int(fila_sig["valor"]) if fila_sig else 1
+                fila_fmt = con.execute(
+                    "SELECT valor FROM config WHERE clave='formato_numero'"
+                ).fetchone()
+                formato = fila_fmt["valor"] if fila_fmt else FORMATO_DEFECTO
+
+                def numero_formateado(correlativo: int) -> str:
+                    try:
+                        return formato.format(
+                            n=correlativo,
+                            aa=f"{fecha.year % 100:02d}",
+                            aaaa=fecha.year,
+                        )
+                    except (KeyError, ValueError, IndexError):
+                        return FORMATO_DEFECTO.format(
+                            n=correlativo,
+                            aa=f"{fecha.year % 100:02d}",
+                            aaaa=fecha.year,
+                        )
+
+                numero = numero_formateado(n)
+                while con.execute(
+                    "SELECT 1 FROM cotizaciones WHERE numero=?", (numero,)
+                ).fetchone():
+                    n += 1
+                    numero = numero_formateado(n)
+                con.execute(
+                    "INSERT INTO config(clave, valor) VALUES('siguiente_correlativo', ?) "
+                    "ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor",
+                    (str(n + 1),),
+                )
+
             cur = con.execute(
                 "INSERT INTO cotizaciones(numero, fecha, cliente, rut, neto, iva, total, con_iva, origen, datos, "
                 "creado, actualizado) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
