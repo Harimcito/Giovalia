@@ -61,57 +61,94 @@ def preparar_tema() -> bool:
 
 TEMA_ACTIVO = preparar_tema()
 
-st.set_page_config(page_title="Giovalia · Cotizador comercial", page_icon="💧",
+st.set_page_config(page_title="Giovalia · Cotizador comercial", page_icon=":material/description:",
                    layout="wide", initial_sidebar_state="collapsed")
 
 CSS_BASE = """
-html, body, .stApp { font-size: 16px; }
-.block-container { max-width: 1460px; padding-top: 1.25rem; padding-bottom: 3rem; }
-h1 { font-size: 2rem !important; line-height: 1.2; }
-h2 { font-size: 1.45rem !important; line-height: 1.25; }
-h3 { font-size: 1.15rem !important; }
+html, body, .stApp { font-size: 17px; line-height: 1.5; }
+.block-container { max-width: 1520px; padding-top: 1.4rem; padding-bottom: 3.25rem; }
+h1 { font-size: 2.15rem !important; line-height: 1.22; margin-bottom: .85rem; }
+h2 { font-size: 1.55rem !important; line-height: 1.3; }
+h3 { font-size: 1.25rem !important; line-height: 1.35; }
+p, li { line-height: 1.55; }
+[data-testid="stWidgetLabel"] p { font-size: 1rem !important; font-weight: 600; line-height: 1.4; }
+.stCaption, [data-testid="stCaptionContainer"] { color: #526674; font-size: .9rem; line-height: 1.5; }
 .stButton > button, .stDownloadButton > button, .stLinkButton > a {
-    font-size: .98rem; font-weight: 600; padding: .58rem 1rem; border-radius: 10px;
-    min-height: 2.7rem; transition: all .15s ease-in-out; }
+    font-size: 1rem; font-weight: 650; padding: .68rem 1.05rem; border-radius: 9px;
+    min-height: 3rem; transition: background-color .15s ease, border-color .15s ease;
+}
 .stAppDeployButton, [data-testid="stAppDeployButton"] { display: none; }
-[data-testid="stAlert"] { border-radius: 12px; }
+[data-testid="stAlert"] { border-radius: 11px; font-size: 1rem; }
+[data-testid="stAlert"] p { line-height: 1.5; }
 [data-baseweb="input"] > div, [data-baseweb="textarea"], [data-baseweb="select"] > div { border-radius: 9px; }
-[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 13px; padding: 13px 15px; }
-[data-testid="stMetricLabel"] { color: #5B6D7A; font-size: .85rem; }
-[data-testid="stMetricValue"] { color: #17394F; font-weight: 700; }
+[data-baseweb="input"] input, [data-baseweb="textarea"] textarea, [data-baseweb="select"] { font-size: 1rem !important; }
+[data-baseweb="input"] input { min-height: 2.8rem; }
+[data-baseweb="textarea"] textarea { line-height: 1.5; }
+[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #DFE6ED; border-radius: 12px; padding: 15px 16px; }
+[data-testid="stMetricLabel"] { color: #526674; font-size: .9rem; }
+[data-testid="stMetricValue"] { color: #17394F; font-weight: 750; }
 [data-testid="stDataFrame"], [data-testid="stDataEditor"] { border-radius: 10px; }
+[data-testid="stDataEditor"] { font-size: .96rem; }
+[data-testid="stExpander"] { border-color: #D7E0E7; border-radius: 10px; }
+[data-testid="stExpander"] summary { min-height: 3rem; font-weight: 600; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 3px solid #72AAB6 !important; outline-offset: 2px !important;
+}
 .pasos { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
-.paso { padding: 8px 15px; border-radius: 10px; border: 1px solid #D7E0E7; background: #FFFFFF; color: #526674; font-size: .9rem; }
-.paso b { margin-right: 7px; }
-.paso.activo { opacity: 1; border: 1px solid #176B7A; background: #176B7A; color: #FFFFFF; font-weight: 700; box-shadow: 0 3px 10px rgba(23,107,122,.14); }
+.paso { padding: 9px 15px; border-radius: 9px; border: 1px solid #D7E0E7; background: #FFFFFF; color: #526674; font-size: .95rem; }
+.paso b { margin-right: 8px; }
+.paso.activo { opacity: 1; border: 1px solid #176B7A; background: #176B7A; color: #FFFFFF; font-weight: 700; box-shadow: 0 2px 7px rgba(23,107,122,.12); }
 .paso.hecho { opacity: 1; border-color: #C1DDD5; background: #EAF5F1; color: #235E53; }
-[data-testid="stRadio"] div[role="radiogroup"] { gap: .5rem; }
-[data-testid="stRadio"] div[role="radiogroup"] label { border: 1px solid #D7E0E7; border-radius: 9px; padding: .25rem .65rem; background: #FFFFFF; }
+[data-testid="stRadio"] div[role="radiogroup"] { gap: .5rem; flex-wrap: wrap; }
+[data-testid="stRadio"] div[role="radiogroup"] label {
+    border: 1px solid #D7E0E7; border-radius: 8px; padding: .35rem .7rem; background: #FFFFFF;
+}
+.st-key-app-navigation { margin: .3rem 0 1.2rem; padding: .25rem 0 0; border-bottom: 1px solid #DCE4EA; }
+.st-key-app-navigation [data-testid="stRadio"] div[role="radiogroup"] {
+    gap: .2rem; border: 0; background: transparent; align-items: stretch;
+}
+.st-key-app-navigation [data-testid="stRadio"] label {
+    border: 0 !important; border-bottom: 3px solid transparent !important;
+    border-radius: 0 !important; background: transparent !important;
+    padding: .65rem .95rem .6rem !important; margin: 0 !important;
+    color: #617583; font-weight: 600; min-height: 2.8rem;
+}
+.st-key-app-navigation [data-testid="stRadio"] label:hover { background: #EAF0F4 !important; color: #176B7A !important; }
+.st-key-app-navigation [data-testid="stRadio"] label:has([aria-checked="true"]) {
+    color: #17394F !important; border-bottom-color: #176B7A !important; font-weight: 750;
+}
+.st-key-app-navigation [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child { display: none !important; }
 @media (max-width: 800px) {
-    .block-container { padding-left: 1rem; padding-right: 1rem; }
-    .paso { padding: 7px 9px; font-size: .82rem; }
+    .block-container { padding-left: 1rem; padding-right: 1rem; padding-top: 1rem; }
+    h1 { font-size: 1.8rem !important; }
+    .paso { padding: 7px 10px; font-size: .88rem; }
+    .st-key-app-navigation [data-testid="stRadio"] label { padding: .55rem .65rem !important; }
 }
 """
 
 CSS_TINTA = """
-.stApp { background: #F5F7FA; }
-[data-testid="stHeader"] { background: rgba(245,247,250,.92); }
-[data-testid="stSidebar"] > div:first-child { background: #F9FBFC; border-right: 1px solid #E1E7ED; }
-h1, h2, h3 { color: #193344; letter-spacing: -.015em; }
-h1.titulo { font-size: 2rem; font-weight: 750; margin: 0 0 .8rem 0; padding: 0; color: #17394F; }
-.gota { display: inline-block; width: .72em; height: .72em; margin-right: .45rem; vertical-align: -.03em; border-radius: 4px; background: #176B7A; }
-button[kind="primary"], [data-testid="stBaseButton-primary"] { background: #176B7A; border: 1px solid #176B7A; color: #FFFFFF; box-shadow: 0 3px 8px rgba(23,107,122,.13); }
+.stApp { background: #F5F7FA; color: #193344; }
+[data-testid="stHeader"] { background: rgba(245,247,250,.96); }
+[data-testid="stSidebar"] > div:first-child { background: #FAFBFC; border-right: 1px solid #E1E7ED; }
+h1, h2, h3 { color: #193344; letter-spacing: -.012em; }
+h1.titulo { font-size: 2.15rem; font-weight: 760; margin: 0 0 1rem 0; padding: 0; color: #17394F; }
+.gota { display: inline-flex; align-items: center; justify-content: center; width: 1.2em; height: 1.2em; margin-right: .5rem; vertical-align: -.08em; border-radius: 6px; background: #176B7A; }
+.gota::after { content: "G"; color: #FFFFFF; font-size: .65em; font-weight: 800; line-height: 1; }
+button[kind="primary"], [data-testid="stBaseButton-primary"] { background: #176B7A; border: 1px solid #176B7A; color: #FFFFFF; box-shadow: 0 2px 6px rgba(23,107,122,.12); }
 button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover { background: #125967; border-color: #125967; color: #FFFFFF; }
-button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled { opacity: .45; box-shadow: none; }
-button[kind="secondary"], [data-testid="stBaseButton-secondary"] { background: #FFFFFF; border: 1px solid #D0DAE2; color: #193344; }
-button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #F0F5F7; border-color: #176B7A; }
-[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 15px; box-shadow: 0 3px 12px rgba(25,51,68,.045); }
-[data-testid="stExpander"] { border-color: #D7E0E7; border-radius: 11px; }
-.inicio-hero { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 16px;
-    padding: 24px 26px; margin: 4px 0 22px; box-shadow: 0 4px 16px rgba(25,51,68,.04); }
-.inicio-hero h2 { margin: 5px 0 7px; color: #193344; font-size: 1.7rem !important; }
-.inicio-hero p { margin: 0; color: #5B6D7A; font-size: 1rem; line-height: 1.55; }
-.inicio-kicker { color: #176B7A; font-size: .75rem; font-weight: 800; letter-spacing: .12em; }
+button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled { opacity: .5; box-shadow: none; }
+button[kind="secondary"], [data-testid="stBaseButton-secondary"] { background: #FFFFFF; border: 1px solid #CDD8E1; color: #193344; }
+button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #EFF4F7; border-color: #176B7A; }
+[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) {
+    background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 13px; box-shadow: 0 2px 8px rgba(25,51,68,.035);
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"] { gap: .35rem; border-bottom: 1px solid #D7E0E7; }
+[data-testid="stTabs"] button[role="tab"] { font-size: 1rem; font-weight: 600; padding: .7rem .95rem; }
+.inicio-hero { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 14px;
+    padding: 26px 28px; margin: 4px 0 22px; box-shadow: 0 2px 10px rgba(25,51,68,.035); }
+.inicio-hero h2 { margin: 5px 0 8px; color: #193344; font-size: 1.75rem !important; }
+.inicio-hero p { margin: 0; color: #526674; font-size: 1.02rem; line-height: 1.6; }
+.inicio-kicker { color: #176B7A; font-size: .78rem; font-weight: 800; letter-spacing: .1em; }
 """
 CSS_ANIMACION = """
 @keyframes tinta { 0% { background-position: 0% 0%, 100% 0%, 60% 100%, 0% 100%, 0 0; }
@@ -143,24 +180,24 @@ E.setdefault("paso", 1)
 COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_ORIGEN = (
     "Incluir", "Cantidad", "Producto", "Código", "¿Cómo lo identifiqué?")
 COL_PRECIO = "Precio unitario"
-ORIGEN = {"biblioteca": "📚 Ya lo conocía", "ia": "🧠 Lo deduje con IA", "texto": "🔤 Estaba en el texto",
-          "descripcion": "✏️ Lo armé con el nombre", "": ""}
+ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
+          "descripcion": "Descripción", "": ""}
 
 # ============================================================== AJUSTES (barra lateral)
 with st.sidebar:
-    st.header("⚙️ Ajustes")
+    st.header("Ajustes")
     carpeta = st.text_input("Carpeta donde guardo las fotos y fichas", "biblioteca",
                             help="No hace falta cambiarla.")
     bib = ct.Biblioteca(carpeta)
     hist = hs.Historial(carpeta)
-    st.caption(f"📦 {len(bib.indice)} productos guardados")
+    st.caption(f"{len(bib.indice)} productos guardados")
     api_key, origen_key = li.buscar_api_key(APP_DIR)
     if api_key:
-        st.caption(f"🔑 Clave de OpenAI lista ({origen_key})")
+        st.caption(f"Clave de OpenAI lista ({origen_key})")
     else:
         api_key = st.text_input("Clave de OpenAI", type="password",
                                 help="Sirve para entender mejor los productos y leer pedidos en PDF o foto.")
-        if api_key and st.button("💾 Guardar esta clave"):
+        if api_key and st.button("Guardar esta clave", icon=":material/save:"):
             li.guardar_api_key(APP_DIR, api_key)
             st.success("Guardada. La próxima vez se carga sola.")
     with st.expander("Opciones avanzadas"):
@@ -173,11 +210,11 @@ with st.sidebar:
                                  "Ejemplo: {n:04d}-COT{aa}")
         sig = st.number_input("Próximo número", min_value=1, step=1, value=hist.siguiente_correlativo())
         st.caption(f"Se verá así: {hist.formatear(int(sig), date.today(), fmt)}")
-        if st.button("Guardar numeración"):
+        if st.button("Guardar numeración", icon=":material/save:"):
             hist.set_config("formato_numero", fmt)
             hist.set_config("siguiente_correlativo", int(sig))
             st.success("Guardado.")
-    with st.expander("💾 Copia de seguridad"):
+    with st.expander("Copia de seguridad"):
         st.caption("Descarga la biblioteca completa: base de datos, catálogo, fotos, fichas y archivos de cotizaciones.")
         if st.button("Preparar respaldo actualizado", key="preparar_respaldo"):
             try:
@@ -188,15 +225,15 @@ with st.sidebar:
                 E.pop("_respaldo_zip", None)
                 st.error(f"No pude preparar el respaldo: {exc}")
         if E.get("_respaldo_zip"):
-            st.download_button("⬇️ Descargar respaldo ZIP", E["_respaldo_zip"],
+            st.download_button("Descargar respaldo ZIP", E["_respaldo_zip"],
                                file_name=E.get("_respaldo_nombre", "respaldo_giovalia.zip"),
                                mime="application/zip", width="stretch", key="descargar_respaldo")
     st.divider()
-    st.button("📝 Volver a los borradores", on_click=lambda: E.clear())
+    st.button("Volver a los borradores", on_click=lambda: E.clear())
 
 
 # ============================================================== FUNCIONES COMUNES
-VISTAS = ["🧾 Nueva cotización", "📚 Historial", "📦 Mis productos"]
+VISTAS = ["Nueva cotización", "Historial", "Mis productos"]
 OPCIONES_PRECIO = ["Incluyen IVA (lo que paga el cliente)", "Son netos (sin IVA)"]
 E.setdefault("vista", VISTAS[0])
 
@@ -225,7 +262,7 @@ def mostrar_pasos(actual: int):
     st.markdown('<div class="pasos">' + "".join(piezas) + "</div>", unsafe_allow_html=True)
     st.progress((actual - 1) / 3, text=f"Etapa {actual} de 4 · {nombres[actual - 1]}")
     if E.get("_ultima_guarda"):
-        st.caption(f"💾 Borrador guardado en este computador · {E['_ultima_guarda']}")
+        st.caption(f"Borrador guardado en este computador · {E['_ultima_guarda']}")
 
 
 def cargar(ruta: Path, origen_pedido: str):
@@ -476,7 +513,7 @@ def mostrar_resumen_lineas():
         })
     if not filas:
         return
-    with st.expander("🧮 Resumen por producto y subtotales", expanded=True):
+    with st.expander("Resumen por producto y subtotales", expanded=True):
         st.dataframe(
             pd.DataFrame(filas), hide_index=True, width="stretch",
             column_config={
@@ -606,7 +643,7 @@ def widget_numero_cotizacion():
         E.pop("error_numero", None)
     if E.get("error_numero"):
         st.error(E["error_numero"])
-    st.caption("Puedes cambiarlo durante la cotización, antes de crear el PDF.")
+    st.caption("Puedes cambiar este número antes de crear el PDF.")
 
 
 def marcar_cambios_cabecera():
@@ -735,13 +772,14 @@ def boton_actualizar_totales():
     c_boton, c_ayuda = st.columns([1.25, 3])
     with c_boton:
         actualizar = st.button(
-            "↻ Actualizar totales",
+            "Actualizar totales",
+            icon=":material/calculate:",
             key=f"actualizar_totales_{int(E.get('paso', 1))}",
             help="Confirma el precio editado, recalcula los importes y guarda el borrador.",
             width="stretch",
         )
     with c_ayuda:
-        st.caption("Si el importe no cambia al editar una celda, confirma con Enter o haz clic fuera y pulsa «Actualizar totales».")
+        st.caption("Al terminar de editar, presiona Enter o haz clic fuera de la celda. Luego selecciona «Actualizar totales» para guardar y recalcular.")
 
     if actualizar:
         persistir_borrador()
@@ -884,15 +922,15 @@ def selector_borradores():
     a, b = st.columns([3, 2])
     with a:
         st.subheader("Acciones rápidas")
-        st.button("➕ Nueva cotización", type="primary", width="stretch", on_click=iniciar_borrador,
+        st.button("Nueva cotización", icon=":material/add_circle:", type="primary", width="stretch", on_click=iniciar_borrador,
                   key="inicio_nueva_cotizacion")
     with b:
         st.subheader("Seguimiento")
-        st.button("📚 Abrir historial", width="stretch",
+        st.button("Abrir historial", icon=":material/history:", width="stretch",
                   on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial")
 
     st.divider()
-    st.subheader("📝 Retomar un borrador")
+    st.subheader("Retomar un borrador")
     if borradores:
         opciones = {
             f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}": r["id"]
@@ -901,10 +939,10 @@ def selector_borradores():
         elegido = st.selectbox("Selecciona una cotización sin terminar", list(opciones), key="borrador_a_retomar")
         c1, c2 = st.columns(2)
         c1.button(
-            "↩️ Retomar borrador", type="primary", width="stretch",
+            "Retomar borrador", type="primary", width="stretch",
             on_click=restaurar_borrador, args=(opciones[elegido],), key="inicio_retomar_borrador",
         )
-        c2.button("➕ Iniciar otro borrador", width="stretch",
+        c2.button("Iniciar otro borrador", width="stretch",
                   on_click=iniciar_borrador, key="inicio_otro_borrador")
     else:
         st.info("No tienes borradores pendientes. Cuando inicies una cotización, podrás retomarla desde aquí aunque se cierre la aplicación.")
@@ -942,7 +980,7 @@ def pedido_ui():
     st.write("El pedido se conserva como borrador mientras trabajas. Puedes volver a abrirlo si la aplicación se interrumpe.")
     con_iva = st.radio("Los precios que voy a escribir…", OPCIONES_PRECIO, horizontal=True,
                        key="precios_modo") == OPCIONES_PRECIO[0]
-    FUENTES = ["✍️ Lo escribo o pego aquí", "📊 Subir Excel o CSV", "📷 Subir PDF o foto"]
+    FUENTES = ["Lo escribo o pego aquí", "Subir Excel o CSV", "Subir PDF o foto"]
     fuente = st.radio("¿Cómo me das el pedido?", FUENTES, horizontal=True, key="fuente_pedido")
     E["fuente_orden"] = fuente
     texto = st.text_area(
@@ -959,9 +997,9 @@ def pedido_ui():
                                        accept_multiple_files=True, key="orden_ia")
         st.caption("El pedido se envía a OpenAI para leerlo. Después revisa que haya quedado bien.")
         if not api_key:
-            st.warning("Para leer PDF o fotos necesito la clave de OpenAI (⚙️ Ajustes, arriba a la izquierda).")
+            st.warning("Para leer PDF o fotos necesito la clave de OpenAI (Ajustes, arriba a la izquierda).")
 
-    if st.button("📖 Leer el pedido", type="primary", width="stretch"):
+    if st.button("Leer el pedido", icon=":material/description:", type="primary", width="stretch"):
         try:
             if fuente == FUENTES[2]:
                 if not archivos_ia:
@@ -1006,7 +1044,7 @@ def pedido_ui():
     nombre = c1.text_input("Nombre o razón social", key="c_nombre")
     rut = c2.text_input("RUT", key="c_rut")
     if rut and rv.validar_rut(rut) is False:
-        c2.caption("⚠️ Este RUT no parece válido. Revisa el dígito final.")
+        c2.caption("Este RUT no parece válido. Revisa el dígito final.")
     c3, c4 = st.columns(2)
     c3.text_input("Dirección", key="c_dir")
     c4.text_input("Ciudad", key="c_ciudad")
@@ -1122,9 +1160,9 @@ def cotizacion_ui():
 def paso_1():
     st.header("1. ¿Qué tienes?")
     if not api_key:
-        st.info("💡 Con la clave de OpenAI (en ⚙️ Ajustes, arriba a la izquierda) entiendo mucho mejor los "
+        st.info("Con la clave de OpenAI (en Ajustes, arriba a la izquierda) entiendo mucho mejor los "
                 "productos y puedo leer pedidos en PDF o foto.")
-    tab_pedido, tab_cot = st.tabs(["📝 Tengo un pedido", "📄 Ya tengo la cotización hecha"])
+    tab_pedido, tab_cot = st.tabs(["Tengo un pedido", "Ya tengo la cotización hecha"])
     with tab_pedido:
         pedido_ui()
     with tab_cot:
@@ -1133,7 +1171,7 @@ def paso_1():
 
 def agregar_desde_catalogo():
     """Permite buscar un producto conocido e incorporarlo a la cotización actual."""
-    with st.expander("➕ Agregar producto desde mi catálogo", expanded=False):
+    with st.expander("Agregar producto desde mi catálogo", expanded=False):
         filas = bib.filas_catalogo()
         if not filas:
             st.info("Todavía no hay productos en el catálogo. Puedes agregarlos en «Mis productos».")
@@ -1291,12 +1329,12 @@ def tarjeta(clave: str, desc: str):
     aviso_ficha = ""
     if ficha:
         n = menciones_guardada(str(ficha), ficha.stat().st_mtime, clave) if bs.es_codigo(clave) else -2
-        estado_ficha = "⚠️ revisar" if n == 0 else "✅ lista"
+        estado_ficha = "revisar" if n == 0 else "lista"
         if n == 0:
             aviso_ficha = (f"La ficha guardada no menciona el código «{clave}». Puede ser de otro producto: "
                            "busca otra o revísala.")
     else:
-        estado_ficha = "❌ falta"
+        estado_ficha = "falta"
     with st.container(border=True):
         st.markdown('<span class="tarjeta-marca"></span>', unsafe_allow_html=True)
         c1, c2 = st.columns([1, 3])
@@ -1305,24 +1343,24 @@ def tarjeta(clave: str, desc: str):
                 try:
                     st.image(str(foto), width=190)
                 except Exception:  # archivo dañado: no debe botar la pantalla
-                    st.markdown("🖼️  \n*No pude mostrar la foto. Elige otra.*")
+                    st.markdown(" \n*No pude mostrar la foto. Elige otra.*")
             else:
-                st.markdown("🖼️  \n*Sin foto*")
+                st.markdown(" \n*Sin foto*")
         with c2:
             st.markdown(f"**{desc}**")
             st.caption(f"Código: {clave}")
-            st.markdown(f"📷 Foto: {'✅ lista' if foto else '❌ falta'} &nbsp;&nbsp;&nbsp; 📄 Ficha técnica: {estado_ficha}")
+            st.markdown(f"Foto: {'lista' if foto else 'falta'} &nbsp;&nbsp;&nbsp; Ficha técnica: {estado_ficha}")
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
-            if b1.button("🔎 Buscar en internet", key=f"b_{clave}", width="stretch"):
+            if b1.button("Buscar en internet", key=f"b_{clave}", width="stretch"):
                 with st.spinner("Buscando…"):
                     for aviso in buscar_para(clave, q_foto, q_ficha):
                         st.warning(aviso)
-            with b2.popover("⚙️ Más opciones", width="stretch"):
+            with b2.popover("Más opciones", width="stretch"):
                 st.text_input("Buscar la foto como", value=sug_foto, key=f"qf_{clave}")
                 st.text_input("Buscar la ficha como", value=sug_ficha, key=f"qd_{clave}")
-                if ficha and st.button("📄 Sacar la foto desde la ficha", key=f"xf_{clave}"):
+                if ficha and st.button("Sacar la foto desde la ficha", key=f"xf_{clave}"):
                     E[f"cand_foto_{clave}"] = bs.fotos_de_ficha(ficha.read_bytes())
                 st.file_uploader("Subir mi propia foto", type=["jpg", "jpeg", "png", "webp"], key=f"foto_{clave}")
                 st.file_uploader("Subir mi propia ficha (PDF)", type=["pdf"], key=f"ficha_{clave}")
@@ -1359,7 +1397,7 @@ def tarjeta(clave: str, desc: str):
                 for i, c in enumerate(fotos_c):
                     with cols[i % 3]:
                         st.image(c["datos"], width=260)
-                        st.caption(("✅ Coincide con el código" if c["verificada"] else "⚪ Sin confirmar")
+                        st.caption(("Coincide con el código" if c["verificada"] else "Sin confirmar")
                                    + (" · baja calidad" if c.get("baja_resolucion") else ""))
                         if st.button("Elegir esta foto", key=f"uf_{clave}_{i}", width="stretch"):
                             guardar_candidato(clave, "foto", c)
@@ -1376,11 +1414,11 @@ def tarjeta(clave: str, desc: str):
                     if c["miniatura"]:
                         k1.image(c["miniatura"], width="stretch")
                     if not c.get("verificable", True):
-                        estado = "ℹ️ Abre el PDF y confirma que es el producto"
+                        estado = "Abre el PDF y confirma que es el producto"
                     else:
-                        estado = {3: f"✅ Menciona el código {clave}",
-                                  2: f"🟡 Menciona {clave}, pero es largo ({c['paginas']} pág.): puede ser un catálogo",
-                                  1: f"⚠️ No menciona {clave}: puede ser de otro producto"}[c["nivel"]]
+                        estado = {3: f"Menciona el código {clave}",
+                                  2: f"Menciona {clave}, pero es largo ({c['paginas']} pág.): puede ser un catálogo",
+                                  1: f"No menciona {clave}: puede ser de otro producto"}[c["nivel"]]
                     k2.markdown(f"{estado}  \n{c['titulo'][:80]}  \n[Abrir el PDF]({c['url']})")
                     if k2.button("Elegir esta ficha" if c["nivel"] >= 2 else "Elegirla igual",
                                  key=f"ufi_{clave}_{i}"):
@@ -1389,7 +1427,7 @@ def tarjeta(clave: str, desc: str):
 
 def paso_3():
     st.header("3. Fotos y fichas técnicas")
-    st.caption("La lista y los precios siguen editables en esta etapa. Los cambios se guardan en el borrador.")
+    st.caption("Puedes seguir corrigiendo cantidades y precios aquí. Los cambios se guardan en el borrador.")
     editor_productos()
     boton_actualizar_totales()
     mostrar_totales()
@@ -1412,7 +1450,7 @@ def paso_3():
     faltan = [c for c in claves if not all(bib.archivos(c))]
     if faltan:
         st.write("Presiona el botón y yo busco en internet. Después elige la foto y la ficha correcta para cada producto.")
-        if st.button(f"🔎 Buscar fotos y fichas de lo que falta ({len(faltan)})", type="primary", width="stretch"):
+        if st.button(f"Buscar fotos y fichas de lo que falta ({len(faltan)})", type="primary", width="stretch"):
             persistir_borrador()
             barra, hubo_error = st.progress(0.0, text="Buscando…"), False
             for i, clave in enumerate(faltan):
@@ -1434,7 +1472,7 @@ def paso_3():
     st.caption("Si un producto no tiene ficha técnica, no pasa nada: el PDF llevará solo la foto.")
 
     st.divider()
-    st.subheader("📦 Productos y anexos")
+    st.subheader("Productos y anexos")
     c_filtro, c_estado = st.columns([2, 1])
     busqueda_anexos = c_filtro.text_input(
         "Buscar producto", key="filtro_anexos_texto",
@@ -1494,9 +1532,9 @@ def panel_revision(en_paso_4: bool = False) -> int:
     errores = [h["texto"] for h in hs_ if h["nivel"] == "error"]
     avisos = [h["texto"] for h in hs_ if h["nivel"] == "aviso"]
     if not hs_:
-        st.success("✅ Revisé la cotización: los totales, el IVA, los precios y los datos del cliente están en orden.")
+        st.success("Revisé la cotización: los totales, el IVA, los precios y los datos del cliente están en orden.")
         return 0
-    st.markdown("#### 🔍 Revisión de la cotización")
+    st.markdown("#### Revisión de la cotización")
     if errores:
         st.error("**Hay que corregir:**\n\n" + "\n".join(f"- {t}" for t in errores))
         if not en_paso_4 and E.get("origen_pedido") == "pedido":
@@ -1583,7 +1621,7 @@ def paso_4():
             permitido = permitido and acepto
         if E.get("error_numero"):
             st.error("Corrige el número de cotización antes de generar el PDF.")
-        if st.button("📄 Crear el PDF", type="primary", width="stretch", disabled=not permitido):
+        if st.button("Crear el PDF", icon=":material/picture_as_pdf:", type="primary", width="stretch", disabled=not permitido):
             try:
                 refrescar_excel_actual()
                 generar_pdf()
@@ -1592,7 +1630,7 @@ def paso_4():
     else:
         st.success("El PDF ya está generado. Para evitar que el archivo y los datos se desincronicen, la edición está pausada.")
         mostrar_totales()
-        if st.button("✏️ Volver a editar y regenerar el PDF", type="primary", width="stretch"):
+        if st.button("Volver a editar y regenerar el PDF", type="primary", width="stretch"):
             for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
                 E.pop(clave_estado, None)
             if E.get("cot_id") and hist.obtener(E["cot_id"]):
@@ -1602,12 +1640,12 @@ def paso_4():
 
     if "pdf_bytes" in E:
         st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
-        st.download_button("⬇️ Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"],
+        st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"],
                            mime="application/pdf", type="primary", width="stretch")
         if E.get("ruta") and Path(E["ruta"]).exists():
-            st.download_button("⬇️ Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(),
+            st.download_button("Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(),
                                file_name=Path(E["ruta"]).name, width="stretch")
-        with st.expander("👁️ Vista previa del PDF completo", expanded=True):
+        with st.expander("Vista previa del PDF completo", expanded=True):
             try:
                 st.pdf(E["pdf_bytes"], height=760, key=f"pdf_preview_{E.get('cot_id', 'actual')}")
             except Exception:
@@ -1625,9 +1663,9 @@ def paso_4():
         atras, nueva = st.columns(2)
         if atras.button("← Volver a fotos y fichas", width="stretch"):
             ir_a(3)
-        nueva.button("🔄 Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+        nueva.button("Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
     else:
-        nueva = st.button("🔄 Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+        nueva = st.button("Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
 
 
 # ============================================================== HISTORIAL
@@ -1698,7 +1736,7 @@ def historial_cotizaciones():
         disabled=["N°", "Fecha", "Cliente", "Total"],
         column_config={"id": None, "Total": st.column_config.NumberColumn(format="$ %d"),
                        "Estado": st.column_config.SelectboxColumn(options=hs.ESTADOS, required=True)})
-    if st.button("💾 Guardar estados y notas"):
+    if st.button("Guardar estados y notas", icon=":material/save:"):
         cambios = 0
         for (_, fila), reg in zip(editado.iterrows(), regs):
             nuevo_estado, nuevas_notas = fila["Estado"], str(fila["Notas"] or "")
@@ -1719,19 +1757,19 @@ def historial_cotizaciones():
         d1, d2 = st.columns(2)
         pdf, xlsx = Path(rec["pdf"] or ""), Path(rec["xlsx"] or "")
         if rec["pdf"] and pdf.exists():
-            d1.download_button("⬇️ Descargar el PDF", pdf.read_bytes(), file_name=pdf.name, mime="application/pdf",
+            d1.download_button("Descargar el PDF", pdf.read_bytes(), file_name=pdf.name, mime="application/pdf",
                                width="stretch", key=f"dp_{rec['id']}")
         else:
             d1.caption("Todavía no se ha creado el PDF de esta cotización.")
         if rec["xlsx"] and xlsx.exists():
-            d2.download_button("⬇️ Descargar el Excel", xlsx.read_bytes(), file_name=xlsx.name,
+            d2.download_button("Descargar el Excel", xlsx.read_bytes(), file_name=xlsx.name,
                                width="stretch", key=f"dx_{rec['id']}")
         b1, b2 = st.columns(2)
-        b1.button("🔁 Usar como base de una cotización nueva", width="stretch", key=f"dup_{rec['id']}",
+        b1.button("Usar como base de una cotización nueva", width="stretch", key=f"dup_{rec['id']}",
                   on_click=cargar_en_pedido, args=(rec["id"], False))
-        b2.button("✏️ Seguir editando esta cotización", width="stretch", key=f"edi_{rec['id']}",
+        b2.button("Seguir editando esta cotización", width="stretch", key=f"edi_{rec['id']}",
                   on_click=cargar_en_pedido, args=(rec["id"], True))
-        with st.expander("🗑️ Eliminar esta cotización"):
+        with st.expander("Eliminar esta cotización"):
             seguro = st.checkbox("Sí, quiero eliminarla para siempre", key=f"del_{rec['id']}")
             if st.button("Eliminar", disabled=not seguro, key=f"delb_{rec['id']}"):
                 hist.eliminar(rec["id"])
@@ -1750,7 +1788,7 @@ def clientes_ui():
         df, num_rows="dynamic", hide_index=True, width="stretch", key=f"cli_tabla_{E['cli_ver']}",
         column_config={"id": None, "nombre": "Nombre o razón social", "rut": "RUT", "direccion": "Dirección",
                        "ciudad": "Ciudad", "telefono": "Teléfono", "email": "Correo"})
-    if st.button("💾 Guardar clientes"):
+    if st.button("Guardar clientes", icon=":material/save:"):
         hist.reemplazar_clientes(editado.to_dict("records"))
         E["cli_ver"] += 1
         st.success("Clientes guardados.")
@@ -1758,8 +1796,8 @@ def clientes_ui():
 
 
 def vista_historial():
-    st.header("📚 Historial")
-    tab_cot, tab_cli = st.tabs(["Cotizaciones", "👥 Clientes"])
+    st.header("Historial")
+    tab_cot, tab_cli = st.tabs(["Cotizaciones", "Clientes"])
     with tab_cot:
         historial_cotizaciones()
     with tab_cli:
@@ -1784,13 +1822,13 @@ def borrar_producto(clave: str):
 
 def vista_productos():
     E.setdefault("p_ver", 0)
-    st.header("📦 Mis productos")
+    st.header("Mis productos")
     st.write("Aquí están los productos que he aprendido. Puedes corregir nombres, anotar el **costo** y el **margen** "
              "para que te sugiera el precio de venta, y cambiar su foto o su ficha.")
     if "p_msg" in E:
         nivel, texto = E.pop("p_msg")
         (st.success if nivel == "ok" else st.error)(texto)
-    with st.expander("➕ Agregar un producto a mano"):
+    with st.expander("Agregar un producto a mano"):
         n1, n2 = st.columns(2)
         nuevo_cod = n1.text_input("Código del producto", key="np_cod")
         nuevo_nom = n2.text_input("Nombre", key="np_nom")
@@ -1813,7 +1851,7 @@ def vista_productos():
         return
     mostrar = pd.DataFrame({
         "Código": [f["clave"] for f in filas], "Producto": [f["nombre"] for f in filas],
-        "Foto": ["✅" if f["foto"] else "❌" for f in filas], "Ficha": ["✅" if f["ficha"] else "❌" for f in filas],
+        "Foto": ["Disponible" if f["foto"] else "Falta" for f in filas], "Ficha": ["Disponible" if f["ficha"] else "Falta" for f in filas],
         "Último precio neto": [f["precio_neto"] for f in filas], "Costo neto": [f["costo_neto"] for f in filas],
         "Margen %": [f["margen_pct"] for f in filas],
         "Sugerido neto": [f["sugerido_neto"] for f in filas],
@@ -1827,7 +1865,7 @@ def vista_productos():
                       | {"Margen %": st.column_config.NumberColumn(format="%.1f %%", min_value=0, step=1)})
     st.caption("Precio sugerido = costo × (1 + margen). El margen es sobre el costo: con costo $10.000 y margen 30 % "
                "el precio neto sugerido es $13.000. Al crear un pedido, estos productos aparecen con su precio ya puesto.")
-    if st.button("💾 Guardar cambios de la tabla"):
+    if st.button("Guardar cambios de la tabla", icon=":material/save:"):
         cambios = 0
         for (_, fila), f in zip(editado.iterrows(), filas):
             nuevos = {"nombre": fila["Producto"], "costo_neto": fila["Costo neto"], "margen_pct": fila["Margen %"],
@@ -1846,7 +1884,7 @@ def vista_productos():
     elegido = st.selectbox("Elige un producto para ver o cambiar su foto y su ficha", codigos, key="p_sel")
     nombre = next(f["nombre"] for f in filas if f["clave"] == elegido)
     tarjeta(elegido, nombre)
-    with st.expander("✏️ Cambiar el código o eliminar este producto"):
+    with st.expander("Cambiar el código o eliminar este producto"):
         st.text_input("Nuevo código", key=f"ren_{elegido}")
         st.checkbox("Si ya existe un producto con ese código, combinarlos", key=f"comb_{elegido}")
         st.button("Cambiar el código", key=f"renb_{elegido}", on_click=renombrar_producto, args=(elegido,))
@@ -1861,10 +1899,11 @@ if TEMA_ACTIVO:
     st.markdown('<h1 class="titulo"><span class="gota"></span>Giovalia · Cotizador comercial</h1>',
                 unsafe_allow_html=True)
 else:
-    st.title("💧 Giovalia · Cotizador comercial")
-    st.info("🎨 Instalé el nuevo diseño. Presiona la tecla **F5** (actualizar la página) para verlo. "
+    st.title("Giovalia · Cotizador comercial")
+    st.info("Instalé el nuevo diseño. Presiona la tecla **F5** (actualizar la página) para verlo. "
             "Si sigue igual, cierra la ventana negra y abre el programa de nuevo.")
-vista = st.radio("Ir a", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
+with st.container(key="app-navigation"):
+    vista = st.radio("Ir a", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
 if vista == VISTAS[1]:
     vista_historial()
 elif vista == VISTAS[2]:
