@@ -1990,15 +1990,13 @@ def configuracion_compacta():
         st.divider()
         st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=lambda: E.clear())
 
-    # Crear servicios fuera del popover garantiza que estén disponibles aunque no se abra el panel.
-    carpeta_activa = E.get("config_carpeta", "biblioteca")
-    bib = ct.Biblioteca(carpeta_activa)
-    hist = hs.Historial(carpeta_activa)
+    # El contenido del popover se calcula también cuando está cerrado; reutilizamos sus servicios
+    # para evitar abrir dos instancias del catálogo y del historial en cada ejecución.
     api_key_actual, _ = li.buscar_api_key(APP_DIR)
     if not api_key_actual:
         api_key_actual = E.get("config_api_key", "")
     usar_lo = bool(E.get("config_usar_lo", False))
-    return carpeta_activa, bib, hist, api_key_actual, usar_lo
+    return carpeta, bib_panel, hist_panel, api_key_actual, usar_lo
 
 
 # ============================================================== PANTALLA
