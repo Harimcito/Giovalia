@@ -452,15 +452,34 @@ st.markdown("<style>" + CSS_BASE + CSS_TINTA + (CSS_ANIMACION if ANIMAR_FONDO el
 
 
 def crear_respaldo_biblioteca(carpeta: Path) -> bytes:
-    """Empaqueta biblioteca, base SQLite, cotizaciones, fotos y fichas sin tocar los originales."""
+    """Empaqueta una copia consistente de SQLite y los archivos compartidos."""
     if not carpeta.exists():
         raise FileNotFoundError(f"No existe la carpeta de biblioteca: {carpeta}")
+    db_origen = carpeta / "cotizador.db"
+    if not db_origen.is_file():
+        raise FileNotFoundError(f"No existe la base de datos de la biblioteca: {db_origen}")
+
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
-        for ruta in sorted(carpeta.rglob("*")):
-            if not ruta.is_file() or "__pycache__" in ruta.parts or ".git" in ruta.parts:
-                continue
-            archivo_zip.write(ruta, arcname=str(Path(carpeta.name) / ruta.relative_to(carpeta)))
+    with tempfile.TemporaryDirectory(prefix="gioval-respaldo-") as temporal:
+        db_copia = Path(temporal) / "cotizador.db"
+        origen = sqlite3.connect(str(db_origen), timeout=30)
+        destino = sqlite3.connect(str(db_copia), timeout=30)
+        try:
+            # El backup API de SQLite captura una instantánea coherente aunque otro usuario
+            # esté guardando una cotización en ese momento.
+            origen.backup(destino)
+        finally:
+            destino.close()
+            origen.close()
+
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
+            for ruta in sorted(carpeta.rglob("*")):
+                if not ruta.is_file() or "__pycache__" in ruta.parts or ".git" in ruta.parts:
+                    continue
+                if ruta.name in {"cotizador.db-wal", "cotizador.db-shm"}:
+                    continue
+                nombre_zip = str(Path(carpeta.name) / ruta.relative_to(carpeta))
+                archivo_zip.write(db_copia if ruta == db_origen else ruta, arcname=nombre_zip)
     if buffer.tell() == 0:
         raise ValueError("La biblioteca no contiene archivos para respaldar.")
     return buffer.getvalue()
