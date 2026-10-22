@@ -390,32 +390,54 @@ elif vista_actual == "Radar de oportunidades":
         if not ticket.strip():
             st.error("Ingresa tu ticket personal en «Conexiones y criterios económicos» o importa un Excel/CSV oficial.")
         else:
-            palabras = [x.strip() for x in terminos_texto.splitlines() if x.strip()]
+            palabras = list(dict.fromkeys(x.strip() for x in terminos_texto.splitlines() if x.strip()))
             regiones = [k for k, v in REGIONES.items() if v in regiones_nombres]
-            with st.spinner("Consultando ChileCompra..."):
+            if not palabras:
+                st.warning("Escribe al menos una palabra clave.")
+            else:
+                if len(palabras) > 8:
+                    st.warning("La API admite hasta 8 términos por operación; se usarán los primeros 8.")
+                barra_busqueda = st.progress(0.0, text="Preparando búsqueda…")
+                detalle_busqueda = st.empty()
+
+                def progreso_api(actual: int, total: int, termino: str) -> None:
+                    barra_busqueda.progress(
+                        actual / max(total, 1),
+                        text=f"Consulta {actual} de {total}",
+                    )
+                    detalle_busqueda.caption(f"Palabra clave: {termino}")
+
                 try:
                     encontrados, errores_api, llamadas = buscar_compras_agiles(
                         ticket=ticket,
-                        palabras=palabras,
+                        palabras=palabras[:8],
                         regiones=regiones,
                         estados=estados_api,
                         tamano_pagina=max_registros,
+                        on_progress=progreso_api,
                     )
-                    guardados = 0
-                    for r in encontrados:
-                        store.guardar_oportunidad(r)
-                        guardados += 1
-                    if guardados:
-                        st.success(
-                            f"Consulta terminada: {guardados} oportunidad(es) nueva(s) o actualizada(s), "
-                            f"con {llamadas} solicitud(es) a la API. La lista es compartida con el otro trabajador."
+                    for registro in encontrados:
+                        store.guardar_oportunidad(registro)
+                    barra_busqueda.empty()
+                    detalle_busqueda.empty()
+                    if encontrados:
+                        mensaje = (
+                            f"Búsqueda terminada: {len(encontrados)} oportunidad(es) nueva(s) o actualizada(s), "
+                            f"{llamadas} consulta(s) a ChileCompra."
                         )
-                    elif not errores_api:
-                        st.info("No encontré coincidencias con esos filtros. Prueba otros términos o regiones.")
-                    for error in errores_api:
-                        st.warning(error)
+                        if errores_api:
+                            mensaje += " Avisos parciales: " + " · ".join(errores_api[:2])
+                            poner_aviso(mensaje, "warning")
+                        else:
+                            poner_aviso(mensaje, "success")
+                    elif errores_api:
+                        poner_aviso("No se pudo completar la búsqueda. " + " · ".join(errores_api[:3]), "warning")
+                    else:
+                        poner_aviso("No encontré coincidencias. Prueba otros términos o amplía la región.", "info")
                     st.rerun()
                 except (APICompraAgilError, ValueError) as exc:
+                    barra_busqueda.empty()
+                    detalle_busqueda.empty()
                     st.error(str(exc))
 
     st.divider()
@@ -447,7 +469,10 @@ elif vista_actual == "Radar de oportunidades":
                 store.guardar_oportunidad(r)
                 importados += 1
             if importados:
-                st.success(f"Importé {importados} registro(s). Se omitieron {omitidos} fila(s) sin título reconocible.")
+                poner_aviso(
+                    f"Importación completada: {importados} registro(s) guardado(s); "
+                    f"{omitidos} fila(s) omitida(s) por falta de título."
+                )
                 st.rerun()
             else:
                 st.warning(
@@ -527,8 +552,20 @@ elif vista_actual == "Radar de oportunidades":
                 "Seguimiento": r["decision"],
                 "Fuente": r["fuente"],
             })
+        limite_tabla = st.selectbox(
+            "Filas visibles",
+            options=[25, 50, 100],
+            index=1,
+            key="radar_limite_tabla",
+            help="Usa la búsqueda por código, organismo o título para reducir la lista.",
+        )
+        st.caption(f"Hay {len(lista)} oportunidad(es) con estos filtros; se muestran hasta {limite_tabla}.")
         st.dataframe(
-            pd.DataFrame(tabla), hide_index=True, width="stretch",
+            pd.DataFrame([{
+                **fila,
+                "Plazo": estado_plazo(next((x.get("fecha_cierre") for x in lista if x["codigo"] == fila["Código"]), "")),
+            } for fila in tabla[:limite_tabla]]),
+            hide_index=True, width="stretch",
             column_config={"Presupuesto ref. CLP": st.column_config.NumberColumn(format="$ %d")},
         )
         claves = [r["codigo"] for r in lista]
@@ -572,10 +609,21 @@ elif vista_actual == "Radar de oportunidades":
                         st.rerun()
                     except APICompraAgilError as exc:
                         st.error(str(exc))
-            st.link_button(
-                "Abrir portal oficial para revisar el código",
+            a_portal, a_eval = st.columns([1, 1])
+            a_portal.link_button(
+                "Revisar en Mercado Público",
                 PORTAL_URL,
                 icon=":material/open_in_new:",
+                width="stretch",
+            )
+            a_eval.button(
+                "Evaluar rentabilidad",
+                icon=":material/calculate:",
+                type="primary",
+                width="stretch",
+                on_click=navegar_a_evaluacion,
+                args=(elegido,),
+                key=f"ir_evaluar_{slug(elegido)}",
             )
             st.caption("En el portal oficial, busca por el código indicado y confirma estado, fechas, requisitos y documentos.")
             with st.form(f"seguimiento_{slug(elegido)}"):
@@ -662,12 +710,17 @@ elif vista_actual == "Evaluar rentabilidad":
                 for i, req in enumerate(productos_req):
                     desc = str(req.get("descripcion") or req.get("nombre") or f"Producto {i+1}")
                     old = eval_lineas_guardadas[i] if i < len(eval_lineas_guardadas) else {}
-                    matches = sugerir_productos_catalogo(desc, indice, limite=5)
+                    matches = sugerencias_catalogo_cache(desc, FIRMA_INDICE, indice)
                     defecto = str(old.get("codigo_catalogo") or "")
                     if defecto not in indice:
                         defecto = matches[0]["clave"] if matches and matches[0]["score"] >= 0.30 else ""
                     idx_defecto = opciones_codigo.index(defecto) if defecto in opciones_codigo else 0
-                    with st.expander(f"{i+1}. {desc[:95]}", expanded=True):
+                    equivalencia_guardada = bool(old.get("equivalencia_confirmada", False))
+                    codigo_guardado = bool(old.get("codigo_catalogo"))
+                    with st.expander(
+                        f"{i+1}. {desc[:95]}",
+                        expanded=(i == 0 or not equivalencia_guardada or not codigo_guardado),
+                    ):
                         c1, c2 = st.columns([2.2, 1])
                         codigo_prod = c1.selectbox(
                             "Producto de tu biblioteca",
