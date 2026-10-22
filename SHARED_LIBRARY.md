@@ -23,6 +23,8 @@ Si Render asigna una URL distinta, actualiza DEFAULT_CLOUD_URL en desktop_launch
 
 GIOVAL_REQUIRE_ACCESS=true protege la aplicación con la clave GIOVAL_ACCESS_PASSWORD. Quien tenga esa clave puede consultar y editar la biblioteca compartida completa, incluidos los datos de clientes y cotizaciones. Es una clave compartida, no identifica a cada persona; si más adelante se necesita revocar usuarios individualmente y tener auditoría por persona, habrá que implementar cuentas individuales.
 
+La clave de OpenAI, si se usan funciones IA, se configura como variable secreta OPENAI_API_KEY en Render. En modo compartido la interfaz no permite que cada sesión sobrescriba la clave global del servidor.
+
 Si la clave del servidor no está configurada, la aplicación falla cerrada y no muestra datos. Nunca incluyas esa clave dentro del instalador.
 
 ## Importar la biblioteca existente (antes de distribuir)
