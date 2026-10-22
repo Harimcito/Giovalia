@@ -366,7 +366,7 @@ with st.popover("Ayuda / IA", icon=":material/help:"):
     if clave_ia:
         modelo_ia = os.environ.get("GIOVAL_RADAR_AI_MODEL", "gpt-6-luna").strip() or "gpt-6-luna"
         origen_mostrado = "esta sesión" if clave_ingresada.strip() else origen_clave
-        st.caption(f"IA conectada por API · Modelo: {modelo_ia} · Clave desde {origen_mostrado}")
+        st.caption(f"IA configurada por API · Modelo: {modelo_ia} · Clave desde {origen_mostrado}")
     else:
         st.info("Guía local activa. Para preguntas libres con IA, configura OPENAI_API_KEY o pega una clave arriba.")
     st.caption(
