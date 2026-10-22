@@ -1574,12 +1574,25 @@ def pedido_ui():
                  for ln in lineas_orden if _esta_marcado(ln.get("incluir"), True)],
                 {**cliente, "numero": registro["numero"]}, ruta,
             )
-            hist.actualizar(
-                E["cot_id"], datos={"lineas": lineas_orden, "cliente": cliente, "precios_modo": E["precios_modo"],
-                                    "origen_pedido": "pedido", "paso": 2},
-                fecha=cliente["fecha"], cliente=nombre, rut=rut, neto=totales["neto"],
-                iva=totales["iva"], total=totales["total"], con_iva=int(con_iva), origen="pedido",
-            )
+            campos_cotizacion = {
+                "fecha": cliente["fecha"], "cliente": nombre, "rut": rut,
+                "neto": totales["neto"], "iva": totales["iva"], "total": totales["total"],
+                "con_iva": int(con_iva), "origen": "pedido",
+            }
+            datos_cotizacion = {
+                "lineas": lineas_orden, "cliente": cliente, "precios_modo": E["precios_modo"],
+                "origen_pedido": "pedido", "paso": 2,
+            }
+            if GIOVAL_REQUIRE_ACCESS:
+                hist.actualizar_si_version(
+                    E["cot_id"], E.get("_cotizacion_version"),
+                    datos=datos_cotizacion, **campos_cotizacion
+                )
+            else:
+                hist.actualizar(E["cot_id"], datos=datos_cotizacion, **campos_cotizacion)
+            registro_nuevo = hist.obtener(E["cot_id"])
+            if registro_nuevo:
+                E["_cotizacion_version"] = registro_nuevo.get("actualizado")
             hist.guardar_archivos(E["cot_id"], xlsx=ruta)
             hist.guardar_cliente(cliente)
         except Exception as exc:
@@ -2085,9 +2098,22 @@ def paso_4():
         if st.button("Volver a editar y regenerar el PDF", type="primary", width="stretch"):
             for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
                 E.pop(clave_estado, None)
-            if E.get("cot_id") and hist.obtener(E["cot_id"]):
-                hist.actualizar(E["cot_id"], pdf=None, estado="Borrador")
-            E["editado_manual"] = True
+            try:
+                if E.get("cot_id") and hist.obtener(E["cot_id"]):
+                    if GIOVAL_REQUIRE_ACCESS:
+                        hist.actualizar_si_version(
+                            E["cot_id"], E.get("_cotizacion_version"), estado="Borrador"
+                        )
+                    else:
+                        hist.actualizar(E["cot_id"], pdf=None, estado="Borrador")
+                    registro_actual = hist.obtener(E["cot_id"])
+                    if registro_actual:
+                        E["_cotizacion_version"] = registro_actual.get("actualizado")
+                E["editado_manual"] = True
+            except hs.ConflictoActualizacion as exc:
+                E["_conflicto_guardado"] = True
+                E["_conflicto_guardado_id"] = E.get("cot_id")
+                E["_conflicto_guardado_mensaje"] = str(exc)
             st.rerun()
 
     if "pdf_bytes" in E:
@@ -2209,20 +2235,35 @@ def historial_cotizaciones():
         column_config={"id": None, "Total": st.column_config.NumberColumn(format="$ %d"),
                        "Estado": st.column_config.SelectboxColumn(options=hs.ESTADOS, required=True)})
     if st.button("Guardar estados" if GIOVAL_REQUIRE_ACCESS else "Guardar estados y notas", icon=":material/save:"):
-        cambios = 0
+        cambios, conflictos = 0, 0
         for (_, fila), reg in zip(editado.iterrows(), regs):
             nuevo_estado = fila["Estado"]
             if GIOVAL_REQUIRE_ACCESS:
                 if nuevo_estado != reg["estado"]:
-                    hist.actualizar(reg["id"], estado=nuevo_estado)
-                    cambios += 1
+                    try:
+                        hist.actualizar_si_version(reg["id"], reg.get("actualizado"), estado=nuevo_estado)
+                        cambios += 1
+                        if E.get("cot_id") == reg["id"]:
+                            actual = hist.obtener(reg["id"])
+                            E["_cotizacion_version"] = actual.get("actualizado") if actual else None
+                    except hs.ConflictoActualizacion:
+                        conflictos += 1
+                        if E.get("cot_id") == reg["id"]:
+                            E["_conflicto_guardado"] = True
+                            E["_conflicto_guardado_id"] = reg["id"]
+                            E["_conflicto_guardado_mensaje"] = (
+                                "Otra sesión modificó esta cotización; no cambié su estado. Recarga antes de editarla."
+                            )
             else:
                 nuevas_notas = str(fila["Notas"] or "")
                 if nuevo_estado != reg["estado"] or nuevas_notas != (reg["notas"] or ""):
                     hist.actualizar(reg["id"], estado=nuevo_estado, notas=nuevas_notas)
                     cambios += 1
         E["h_ver"] += 1
-        st.success(f"Guardado ({cambios} cambios).")
+        if conflictos:
+            st.warning(f"Guardé {cambios} cambios. No se pudieron guardar {conflictos} porque otra sesión modificó esas cotizaciones.")
+        else:
+            st.success(f"Guardado ({cambios} cambios).")
         st.rerun()
 
     st.divider()
