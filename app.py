@@ -61,7 +61,7 @@ def preparar_tema() -> bool:
 
 TEMA_ACTIVO = preparar_tema()
 
-st.set_page_config(page_title="Giovalia · Cotizador comercial", page_icon=":material/description:",
+st.set_page_config(page_title="Gioval · Cotizador comercial", page_icon=":material/description:",
                    layout="wide", initial_sidebar_state="collapsed")
 
 CSS_BASE = """
@@ -993,7 +993,7 @@ def pedido_ui():
                                        accept_multiple_files=True, key="orden_ia")
         st.caption("El pedido se envía a OpenAI para leerlo. Después revisa que haya quedado bien.")
         if not api_key:
-            st.warning("Para leer PDF o fotos necesito la clave de OpenAI (Ajustes, arriba a la izquierda).")
+            st.warning("Para leer PDF o fotos necesito la clave de OpenAI (Ajustes, arriba a la derecha).")
 
     if st.button("Leer el pedido", icon=":material/description:", type="primary", width="stretch"):
         try:
@@ -1156,7 +1156,7 @@ def cotizacion_ui():
 def paso_1():
     st.header("1. ¿Qué tienes?")
     if not api_key:
-        st.info("Con la clave de OpenAI (en Ajustes, arriba a la izquierda) entiendo mucho mejor los "
+        st.info("Con la clave de OpenAI (en Ajustes, arriba a la derecha) entiendo mucho mejor los "
                 "productos y puedo leer pedidos en PDF o foto.")
     tab_pedido, tab_cot = st.tabs(["Tengo un pedido", "Ya tengo la cotización hecha"])
     with tab_pedido:
@@ -1170,7 +1170,7 @@ def agregar_desde_catalogo():
     with st.expander("Agregar producto desde mi catálogo", expanded=False):
         filas = bib.filas_catalogo()
         if not filas:
-            st.info("Todavía no hay productos en el catálogo. Puedes agregarlos en «Mis productos».")
+            st.info("Todavía no hay productos en el catálogo. Puedes agregarlos aquí o desde una cotización.")
             return
         busqueda = st.text_input("Buscar por código o nombre", key="catalogo_busqueda",
                                  placeholder="Ej.: CF283A, tóner HP, resma oficio")
@@ -1818,7 +1818,7 @@ def borrar_producto(clave: str):
 
 def vista_productos():
     E.setdefault("p_ver", 0)
-    st.header("Mis productos")
+    st.header("Catálogo de productos")
     st.write("Aquí están los productos que he aprendido. Puedes corregir nombres, anotar el **costo** y el **margen** "
              "para que te sugiera el precio de venta, y cambiar su foto o su ficha.")
     if "p_msg" in E:
