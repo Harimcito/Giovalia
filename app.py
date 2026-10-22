@@ -2834,12 +2834,29 @@ def configuracion_compacta():
                 st.success("Numeración guardada.")
 
         with st.expander("Copia de seguridad", expanded=False):
-            st.caption("Incluye la base de datos, catálogo, fotos, fichas y cotizaciones guardadas.")
+            if GIOVAL_REQUIRE_ACCESS:
+                st.caption(
+                    "El ZIP incluye productos, fotos, fichas y el historial comercial compartido; "
+                    "no incluye la libreta de clientes ni PDF/Excel finales con datos personales."
+                )
+            else:
+                st.caption("El ZIP incluye la base de datos, catálogo, fotos, fichas y archivos de cotizaciones.")
+            ultimo_respaldo = hist_panel.config("ultimo_respaldo_preparado")
+            if ultimo_respaldo:
+                try:
+                    fecha_respaldo = datetime.fromisoformat(ultimo_respaldo).strftime("%d/%m/%Y a las %H:%M")
+                except (TypeError, ValueError):
+                    fecha_respaldo = str(ultimo_respaldo)
+                st.caption(f"Último ZIP preparado: {fecha_respaldo}.")
+            else:
+                st.caption("Todavía no se ha preparado un respaldo desde este equipo.")
             if st.button("Preparar respaldo", icon=":material/archive:", key="preparar_respaldo", width="stretch"):
                 try:
                     E["_respaldo_zip"] = crear_respaldo_biblioteca(bib_panel.dir)
-                    E["_respaldo_nombre"] = f"respaldo_giovalia_{datetime.now():%Y%m%d_%H%M%S}.zip"
-                    st.success("Respaldo preparado. Descárgalo y guárdalo fuera de la carpeta del programa.")
+                    ahora_respaldo = datetime.now()
+                    E["_respaldo_nombre"] = f"respaldo_giovalia_{ahora_respaldo:%Y%m%d_%H%M%S}.zip"
+                    hist_panel.set_config("ultimo_respaldo_preparado", ahora_respaldo.isoformat(timespec="seconds"))
+                    st.success("ZIP preparado. Descárgalo y guarda una copia fuera del computador central.")
                 except Exception as exc:
                     E.pop("_respaldo_zip", None)
                     st.error(f"No pude preparar el respaldo: {exc}")
@@ -2852,6 +2869,10 @@ def configuracion_compacta():
                     mime="application/zip",
                     width="stretch",
                     key="descargar_respaldo",
+                )
+                st.caption(
+                    "La fecha indica cuándo se generó el ZIP, no confirma que lo hayas descargado. "
+                    "Guárdalo también en otro disco o ubicación segura."
                 )
 
             if GIOVAL_REQUIRE_ACCESS and GIOVAL_ALLOW_INITIAL_IMPORT:
