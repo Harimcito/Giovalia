@@ -342,6 +342,94 @@ vista_actual = st.segmented_control(
     label_visibility="collapsed",
     width="stretch",
 )
+
+# Ayuda contextual disponible desde todas las secciones.
+from radar_comercial.asistente import (
+    GUIAS_RAPIDAS,
+    buscar_api_key as buscar_clave_asistente,
+    responder_con_ia,
+    responder_local as responder_sin_ia,
+)
+
+with st.popover("Ayuda / IA", icon=":material/help:"):
+    st.markdown("### Asistente de uso de Gioval")
+    st.caption(f"Sección actual: **{vista_actual}**")
+    clave_configurada, origen_clave = buscar_clave_asistente(RAIZ)
+    clave_ingresada = st.text_input(
+        "Clave de OpenAI (opcional; solo esta sesión)",
+        type="password",
+        key="radar_ia_clave_sesion",
+        help="Se usa solo en memoria de esta sesión. No se guarda en archivos ni en la base de datos.",
+        placeholder="Pega tu API key si no está configurada",
+    )
+    clave_ia = clave_ingresada.strip() or clave_configurada
+    if clave_ia:
+        modelo_ia = os.environ.get("GIOVAL_RADAR_AI_MODEL", "gpt-6-luna").strip() or "gpt-6-luna"
+        origen_mostrado = "esta sesión" if clave_ingresada.strip() else origen_clave
+        st.caption(f"IA conectada por API · Modelo: {modelo_ia} · Clave desde {origen_mostrado}")
+    else:
+        st.info("Guía local activa. Para preguntas libres con IA, configura OPENAI_API_KEY o pega una clave arriba.")
+    st.caption(
+        "No incluyas tickets de ChileCompra, claves de acceso, RUT ni datos personales. "
+        "La IA recibe tu pregunta y el historial reciente de este chat, no la base comercial."
+    )
+    tema_ayuda = st.selectbox(
+        "Guía rápida",
+        options=list(GUIAS_RAPIDAS.keys()),
+        key="radar_ia_guia_tema",
+    )
+    with st.container(border=True):
+        st.markdown(GUIAS_RAPIDAS[tema_ayuda])
+    mensajes_ia = st.session_state.setdefault("radar_ia_mensajes", [])
+    for mensaje_ia in mensajes_ia[-12:]:
+        with st.chat_message("assistant" if mensaje_ia["role"] == "assistant" else "user"):
+            st.markdown(mensaje_ia["content"])
+    with st.form("radar_asistente_form", clear_on_submit=True):
+        pregunta_ia = st.text_area(
+            "¿Qué necesitas hacer o entender?",
+            placeholder="Ej.: ¿por qué el margen sale incompleto?",
+            max_chars=1200,
+            height=80,
+            key="radar_ia_pregunta",
+        )
+        enviar_ia = st.form_submit_button(
+            "Preguntar",
+            type="primary",
+            width="stretch",
+            disabled=not bool(pregunta_ia.strip()),
+        )
+    if st.button("Borrar conversación", key="radar_ia_borrar", width="stretch"):
+        st.session_state["radar_ia_mensajes"] = []
+        st.rerun()
+    if enviar_ia and pregunta_ia.strip():
+        historial_chat_previo = [
+            {"role": m["role"], "content": m["content"]}
+            for m in mensajes_ia[-8:]
+            if m.get("role") in {"user", "assistant"}
+        ]
+        nuevo_historial = [*mensajes_ia, {"role": "user", "content": pregunta_ia.strip()}][-12:]
+        st.session_state["radar_ia_mensajes"] = nuevo_historial
+        if clave_ia:
+            try:
+                with st.spinner("Preparando respuesta…"):
+                    respuesta_ia = responder_con_ia(
+                        pregunta=pregunta_ia.strip(),
+                        vista_actual=vista_actual,
+                        api_key=clave_ia,
+                        historial=historial_chat_previo,
+                    )
+            except Exception as exc:
+                respuesta_ia = (
+                    "No pude conectar con la IA. Revisa la clave, el acceso al modelo, el saldo/cuota "
+                    "de API y tu conexión a internet. La guía rápida sigue disponible. "
+                    f"Detalle técnico: {type(exc).__name__}: {str(exc)[:240]}"
+                )
+        else:
+            respuesta_ia = responder_sin_ia(pregunta_ia.strip(), vista_actual)
+        nuevo_historial.append({"role": "assistant", "content": respuesta_ia})
+        st.session_state["radar_ia_mensajes"] = nuevo_historial[-12:]
+        st.rerun()
+
 mostrar_aviso_pendiente()
 
 if vista_actual == "Panel comercial":
