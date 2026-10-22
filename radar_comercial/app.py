@@ -85,6 +85,12 @@ div[data-testid="stDataFrame"] { border:1px solid #2A2D39; border-radius:8px; ov
 button[kind="primary"] { font-weight:650 !important; }
 .st-key-radar-header { margin-bottom:.7rem; }
 .radar-flash { margin:.6rem 0 1rem; }
+@media (max-width: 700px) {
+  .block-container { padding-left:.8rem; padding-right:.8rem; }
+  .hero-radar { padding:1rem; }
+  .hero-radar h1 { font-size:1.35rem; line-height:1.3; }
+  [data-testid="stSegmentedControl"] button { padding-left:.32rem !important; padding-right:.32rem !important; font-size:.78rem !important; }
+}
 </style>
 """
 st.markdown(ESTILO, unsafe_allow_html=True)
@@ -639,6 +645,8 @@ elif vista_actual == "Radar de oportunidades":
             column_config={"Presupuesto ref. CLP": st.column_config.NumberColumn(format="$ %d")},
         )
         claves = [r["codigo"] for r in lista]
+        if st.session_state.get("radar_opportunity_selected") not in claves:
+            st.session_state["radar_opportunity_selected"] = claves[0]
         elegido = st.selectbox(
             "Abrir oportunidad",
             options=claves,
