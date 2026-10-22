@@ -107,6 +107,11 @@ button[kind="secondary"], [data-testid="stBaseButton-secondary"] { background: #
 button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #F0F5F7; border-color: #176B7A; }
 [data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 15px; box-shadow: 0 3px 12px rgba(25,51,68,.045); }
 [data-testid="stExpander"] { border-color: #D7E0E7; border-radius: 11px; }
+.inicio-hero { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 16px;
+    padding: 24px 26px; margin: 4px 0 22px; box-shadow: 0 4px 16px rgba(25,51,68,.04); }
+.inicio-hero h2 { margin: 5px 0 7px; color: #193344; font-size: 1.7rem !important; }
+.inicio-hero p { margin: 0; color: #5B6D7A; font-size: 1rem; line-height: 1.55; }
+.inicio-kicker { color: #176B7A; font-size: .75rem; font-weight: 800; letter-spacing: .12em; }
 """
 CSS_ANIMACION = """
 @keyframes tinta { 0% { background-position: 0% 0%, 100% 0%, 60% 100%, 0% 100%, 0 0; }
