@@ -33,10 +33,12 @@ Name: "{localappdata}\Gioval"; Flags: uninsneveruninstall
 [Files]
 Source: "..\dist\Gioval\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "webview2\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "..\configurar_cliente_gioval.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Gioval"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{localappdata}\Gioval"
 Name: "{autodesktop}\Gioval"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{localappdata}\Gioval"
+Name: "{autoprograms}\Configurar conexión de Gioval"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\configurar_cliente_gioval.ps1"""; WorkingDir: "{localappdata}\Gioval"
 
 [Run]
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Preparando el componente visual de Windows..."; Flags: waituntilterminated; Check: not IsWebView2Installed
