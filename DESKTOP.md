@@ -1,18 +1,22 @@
 # Cliente de escritorio de Gioval
 
-El instalador de Windows abre una ventana propia con pywebview/WebView2, pero el contenido y los datos comerciales están alojados en un único servicio central. El cliente no inicia una base de datos local ni guarda copias autónomas del catálogo.
+El instalador de Windows abre una ventana propia con pywebview/WebView2 y se conecta a un servidor central. El cliente no guarda una base de datos comercial local.
 
-Lee SHARED_LIBRARY.md para configurar Render, proteger el acceso, importar la biblioteca existente y distribuir instaladores.
+## Alternativa gratuita recomendada
 
-## Cliente Windows
+Consulta [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md) para ejecutar el servidor en un computador Windows existente y compartir la biblioteca sin pagar alojamiento mensual.
 
-El flujo GitHub Actions "Crear instalador de escritorio para Windows" compila el cliente y publica el artefacto Gioval-Instalador-Windows-x64. Después de completar un despliegue en Render y confirmar la URL del servicio:
+- En el computador central descarga el repositorio y ejecuta `instalar_servidor_gioval.bat` una vez.
+- Después inicia el servidor con `iniciar_servidor_gioval.bat` y deja la ventana abierta.
+- En cada computador cliente instala `Gioval-Setup.exe`.
+- En el menú Inicio, ejecuta **Configurar conexión de Gioval** y escribe la dirección central que corresponda: HTTP privado dentro de la oficina o HTTPS si se configuró un túnel seguro para acceder desde internet.
+- Comparte la clave de acceso solo con quienes estén autorizados.
 
-1. Descarga el artefacto más reciente de GitHub Actions.
-2. Extrae Gioval-Setup.exe del ZIP.
-3. Ejecuta el instalador en cada computador.
-4. Comparte la clave de acceso de la biblioteca solo con las personas autorizadas.
+La modalidad de red local no tiene costo de alojamiento, pero el computador servidor debe permanecer encendido. El cliente requiere Windows x64, conexión a la red del servidor y Microsoft Edge WebView2 Runtime. No requiere Python en los equipos clientes.
 
-El cliente requiere conexión a internet y Microsoft Edge WebView2 Runtime. No requiere que la persona instale Python ni ejecute comandos.
+## Compilar el cliente Windows manualmente
 
-No distribuyas el instalador antes de que el servicio central esté desplegado y la URL configurada. Si la dirección cambia, actualiza DEFAULT_CLOUD_URL en desktop_launcher.py y genera el instalador de nuevo.
+En Windows x64, con Python instalado para desarrollo:
+
+    python -m pip install -r requirements-desktop.txt
+    python -m PyInstaller --noconfirm --clean gioval_desktop.spec

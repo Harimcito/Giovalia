@@ -9,7 +9,9 @@ Dos formas de usarlo:
 
 ## App de escritorio y biblioteca compartida
 
-El instalador de Windows abre Gioval en una ventana independiente. Para compartir catálogo, clientes, cotizaciones, fotos, fichas y numeración entre todos los usuarios, usa el servicio central descrito en [SHARED_LIBRARY.md](SHARED_LIBRARY.md). Cada equipo debe conectarse a ese mismo servicio; las bibliotecas de instalaciones antiguas no se sincronizan automáticamente.
+El instalador de Windows abre Gioval en una ventana independiente y se conecta a un servidor central. La opción sin costo mensual está descrita en [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md): un computador Windows existente guarda la biblioteca y los demás equipos se conectan por red local o, opcionalmente, mediante un túnel HTTPS gratuito. No sincronices la base SQLite en tiempo real mediante carpetas de Google Drive/OneDrive.
+
+Para la alternativa alojada, consulta [SHARED_LIBRARY.md](SHARED_LIBRARY.md). No necesitas contratar Render para usar la modalidad gratuita.
 
 ## Instalación en Windows (una vez)
 1. Python 3.10 o superior desde python.org (marca "Add python.exe to PATH" al instalar).
