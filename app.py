@@ -1742,9 +1742,7 @@ def tarjeta(clave: str, desc: str):
             st.markdown(f"**{desc}**")
             st.caption(f"Código: {clave}")
             st.markdown(f"**Foto:** {'Disponible' if foto else 'Falta'} &nbsp; · &nbsp; **Ficha técnica:** {estado_ficha}")
-            if GIOVAL_REQUIRE_ACCESS:
-            d2.caption("El Excel se genera en tu sesión y se descarga; no se guarda en la biblioteca común.")
-        b1, b2 = st.columns(2)
+            b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
             if b1.button("Buscar en internet", key=f"b_{clave}", width="stretch"):
@@ -2190,6 +2188,8 @@ def historial_cotizaciones():
         if rec["xlsx"] and xlsx.exists():
             d2.download_button("Descargar el Excel", xlsx.read_bytes(), file_name=xlsx.name, icon=":material/download:",
                                width="stretch", key=f"dx_{rec['id']}")
+        if GIOVAL_REQUIRE_ACCESS:
+            d2.caption("El Excel se genera en tu sesión y se descarga; no se guarda en la biblioteca común.")
         b1, b2 = st.columns(2)
         b1.button("Usar como base de una cotización nueva", width="stretch", key=f"dup_{rec['id']}",
                   on_click=cargar_en_pedido, args=(rec["id"], False))
