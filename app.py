@@ -1,6 +1,8 @@
 """Cotizaciones con fotos y fichas técnicas. Ejecutar con:  streamlit run app.py"""
+import io
 import re
 import tempfile
+import zipfile
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -30,11 +32,11 @@ if isinstance(_pendiente_importado, dict):
             E[_clave_widget] = _valor_widget
 
 # ------------------------------------------------------------- DISEÑO "tinta en agua"
-ANIMAR_FONDO = True   # pon False si prefieres el fondo quieto
-TEMA_BASE = {"base": "light", "primaryColor": "#2A7090", "backgroundColor": "#F5F9FB",
-             "secondaryBackgroundColor": "#E3EFF5", "textColor": "#17394F", "font": "sans serif"}
-TEMA_EXTRA = {"baseRadius": "large", "buttonRadius": "large", "borderColor": "#C9DEE8",
-              "linkColor": "#2A7090", "dataframeHeaderBackgroundColor": "#DCEBF3"}
+ANIMAR_FONDO = False
+TEMA_BASE = {"base": "light", "primaryColor": "#176B7A", "backgroundColor": "#F5F7FA",
+             "secondaryBackgroundColor": "#EAF0F4", "textColor": "#193344", "font": "sans serif"}
+TEMA_EXTRA = {"baseRadius": "medium", "buttonRadius": "medium", "borderColor": "#D7E0E7",
+              "linkColor": "#176B7A", "dataframeHeaderBackgroundColor": "#EAF0F4"}
 
 
 def preparar_tema() -> bool:
@@ -59,61 +61,52 @@ def preparar_tema() -> bool:
 
 TEMA_ACTIVO = preparar_tema()
 
-st.set_page_config(page_title="Cotizaciones con fotos y fichas", page_icon="💧",
+st.set_page_config(page_title="Giovalia · Cotizador comercial", page_icon="💧",
                    layout="wide", initial_sidebar_state="collapsed")
 
 CSS_BASE = """
-html, body, .stApp { font-size: 18px; }
-.block-container { max-width: 1280px; padding-top: 2.4rem; }
-h2 { font-size: 1.6rem !important; }
+html, body, .stApp { font-size: 16px; }
+.block-container { max-width: 1460px; padding-top: 1.25rem; padding-bottom: 3rem; }
+h1 { font-size: 2rem !important; line-height: 1.2; }
+h2 { font-size: 1.45rem !important; line-height: 1.25; }
+h3 { font-size: 1.15rem !important; }
 .stButton > button, .stDownloadButton > button, .stLinkButton > a {
-    font-size: 1.05rem; padding: 0.65rem 1.2rem; border-radius: 14px; }
+    font-size: .98rem; font-weight: 600; padding: .58rem 1rem; border-radius: 10px;
+    min-height: 2.7rem; transition: all .15s ease-in-out; }
 .stAppDeployButton, [data-testid="stAppDeployButton"] { display: none; }
-.pasos { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 18px 0; }
-.paso { padding: 8px 16px; border-radius: 999px; border: 1px solid rgba(128,128,128,.45);
-        opacity: .7; font-size: .95rem; }
-.paso b { margin-right: 6px; }
-.paso.activo { opacity: 1; border: 2px solid #ff4b4b; background: rgba(255,75,75,.18); font-weight: 600; }
-.paso.hecho { opacity: 1; border-color: rgba(0,190,100,.7); background: rgba(0,190,100,.15); }
+[data-testid="stAlert"] { border-radius: 12px; }
+[data-baseweb="input"] > div, [data-baseweb="textarea"], [data-baseweb="select"] > div { border-radius: 9px; }
+[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 13px; padding: 13px 15px; }
+[data-testid="stMetricLabel"] { color: #5B6D7A; font-size: .85rem; }
+[data-testid="stMetricValue"] { color: #17394F; font-weight: 700; }
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] { border-radius: 10px; }
+.pasos { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+.paso { padding: 8px 15px; border-radius: 10px; border: 1px solid #D7E0E7; background: #FFFFFF; color: #526674; font-size: .9rem; }
+.paso b { margin-right: 7px; }
+.paso.activo { opacity: 1; border: 1px solid #176B7A; background: #176B7A; color: #FFFFFF; font-weight: 700; box-shadow: 0 3px 10px rgba(23,107,122,.14); }
+.paso.hecho { opacity: 1; border-color: #C1DDD5; background: #EAF5F1; color: #235E53; }
+[data-testid="stRadio"] div[role="radiogroup"] { gap: .5rem; }
+[data-testid="stRadio"] div[role="radiogroup"] label { border: 1px solid #D7E0E7; border-radius: 9px; padding: .25rem .65rem; background: #FFFFFF; }
+@media (max-width: 800px) {
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+    .paso { padding: 7px 9px; font-size: .82rem; }
+}
 """
 
 CSS_TINTA = """
-.stApp {
-  background:
-    radial-gradient(60vw 50vh at 5% 0%, rgba(86,170,205,.34), transparent 65%),
-    radial-gradient(50vw 45vh at 100% 8%, rgba(158,138,222,.26), transparent 65%),
-    radial-gradient(55vw 50vh at 85% 100%, rgba(110,205,190,.30), transparent 65%),
-    radial-gradient(45vw 40vh at 0% 95%, rgba(245,165,190,.22), transparent 65%),
-    linear-gradient(180deg, #F7FBFD 0%, #EEF6FA 100%);
-  background-size: 130% 130%, 130% 130%, 130% 130%, 130% 130%, 100% 100%;
-  background-attachment: fixed;
-}
-[data-testid="stHeader"] { background: transparent; }
-[data-testid="stSidebar"] > div:first-child { background: rgba(255,255,255,.6); backdrop-filter: blur(10px); }
-h1, h2, h3 { color: #17394F; letter-spacing: -0.01em; }
-h1.titulo { font-size: 2.1rem; font-weight: 700; margin: 0 0 .4rem 0; padding: 0;
-  background: linear-gradient(90deg, #17394F 0%, #2A7090 55%, #7A6BC4 100%);
-  -webkit-background-clip: text; background-clip: text; color: transparent; }
-.gota { display: inline-block; width: .8em; height: .8em; margin-right: .45rem; vertical-align: -0.05em;
-  border-radius: 62% 38% 55% 45% / 55% 45% 60% 40%;
-  background: radial-gradient(circle at 30% 30%, #A9E1F0, #2A7090 58%, #6C5CB5); }
-button[kind="primary"], [data-testid="stBaseButton-primary"] {
-  background: linear-gradient(135deg, #2A7090 0%, #4F8FB5 55%, #8A7FCB 100%); border: none; color: #fff;
-  box-shadow: 0 6px 18px rgba(42,112,144,.28); }
-button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover { filter: brightness(1.08); color: #fff; }
+.stApp { background: #F5F7FA; }
+[data-testid="stHeader"] { background: rgba(245,247,250,.92); }
+[data-testid="stSidebar"] > div:first-child { background: #F9FBFC; border-right: 1px solid #E1E7ED; }
+h1, h2, h3 { color: #193344; letter-spacing: -.015em; }
+h1.titulo { font-size: 2rem; font-weight: 750; margin: 0 0 .8rem 0; padding: 0; color: #17394F; }
+.gota { display: inline-block; width: .72em; height: .72em; margin-right: .45rem; vertical-align: -.03em; border-radius: 4px; background: #176B7A; }
+button[kind="primary"], [data-testid="stBaseButton-primary"] { background: #176B7A; border: 1px solid #176B7A; color: #FFFFFF; box-shadow: 0 3px 8px rgba(23,107,122,.13); }
+button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover { background: #125967; border-color: #125967; color: #FFFFFF; }
 button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled { opacity: .45; box-shadow: none; }
-button[kind="secondary"], [data-testid="stBaseButton-secondary"] {
-  background: rgba(255,255,255,.78); border: 1px solid rgba(42,112,144,.35); color: #17394F; }
-button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #fff; border-color: #2A7090; }
-[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) {
-  background: rgba(255,255,255,.72); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.95);
-  border-radius: 22px; box-shadow: 0 10px 34px rgba(50,100,135,.15); }
-[data-testid="stAlert"] { border-radius: 16px; }
-[data-baseweb="input"] > div, [data-baseweb="textarea"], [data-baseweb="select"] > div { border-radius: 14px; }
-.paso { background: rgba(255,255,255,.62); border-color: rgba(42,112,144,.25); color: #17394F; }
-.paso.activo { background: linear-gradient(135deg, #2A7090, #8A7FCB); color: #fff; border: none;
-  box-shadow: 0 6px 16px rgba(42,112,144,.28); }
-.paso.hecho { background: rgba(110,205,190,.38); border-color: rgba(60,160,150,.6); }
+button[kind="secondary"], [data-testid="stBaseButton-secondary"] { background: #FFFFFF; border: 1px solid #D0DAE2; color: #193344; }
+button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #F0F5F7; border-color: #176B7A; }
+[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 15px; box-shadow: 0 3px 12px rgba(25,51,68,.045); }
+[data-testid="stExpander"] { border-color: #D7E0E7; border-radius: 11px; }
 """
 CSS_ANIMACION = """
 @keyframes tinta { 0% { background-position: 0% 0%, 100% 0%, 60% 100%, 0% 100%, 0 0; }
@@ -123,6 +116,22 @@ CSS_ANIMACION = """
 """
 st.markdown("<style>" + CSS_BASE + (CSS_TINTA + (CSS_ANIMACION if ANIMAR_FONDO else "") if TEMA_ACTIVO else "")
             + "</style>", unsafe_allow_html=True)
+
+
+def crear_respaldo_biblioteca(carpeta: Path) -> bytes:
+    """Empaqueta biblioteca, base SQLite, cotizaciones, fotos y fichas sin tocar los originales."""
+    if not carpeta.exists():
+        raise FileNotFoundError(f"No existe la carpeta de biblioteca: {carpeta}")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
+        for ruta in sorted(carpeta.rglob("*")):
+            if not ruta.is_file() or "__pycache__" in ruta.parts or ".git" in ruta.parts:
+                continue
+            archivo_zip.write(ruta, arcname=str(Path(carpeta.name) / ruta.relative_to(carpeta)))
+    if buffer.tell() == 0:
+        raise ValueError("La biblioteca no contiene archivos para respaldar.")
+    return buffer.getvalue()
+
 
 E.setdefault("paso", 1)
 
@@ -163,6 +172,20 @@ with st.sidebar:
             hist.set_config("formato_numero", fmt)
             hist.set_config("siguiente_correlativo", int(sig))
             st.success("Guardado.")
+    with st.expander("💾 Copia de seguridad"):
+        st.caption("Descarga la biblioteca completa: base de datos, catálogo, fotos, fichas y archivos de cotizaciones.")
+        if st.button("Preparar respaldo actualizado", key="preparar_respaldo"):
+            try:
+                E["_respaldo_zip"] = crear_respaldo_biblioteca(bib.dir)
+                E["_respaldo_nombre"] = f"respaldo_giovalia_{datetime.now():%Y%m%d_%H%M%S}.zip"
+                st.success("El respaldo está preparado. Descárgalo y guárdalo fuera de esta carpeta.")
+            except Exception as exc:
+                E.pop("_respaldo_zip", None)
+                st.error(f"No pude preparar el respaldo: {exc}")
+        if E.get("_respaldo_zip"):
+            st.download_button("⬇️ Descargar respaldo ZIP", E["_respaldo_zip"],
+                               file_name=E.get("_respaldo_nombre", "respaldo_giovalia.zip"),
+                               mime="application/zip", width="stretch", key="descargar_respaldo")
     st.divider()
     st.button("📝 Volver a los borradores", on_click=lambda: E.clear())
 
@@ -195,6 +218,9 @@ def mostrar_pasos(actual: int):
         clase = "hecho" if i < actual else "activo" if i == actual else ""
         piezas.append(f'<div class="paso {clase}"><b>{"✓" if i < actual else i}</b>{n}</div>')
     st.markdown('<div class="pasos">' + "".join(piezas) + "</div>", unsafe_allow_html=True)
+    st.progress((actual - 1) / 3, text=f"Etapa {actual} de 4 · {nombres[actual - 1]}")
+    if E.get("_ultima_guarda"):
+        st.caption(f"💾 Borrador guardado en este computador · {E['_ultima_guarda']}")
 
 
 def cargar(ruta: Path, origen_pedido: str):
@@ -410,6 +436,51 @@ def mostrar_totales():
     c.metric("Total", rv.clp(tot["total"]))
 
 
+def mostrar_resumen_lineas():
+    """Resumen de lectura con subtotal por línea, precio pendiente e inclusión."""
+    tabla = E.get("tabla_edit")
+    if not isinstance(tabla, pd.DataFrame) or tabla.empty:
+        return
+    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+    etiqueta = "con IVA" if con_iva else "neto"
+    filas = []
+    for _, fila in tabla.iterrows():
+        descripcion = _texto_seguro(fila.get(COL_PROD))
+        if not descripcion:
+            continue
+        incluir = _esta_marcado(fila.get(COL_INCLUIR), True)
+        try:
+            cantidad = float(fila.get(COL_CANT))
+            if pd.isna(cantidad):
+                cantidad = 0
+        except (TypeError, ValueError):
+            cantidad = 0
+        try:
+            valor = fila.get(COL_PRECIO)
+            precio = None if pd.isna(valor) else float(valor)
+        except (TypeError, ValueError):
+            precio = None
+        subtotal = (precio * cantidad) if incluir and precio is not None else (None if incluir else 0)
+        estado = "Excluido" if not incluir else ("Precio pendiente" if precio is None else "Incluido")
+        filas.append({
+            "Estado": estado, "Cantidad": cantidad, "Producto": descripcion,
+            "Código": _texto_seguro(fila.get(COL_COD)),
+            f"Precio unitario ({etiqueta})": precio,
+            f"Subtotal ({etiqueta})": subtotal,
+        })
+    if not filas:
+        return
+    with st.expander("🧮 Resumen por producto y subtotales", expanded=True):
+        st.dataframe(
+            pd.DataFrame(filas), hide_index=True, width="stretch",
+            column_config={
+                "Cantidad": st.column_config.NumberColumn(format="%.2f"),
+                f"Precio unitario ({etiqueta})": st.column_config.NumberColumn(format="$ %d"),
+                f"Subtotal ({etiqueta})": st.column_config.NumberColumn(format="$ %d"),
+            },
+        )
+
+
 def guardar_precios_inventario(lineas: list[dict]):
     """Aprende/actualiza el último precio neto utilizado para cada producto."""
     for ln in lineas:
@@ -478,6 +549,7 @@ def persistir_borrador():
         con_iva=int(modo_precios == OPCIONES_PRECIO[0]),
     )
     guardar_precios_inventario(lineas)
+    E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
 
 def widget_numero_cotizacion():
@@ -729,33 +801,69 @@ def restaurar_borrador(cot_id: int):
 
 
 def selector_borradores():
-    """Pantalla de inicio para retomar un borrador o comenzar uno nuevo."""
+    """Panel de inicio: accesos rápidos, métricas y borradores para retomar."""
+    todas = hist.listar()
     borradores = []
     for reg in hist.listar("", "Borrador"):
         pdf = Path(reg["pdf"]) if reg.get("pdf") else None
         if not pdf or not pdf.exists():
             borradores.append(reg)
-    st.header("📝 Cotizaciones y borradores")
+
+    st.markdown(
+        '<div class="inicio-hero"><div class="inicio-kicker">ESPACIO DE TRABAJO</div>'
+        '<h2>Tu cotizador comercial</h2>'
+        '<p>Prepara una cotización, completa sus anexos técnicos y conserva el trabajo en tu biblioteca local.</p></div>',
+        unsafe_allow_html=True,
+    )
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Cotizaciones registradas", len(todas))
+    m2.metric("Borradores pendientes", len(borradores))
+    m3.metric("Monto aceptado", rv.clp(sum(float(r.get("total") or 0) for r in todas if r.get("estado") == "Aceptada")))
+    m4.metric("Productos en catálogo", len(bib.indice))
+
+    a, b = st.columns([3, 2])
+    with a:
+        st.subheader("Acciones rápidas")
+        st.button("➕ Nueva cotización", type="primary", width="stretch", on_click=iniciar_borrador,
+                  key="inicio_nueva_cotizacion")
+    with b:
+        st.subheader("Seguimiento")
+        st.button("📚 Abrir historial", width="stretch",
+                  on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial")
+
+    st.divider()
+    st.subheader("📝 Retomar un borrador")
     if borradores:
-        st.write("Encontré cotizaciones sin PDF terminado. Puedes retomar cualquiera; los cambios se guardan automáticamente.")
         opciones = {
-            f"{r['numero']} · {r.get('cliente') or 'sin cliente'} · {fecha_corta(r.get('fecha') or '')}": r["id"]
+            f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}": r["id"]
             for r in borradores
         }
-        elegido = st.selectbox("Borrador que quieres retomar", list(opciones), key="borrador_a_retomar")
+        elegido = st.selectbox("Selecciona una cotización sin terminar", list(opciones), key="borrador_a_retomar")
         c1, c2 = st.columns(2)
         c1.button(
             "↩️ Retomar borrador", type="primary", width="stretch",
-            on_click=restaurar_borrador, args=(opciones[elegido],),
+            on_click=restaurar_borrador, args=(opciones[elegido],), key="inicio_retomar_borrador",
         )
-        c2.button(
-            "➕ Iniciar otra cotización", width="stretch",
-            on_click=iniciar_borrador,
-        )
+        c2.button("➕ Iniciar otro borrador", width="stretch",
+                  on_click=iniciar_borrador, key="inicio_otro_borrador")
     else:
-        st.write("Cuando comienzas, se crea un borrador automáticamente. Puedes volver a él si se cierra la aplicación.")
-        st.button("➕ Iniciar nueva cotización", type="primary", width="stretch",
-                  on_click=iniciar_borrador)
+        st.info("No tienes borradores pendientes. Cuando inicies una cotización, podrás retomarla desde aquí aunque se cierre la aplicación.")
+        st.button("Comenzar ahora →", type="primary", width="stretch",
+                  on_click=iniciar_borrador, key="inicio_comenzar_ahora")
+
+    if todas:
+        st.divider()
+        st.subheader("Actividad reciente")
+        recientes = sorted(todas, key=lambda r: str(r.get("actualizado") or r.get("creado") or r.get("fecha") or ""), reverse=True)[:5]
+        df_recientes = pd.DataFrame({
+            "N° cotización": [r.get("numero", "") for r in recientes],
+            "Fecha": [fecha_corta(r.get("fecha") or "") for r in recientes],
+            "Cliente": [r.get("cliente") or "Sin cliente" for r in recientes],
+            "Total": [r.get("total") or 0 for r in recientes],
+            "Estado": [r.get("estado") or "Borrador" for r in recientes],
+        })
+        st.dataframe(df_recientes, hide_index=True, width="stretch",
+                     column_config={"Total": st.column_config.NumberColumn(format="$ %d")})
 
 
 # ============================================================== PASO 1: PEDIDO
@@ -955,6 +1063,70 @@ def paso_1():
         cotizacion_ui()
 
 
+def agregar_desde_catalogo():
+    """Permite buscar un producto conocido e incorporarlo a la cotización actual."""
+    with st.expander("➕ Agregar producto desde mi catálogo", expanded=False):
+        filas = bib.filas_catalogo()
+        if not filas:
+            st.info("Todavía no hay productos en el catálogo. Puedes agregarlos en «Mis productos».")
+            return
+        busqueda = st.text_input("Buscar por código o nombre", key="catalogo_busqueda",
+                                 placeholder="Ej.: CF283A, tóner HP, resma oficio")
+        consulta = busqueda.strip().casefold()
+        filtradas = [f for f in filas if not consulta or consulta in (str(f["clave"]) + " " + str(f["nombre"])).casefold()]
+        if not filtradas:
+            st.info("No encontré productos con esa búsqueda. Prueba con otra palabra o código.")
+            return
+        opciones = [f"{f['clave']} · {f['nombre']}" for f in filtradas]
+        key_busqueda = busqueda.strip().lower().replace(" ", "_")[:24] or "todos"
+        elegido = st.selectbox("Producto del catálogo", opciones, key=f"catalogo_producto_{key_busqueda}")
+        producto = filtradas[opciones.index(elegido)]
+        con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+        precio_neto_base = producto.get("sugerido_neto")
+        if precio_neto_base is None:
+            precio_neto_base = producto.get("precio_neto")
+        precio_sugerido = (ct.precio_para_mostrar(float(precio_neto_base), con_iva)
+                           if precio_neto_base is not None else None)
+        st.caption(f"Código: {producto['clave']} · {('precio ingresado con IVA' if con_iva else 'precio neto sin IVA')}")
+        c1, c2 = st.columns([1, 2])
+        cantidad = c1.number_input("Cantidad", min_value=1, value=1, step=1,
+                                   key=f"catalogo_cantidad_{producto['clave']}")
+        precio_ui = c2.number_input(
+            "Precio unitario", min_value=0.0, step=100.0,
+            value=float(precio_sugerido or 0), format="%.0f",
+            key=f"catalogo_precio_{producto['clave']}",
+        )
+        pendiente = st.checkbox(
+            "Dejar el precio pendiente para completarlo después",
+            value=precio_sugerido is None, key=f"catalogo_pendiente_{producto['clave']}",
+        )
+        if precio_sugerido is None:
+            st.caption("Este producto no tiene un último precio ni un precio sugerido guardado.")
+        if st.button("Agregar a la cotización", type="primary", width="stretch",
+                     key=f"catalogo_agregar_{producto['clave']}"):
+            precio_neto = None if pendiente or precio_ui <= 0 else ct.neto_desde(float(precio_ui), con_iva)
+            linea = {
+                "fila": len(E.get("lineas", [])) + 1,
+                "cantidad": ct._cantidad(float(cantidad)),
+                "descripcion": producto["nombre"] or producto["clave"],
+                "unitario": precio_neto, "precio_neto": precio_neto,
+                "es_producto": True, "clave_auto": producto["clave"],
+                "origen": "biblioteca", "incluir": True,
+            }
+            lineas_actuales = list(E.get("lineas", []))
+            lineas_actuales.append(linea)
+            E["lineas"] = lineas_actuales
+            E["tabla"] = tabla_desde_lineas(lineas_actuales, con_iva=con_iva)
+            E["tabla_edit"] = E["tabla"].copy()
+            E["editor_version"] = int(E.get("editor_version", 0)) + 1
+            E["editado_manual"] = True
+            for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
+                E.pop(clave_estado, None)
+            refrescar_excel_actual()
+            persistir_borrador()
+            st.rerun()
+
+
 # ============================================================== PASO 2: PRODUCTOS
 def paso_2():
     st.header("2. Revisa tus productos y precios")
@@ -963,7 +1135,9 @@ def paso_2():
     if not api_key:
         st.info("Con la clave de OpenAI puedo deducir mejor la marca, el modelo y el código.")
 
+    agregar_desde_catalogo()
     editor_productos()
+    mostrar_resumen_lineas()
     editar_cabecera()
     mostrar_totales()
     panel_revision()
@@ -1146,6 +1320,7 @@ def paso_3():
     st.header("3. Fotos y fichas técnicas")
     st.caption("La lista y los precios siguen editables en esta etapa. Los cambios se guardan en el borrador.")
     editor_productos()
+    mostrar_resumen_lineas()
     editar_cabecera()
     mostrar_totales()
     claves, descripciones = datos_productos()
@@ -1186,8 +1361,39 @@ def paso_3():
         st.success("¡Todos los productos tienen foto y ficha!")
     st.caption("Si un producto no tiene ficha técnica, no pasa nada: el PDF llevará solo la foto.")
 
+    st.divider()
+    st.subheader("📦 Productos y anexos")
+    c_filtro, c_estado = st.columns([2, 1])
+    busqueda_anexos = c_filtro.text_input(
+        "Buscar producto", key="filtro_anexos_texto",
+        placeholder="Código, marca o descripción",
+    )
+    estado_anexos = c_estado.selectbox(
+        "Mostrar", ["Todos", "Incompletos", "Sin foto", "Sin ficha", "Completos"],
+        key="filtro_anexos_estado",
+    )
+    consulta_anexos = busqueda_anexos.strip().casefold()
+    visibles = []
     for clave in claves:
-        tarjeta(clave, descripciones[clave])
+        foto, ficha = bib.archivos(clave)
+        completo = bool(foto and ficha)
+        if consulta_anexos and consulta_anexos not in (clave + " " + descripciones[clave]).casefold():
+            continue
+        if estado_anexos == "Incompletos" and completo:
+            continue
+        if estado_anexos == "Sin foto" and foto:
+            continue
+        if estado_anexos == "Sin ficha" and ficha:
+            continue
+        if estado_anexos == "Completos" and not completo:
+            continue
+        visibles.append(clave)
+    st.caption(f"Mostrando {len(visibles)} de {len(claves)} productos. El filtro solo cambia la vista; no excluye productos de la cotización.")
+    if visibles:
+        for clave in visibles:
+            tarjeta(clave, descripciones[clave])
+    else:
+        st.info("No hay productos que coincidan con este filtro.")
 
     st.divider()
     atras, sigue = st.columns(2)
@@ -1288,6 +1494,7 @@ def paso_4():
     if "pdf_bytes" not in E:
         st.write("Esta es la última oportunidad para corregir los productos, cantidades, códigos, precios y datos del cliente antes de crear el PDF.")
         editor_productos()
+        mostrar_resumen_lineas()
         editar_cabecera()
         mostrar_totales()
 
@@ -1327,6 +1534,11 @@ def paso_4():
         if E.get("ruta") and Path(E["ruta"]).exists():
             st.download_button("⬇️ Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(),
                                file_name=Path(E["ruta"]).name, width="stretch")
+        with st.expander("👁️ Vista previa del PDF completo", expanded=True):
+            try:
+                st.pdf(E["pdf_bytes"], height=760, key=f"pdf_preview_{E.get('cot_id', 'actual')}")
+            except Exception:
+                st.info("El visor integrado no está disponible en esta instalación. Usa el botón de descarga del PDF.")
         textos = (("sin_clave", "Estos productos no tienen código, así que no llevan foto ni ficha"),
                   ("sin_foto", "Les falta la foto"), ("sin_ficha", "Les falta la ficha técnica"),
                   ("ficha_dudosa", "Revisa estas fichas: no mencionan el código del producto"),
@@ -1571,10 +1783,10 @@ def vista_productos():
 
 # ============================================================== PANTALLA
 if TEMA_ACTIVO:
-    st.markdown('<h1 class="titulo"><span class="gota"></span>Cotizaciones con fotos y fichas</h1>',
+    st.markdown('<h1 class="titulo"><span class="gota"></span>Giovalia · Cotizador comercial</h1>',
                 unsafe_allow_html=True)
 else:
-    st.title("💧 Cotizaciones con fotos y fichas")
+    st.title("💧 Giovalia · Cotizador comercial")
     st.info("🎨 Instalé el nuevo diseño. Presiona la tecla **F5** (actualizar la página) para verlo. "
             "Si sigue igual, cierra la ventana negra y abre el programa de nuevo.")
 vista = st.radio("Ir a", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
