@@ -137,3 +137,69 @@ def buscar_api_key(carpeta_app) -> tuple[str, str]:
                     return clave, "archivo .env"
 
     return "", "no encontrada"
+
+def guardar_api_key(carpeta_app, api_key: str) -> Path:
+    """Guarda/actualiza OPENAI_API_KEY en el archivo .env local.
+
+    La clave queda en texto plano en ese archivo: mantenlo privado, no lo
+    compartas y no lo subas a Git.
+    """
+    clave = str(api_key or "").strip()
+    if not clave:
+        raise ValueError("La clave de OpenAI está vacía.")
+    if "\n" in clave or "\r" in clave:
+        raise ValueError("La clave no puede contener saltos de línea.")
+
+    carpeta = Path(carpeta_app).expanduser().resolve()
+    carpeta.mkdir(parents=True, exist_ok=True)
+    env = carpeta / ".env"
+
+    try:
+        lineas = env.read_text("utf-8", errors="ignore").splitlines()
+    except FileNotFoundError:
+        lineas = []
+
+    resultado = []
+    guardada = False
+    for linea in lineas:
+        comparable = linea.strip()
+        if comparable.startswith("export "):
+            comparable = comparable[7:].lstrip()
+        nombre, separador, _ = comparable.partition("=")
+        if separador and nombre.strip() == "OPENAI_API_KEY":
+            if not guardada:
+                resultado.append(f"OPENAI_API_KEY={clave}")
+                guardada = True
+            # Elimina duplicados para que la carga sea inequívoca.
+            continue
+        resultado.append(linea)
+
+    if not guardada:
+        resultado.append(f"OPENAI_API_KEY={clave}")
+
+    contenido = "\n".join(resultado).rstrip() + "\n"
+    import tempfile
+
+    descriptor, temporal = tempfile.mkstemp(prefix=".env.", suffix=".tmp", dir=str(carpeta))
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as archivo:
+            archivo.write(contenido)
+            archivo.flush()
+            os.fsync(archivo.fileno())
+        # En sistemas POSIX restringe el archivo al propietario. En Windows se
+        # conserva la ACL heredada de la carpeta para evitar dejarlo de solo lectura.
+        if os.name != "nt":
+            os.chmod(temporal, 0o600)
+        os.replace(temporal, env)
+    except Exception:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        try:
+            os.unlink(temporal)
+        except OSError:
+            pass
+        raise
+    return env
+
