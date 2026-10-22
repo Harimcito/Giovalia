@@ -330,7 +330,7 @@ st.markdown(
     '<b>Estado de trabajo</b> &nbsp; · &nbsp; '
     + ("Biblioteca central compartida" if GIOVAL_REQUIRE_ACCESS else "Biblioteca local")
     + " &nbsp; · &nbsp; "
-    + ("API de ChileCompra lista para consultar" if ticket.strip() else "Sin ticket API: puedes importar Excel/CSV o ingresar oportunidades manualmente")
+    + ("Ticket de API ingresado en esta sesión" if ticket.strip() else "Sin ticket API: puedes importar Excel/CSV o ingresar oportunidades manualmente")
     + "</div>",
     unsafe_allow_html=True,
 )
@@ -741,7 +741,7 @@ elif vista_actual == "Radar de oportunidades":
                 poner_aviso("Seguimiento guardado para ambos trabajadores.")
                 st.rerun()
     else:
-        st.info("Todavía no hay oportunidades registradas con esos filtros.")
+        st.info("Ninguna oportunidad coincide con esos filtros. Prueba ampliar la búsqueda o registra/importa un proceso.")
 
 # ─────────────────────────────────────── Evaluador
 elif vista_actual == "Evaluar rentabilidad":
