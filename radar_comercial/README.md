@@ -21,7 +21,7 @@ Así, actualizar el código no borra las oportunidades ni las evaluaciones. La b
 
 ## Conectar opcionalmente con la biblioteca de Giovalia
 
-Radar puede ejecutarse sin Giovalia y sin catálogo: las búsquedas, la importación XLSX/CSV, las oportunidades manuales y el seguimiento siguen disponibles. La evaluación contra catálogo necesita un biblioteca/indice.json compatible.
+Radar puede ejecutarse sin Giovalia y sin catálogo: las búsquedas, la importación XLSX/CSV, las oportunidades manuales y el seguimiento siguen disponibles. La evaluación contra catálogo necesita un archivo biblioteca/indice.json compatible.
 
 Para reutilizar la biblioteca central de Giovalia, define GIOVAL_DATA_DIR o RADAR_DATA_DIR en el entorno antes de iniciar Radar y apunta a la carpeta de datos que contiene biblioteca. Para una configuración separada, deja el valor predeterminado o define RADAR_DATA_DIR con otra carpeta. RADAR_DATA_DIR tiene prioridad sobre GIOVAL_DATA_DIR.
 
