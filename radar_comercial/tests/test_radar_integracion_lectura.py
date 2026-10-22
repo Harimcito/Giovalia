@@ -49,13 +49,14 @@ class IntegracionSoloLecturaTests(unittest.TestCase):
                 )
                 con.execute(
                     "INSERT INTO cotizaciones (estado,total,datos,cliente,rut) VALUES (?,?,?,?,?)",
-                    ("Aceptada", 23800, json.dumps({"lineas":[{"descripcion":"Tóner TN1060","cantidad":2}]}), "CLIENTE PRIVADO", "RUT-PRIVADO"),
+                    ("Aceptada", 23800, json.dumps({"cliente":{"nombre":"CLIENTE PRIVADO","rut":"RUT-PRIVADO"},"lineas":[{"descripcion":"Tóner TN1060","cantidad":2}]}), "CLIENTE PRIVADO", "RUT-PRIVADO"),
                 )
             rows = HistorialLectura(root).listar()
             self.assertEqual(len(rows), 1)
             self.assertEqual(set(rows[0]), {"estado", "total", "datos"})
             self.assertNotIn("CLIENTE PRIVADO", str(rows))
             self.assertNotIn("RUT-PRIVADO", str(rows))
+            self.assertIn("Tóner TN1060", rows[0]["datos"])
 
     def test_missing_library_is_empty_and_does_not_create_database(self):
         with tempfile.TemporaryDirectory() as tmp:
