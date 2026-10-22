@@ -2103,24 +2103,47 @@ def hallazgos() -> list[dict]:
 
 
 def panel_revision(en_paso_4: bool = False) -> int:
-    """Muestra lo que encontró el revisor. Devuelve cuántos errores graves hay."""
+    """Muestra errores y avisos antes de crear el PDF; devuelve errores bloqueantes."""
     try:
-        hs_ = hallazgos()
-    except Exception:
-        st.info("No pude revisar la cotización automáticamente.")
+        hallazgos_actuales = hallazgos()
+    except Exception as exc:
+        st.warning(f"No pude terminar la revisión automática: {exc}")
         return 0
-    errores = [h["texto"] for h in hs_ if h["nivel"] == "error"]
-    avisos = [h["texto"] for h in hs_ if h["nivel"] == "aviso"]
-    if not hs_:
-        st.success("Revisé la cotización: los totales, el IVA, los precios y los datos del cliente están en orden.")
+    errores = [h["texto"] for h in hallazgos_actuales if h["nivel"] == "error"]
+    avisos = [h["texto"] for h in hallazgos_actuales if h["nivel"] == "aviso"]
+    if not hallazgos_actuales:
+        st.success("Revisión completada: totales, IVA, precios y datos del cliente en orden.")
         return 0
-    st.markdown("#### Revisión de la cotización")
+
+    st.markdown("#### Revisión antes de generar el PDF")
+    resumen = []
     if errores:
-        st.error("**Hay que corregir:**\n\n" + "\n".join(f"- {t}" for t in errores))
-        if not en_paso_4 and E.get("origen_pedido") == "pedido":
-            st.caption("Para corregir precios o datos del cliente, vuelve al paso 1: tu pedido sigue ahí.")
+        resumen.append(f"{len(errores)} error(es) por corregir")
     if avisos:
-        st.warning("**Conviene revisar:**\n\n" + "\n".join(f"- {t}" for t in avisos))
+        resumen.append(f"{len(avisos)} aviso(s) para revisar")
+    st.caption(" · ".join(resumen))
+
+    if errores:
+        st.error(f"{len(errores)} problema(s) que requieren atención.")
+        with st.expander("Ver errores de la cotización", expanded=True):
+            for problema in errores:
+                st.markdown(f"- {problema}")
+        if en_paso_4:
+            st.button(
+                "Volver a productos y precios",
+                icon=":material/edit:",
+                width="stretch",
+                on_click=ir_a,
+                args=(2,),
+                key="revision_volver_productos",
+            )
+        elif E.get("origen_pedido") == "pedido":
+            st.caption("El pedido sigue guardado. Puedes volver a los pasos anteriores para corregirlo.")
+
+    if avisos:
+        with st.expander(f"Ver avisos de revisión ({len(avisos)})", expanded=bool(not errores)):
+            for aviso in avisos:
+                st.markdown(f"- {aviso}")
     return len(errores)
 
 
