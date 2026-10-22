@@ -64,7 +64,6 @@ class SharedLibraryPrivacyTests(unittest.TestCase):
             self.assertIsNone(registro["xlsx"])
             self.assertIsNone(registro["pdf"])
             self.assertEqual(history.clientes(), [])
-            self.assertFalse((root / "cotizaciones").glob("**/*.xlsx").__class__ is None)
             self.assertEqual(list((root / "cotizaciones").glob("**/*")), [])
 
             serializado = json.dumps(registro["datos"], ensure_ascii=False)
