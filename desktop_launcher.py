@@ -1,44 +1,33 @@
-"""Lanzador de escritorio para Giovalia.
+"""Cliente de escritorio de Giovalia.
 
-En Windows abre Streamlit dentro de una ventana WebView2; no abre una pestaña
-del navegador. El mismo ejecutable se relanza en modo servidor como proceso hijo.
+La ventana se conecta a la aplicación central alojada en la nube. No inicia una
+base de datos local: así todos los usuarios trabajan sobre la misma biblioteca.
 """
 from __future__ import annotations
 
 import ctypes
+import json
 import os
-import socket
-import subprocess
 import sys
 import time
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import urlopen
 
 
 APP_TITLE = "Gioval · Cotizador comercial"
-SERVER_FLAG = "--gioval-server"
-PORT_FLAG = "--port"
-
-
-def resource_dir() -> Path:
-    """Directorio de recursos empacados por PyInstaller o del proyecto en desarrollo."""
-    if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)).resolve()
-    return Path(__file__).resolve().parent
+DEFAULT_CLOUD_URL = "https://gioval-cotizador-compartido.onrender.com"
 
 
 def data_dir() -> Path:
-    """Datos escribibles por el usuario, separados de la instalación."""
-    override = os.environ.get("GIOVAL_DATA_DIR")
-    if override:
-        return Path(override).expanduser().resolve()
+    """Directorio local exclusivo para preferencia de servidor; los datos comerciales son remotos."""
     local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     return (local_app_data / "Gioval").resolve()
 
 
 def show_message(title: str, message: str, error: bool = True) -> None:
-    """Muestra errores sin requerir una consola de Windows."""
+    """Muestra avisos nativos sin requerir una consola de Windows."""
     if os.name == "nt":
         flags = 0x10 if error else 0x40
         ctypes.windll.user32.MessageBoxW(None, message, title, flags)
@@ -46,177 +35,93 @@ def show_message(title: str, message: str, error: bool = True) -> None:
         print(f"{title}\n\n{message}", file=sys.stderr if error else sys.stdout)
 
 
-def choose_port() -> int:
-    """Pide a Windows un puerto TCP libre para evitar conflictos con otros programas."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+def cloud_url() -> str:
+    """Lee la URL central, permitiendo sobreescribirla para desarrollo o cambios de dominio."""
+    value = os.environ.get("GIOVAL_CLOUD_URL", "").strip()
+    if not value:
+        config = data_dir() / "desktop.json"
+        try:
+            stored = json.loads(config.read_text("utf-8"))
+            value = str(stored.get("url", "")).strip()
+        except (OSError, json.JSONDecodeError, AttributeError):
+            value = ""
+    value = (value or DEFAULT_CLOUD_URL).rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
+        raise ValueError("La dirección de Giovalia debe usar HTTPS.")
+    if not parsed.netloc:
+        raise ValueError("La dirección central de Giovalia no es válida.")
+    return value
 
 
-def read_flag_value(flag: str, default: str = "") -> str:
-    try:
-        index = sys.argv.index(flag)
-        return sys.argv[index + 1]
-    except (ValueError, IndexError):
-        return default
+def check_package() -> None:
+    """Verifica dependencias clave durante la compilación sin abrir una ventana."""
+    import webview
+
+    if not callable(webview.create_window) or not callable(webview.start):
+        raise RuntimeError("El paquete de escritorio no contiene las funciones de ventana necesarias.")
+    url = cloud_url()
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        raise RuntimeError("No se configuró el servidor central de Giovalia.")
 
 
-def run_streamlit_server() -> None:
-    """Punto de entrada del proceso servidor, independiente de la ventana."""
-    port_text = read_flag_value(PORT_FLAG)
-    if not port_text.isdigit():
-        raise RuntimeError("No se recibió un puerto válido para el servidor local.")
-
-    app_script = resource_dir() / "app.py"
-    if not app_script.is_file():
-        raise FileNotFoundError(f"No encuentro app.py en el paquete: {app_script}")
-
-    writable = data_dir()
-    writable.mkdir(parents=True, exist_ok=True)
-    os.environ["GIOVAL_DATA_DIR"] = str(writable)
-    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
-    os.chdir(writable)
-
-    # El servidor escucha solo en localhost: no se expone a otros equipos.
-    sys.argv = [
-        "streamlit",
-        "run",
-        str(app_script),
-        "--server.address=127.0.0.1",
-        f"--server.port={int(port_text)}",
-        "--server.headless=true",
-        "--global.developmentMode=false",
-        "--server.fileWatcherType=none",
-        "--browser.gatherUsageStats=false",
-    ]
-    from streamlit.web.cli import main as streamlit_main
-
-    streamlit_main(prog_name="streamlit")
-
-
-def wait_until_ready(port: int, process: subprocess.Popen, timeout: float = 90.0) -> bool:
-    """Espera a que el servidor confirme que ya atiende solicitudes locales."""
-    url = f"http://127.0.0.1:{port}/_stcore/health"
+def wait_until_ready(url: str, timeout: float = 120.0) -> bool:
+    """Espera a que la aplicación central responda antes de abrir la ventana."""
+    health_url = f"{url}/_stcore/health"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if process.poll() is not None:
-            return False
         try:
-            with urlopen(url, timeout=1.5) as response:
+            with urlopen(health_url, timeout=5) as response:
                 if response.status == 200:
                     return True
         except (URLError, TimeoutError, OSError):
             pass
-        time.sleep(0.3)
+        time.sleep(1.5)
     return False
 
 
-def stop_server(process: subprocess.Popen | None) -> None:
-    """Cierra Streamlit cuando se cierra la ventana de escritorio."""
-    if process is None or process.poll() is not None:
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=8)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        try:
-            process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            pass
-
-
 def launch_desktop() -> None:
-    if os.name != "nt":
-        show_message(APP_TITLE, "El paquete de escritorio está preparado para Windows.", error=False)
-        return
-
-    writable = data_dir()
-    logs_dir = writable / "logs"
     try:
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        writable.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        show_message(APP_TITLE, f"No puedo preparar la carpeta de datos del usuario.\n\n{exc}")
-        return
-
-    app_script = resource_dir() / "app.py"
-    if not app_script.is_file():
-        show_message(APP_TITLE, f"No encuentro los archivos de Giovalia.\n\nRuta esperada:\n{app_script}")
-        return
-
-    port = choose_port()
-    environment = os.environ.copy()
-    environment["GIOVAL_DATA_DIR"] = str(writable)
-    environment["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
-
-    if getattr(sys, "frozen", False):
-        command = [sys.executable, SERVER_FLAG, PORT_FLAG, str(port)]
-    else:
-        command = [sys.executable, str(Path(__file__).resolve()), SERVER_FLAG, PORT_FLAG, str(port)]
-
-    server_log_path = logs_dir / "server.log"
-    process: subprocess.Popen | None = None
-    try:
-        with server_log_path.open("a", encoding="utf-8") as server_log:
-            server_log.write(f"\n\n--- Inicio de Giovalia: {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
-            server_log.flush()
-            process = subprocess.Popen(
-                command,
-                cwd=str(writable),
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=server_log,
-                stderr=subprocess.STDOUT,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                close_fds=True,
-            )
-
-            if not wait_until_ready(port, process):
-                try:
-                    detail = "\n".join(server_log_path.read_text("utf-8", errors="replace").splitlines()[-12:])
-                except OSError:
-                    detail = ""
-                stop_server(process)
-                show_message(
-                    APP_TITLE,
-                    "Giovalia no pudo iniciar su servidor local.\n"
-                    "Revisa el registro para ver el detalle:\n"
-                    f"{server_log_path}\n\n{detail[-1800:]}",
-                )
-                return
-
-            try:
-                import webview
-
-                webview.create_window(
-                    APP_TITLE,
-                    f"http://127.0.0.1:{port}",
-                    width=1440,
-                    height=900,
-                    min_size=(1000, 680),
-                    background_color="#0A0B10",
-                    text_select=True,
-                )
-                # Windows utiliza WebView2/Chromium dentro de una ventana nativa.
-                webview.start(gui="edgechromium", debug=False)
-            except Exception as exc:
-                stop_server(process)
-                show_message(
-                    APP_TITLE,
-                    "No pude abrir la ventana de escritorio.\n"
-                    "Comprueba que el instalador haya configurado Microsoft Edge WebView2 Runtime.\n\n"
-                    f"Detalle: {exc}\n\nRegistro: {server_log_path}",
-                )
+        url = cloud_url()
     except Exception as exc:
-        stop_server(process)
-        show_message(APP_TITLE, f"No pude iniciar Giovalia.\n\nDetalle: {exc}")
-    finally:
-        stop_server(process)
+        show_message(APP_TITLE, f"No pude leer la dirección del espacio compartido.\n\nDetalle: {exc}")
+        return
+
+    if not wait_until_ready(url):
+        show_message(
+            APP_TITLE,
+            "No pude conectar con la biblioteca compartida de Gioval.\n\n"
+            f"Servidor: {url}\n\n"
+            "Comprueba tu conexión a internet y que el servicio central esté publicado. "
+            "Los datos no se guardarán en este computador mientras el servidor no esté disponible.",
+        )
+        return
+
+    try:
+        import webview
+
+        webview.create_window(
+            APP_TITLE,
+            url,
+            width=1440,
+            height=900,
+            min_size=(1000, 680),
+            background_color="#0A0B10",
+            text_select=True,
+        )
+        webview.start(gui="edgechromium", debug=False)
+    except Exception as exc:
+        show_message(
+            APP_TITLE,
+            "No pude abrir la ventana de escritorio.\n"
+            "Comprueba que Microsoft Edge WebView2 Runtime esté instalado.\n\n"
+            f"Detalle: {exc}",
+        )
 
 
 if __name__ == "__main__":
-    if SERVER_FLAG in sys.argv:
-        run_streamlit_server()
-    else:
-        launch_desktop()
+    if "--check-package" in sys.argv:
+        check_package()
+        raise SystemExit(0)
+    launch_desktop()
