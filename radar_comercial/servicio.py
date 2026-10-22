@@ -7,11 +7,14 @@ de ChileCompra solo se usa en memoria para realizar solicitudes HTTP.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import re
 import sqlite3
+import tempfile
 import unicodedata
+import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -817,6 +820,25 @@ class RadarStore:
         with self._connection() as con:
             row = con.execute("SELECT COUNT(*) AS n FROM oportunidades").fetchone()
         return int(row["n"] or 0)
+
+    def crear_respaldo_zip(self) -> bytes:
+        """Crea una copia consistente de la base propia del Radar sin detenerlo."""
+        with tempfile.TemporaryDirectory(prefix="gioval-radar-backup-") as tmp:
+            copia_db = Path(tmp) / "radar_comercial.db"
+            with sqlite3.connect(self.path, timeout=30) as origen:
+                with sqlite3.connect(copia_db) as destino:
+                    origen.backup(destino)
+            salida = io.BytesIO()
+            with zipfile.ZipFile(salida, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
+                archivo_zip.write(copia_db, arcname="radar_comercial.db")
+                archivo_zip.writestr(
+                    "LEEME.txt",
+                    "Respaldo de Radar Comercial Gioval.\\n"
+                    "Contiene oportunidades, seguimiento y evaluaciones.\\n"
+                    "No contiene el catálogo ni el historial del cotizador, que se respaldan por separado.\\n"
+                    "Para restaurarlo, detén Radar y reemplaza radar_comercial.db en el directorio de datos.\\n",
+                )
+            return salida.getvalue()
 
 
 def resumen_historial_cotizador(registros: list[dict]) -> dict:
