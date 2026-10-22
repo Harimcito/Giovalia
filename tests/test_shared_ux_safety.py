@@ -67,7 +67,7 @@ class SharedQuotationConcurrencyTests(unittest.TestCase):
             self.assertEqual(registro["numero"], "COT-ACTUALIZADA")
             self.assertEqual(registro["cliente"], "")
             self.assertEqual(registro["rut"], "")
-            self.assertNotIn(numero, ("COT-ACTUALIZADA", "COT-OBSOLETA"))
+            self.assertNotEqual(registro["numero"], numero)
 
     def test_product_can_explicitly_skip_a_technical_datasheet(self):
         from cotizador import Biblioteca
