@@ -13,6 +13,15 @@ El instalador de Windows abre Gioval en una ventana independiente y se conecta a
 
 Para la alternativa alojada, consulta [SHARED_LIBRARY.md](SHARED_LIBRARY.md). No necesitas contratar Render para usar la modalidad gratuita.
 
+## Radar Comercial (aplicación independiente)
+
+Gioval incluye una segunda aplicación para detectar oportunidades de Compra Ágil y estimar rentabilidad a partir del catálogo comercial del cotizador. Consulta [RADAR_COMERCIAL.md](RADAR_COMERCIAL.md) para instalación y uso.
+
+- En el computador central ejecuta `iniciar_radar_gioval.bat`; el cotizador permanece en el puerto 8501 y Radar corre por separado en el puerto 8502.
+- Abre `http://localhost:8502` en el servidor o `http://IP-DEL-COMPUTADOR-CENTRAL:8502` desde otro equipo de la misma red.
+- Radar lee el catálogo y el historial del cotizador, pero guarda las oportunidades y las evaluaciones en `radar_comercial.db`, sin modificar las cotizaciones existentes.
+- La consulta directa a la API requiere un ticket propio de ChileCompra. También se pueden importar resultados desde Excel/CSV o registrar una oportunidad manualmente.
+
 ## Instalación en Windows (una vez)
 1. Python 3.10 o superior desde python.org (marca "Add python.exe to PATH" al instalar).
 2. (Opcional) LibreOffice, solo si quieres un PDF con formato idéntico al Excel (casilla en la barra lateral).
