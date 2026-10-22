@@ -75,6 +75,16 @@ ESTILO = """
 [data-testid="stProgress"] [role="progressbar"] { background:#232631 !important; }
 [data-testid="stProgress"] [role="progressbar"] > div { background:#626979 !important; }
 div[data-testid="stDataFrame"] { border:1px solid #2A2D39; border-radius:8px; overflow:hidden; }
+[data-testid="stSegmentedControl"] { margin:.8rem 0 1rem; }
+[data-testid="stSegmentedControl"] button { border-radius:8px !important; min-height:2.7rem; }
+[data-testid="stSegmentedControl"] button[aria-pressed="true"] {
+  background:#242834 !important; border:1px solid #555B6B !important; color:#FFFFFF !important;
+}
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea,
+[data-testid="stNumberInput"] input { border-radius:7px !important; }
+button[kind="primary"] { font-weight:650 !important; }
+.st-key-radar-header { margin-bottom:.7rem; }
+.radar-flash { margin:.6rem 0 1rem; }
 </style>
 """
 st.markdown(ESTILO, unsafe_allow_html=True)
@@ -114,26 +124,29 @@ base_actual = store.config("base_importes_catalogo", "Incluyen IVA")
 if base_actual not in base_opciones:
     base_actual = "Incluyen IVA"
 
-with st.container(border=True):
-    c_marca, c_titulo, c_conexion = st.columns([1.1, 3.5, 1.3])
+with st.container(key="radar-header"):
+    c_marca, c_conexion = st.columns([5, 1.35])
     with c_marca:
         st.markdown("### GIOVAL")
-        st.caption("Radar comercial")
-    with c_titulo:
-        st.markdown(
-            '<section class="hero-radar"><div class="kicker">Compras públicas / Margen comercial</div>'
-            '<h1>Encuentra oportunidades. Cotiza con criterio.</h1>'
-            '<p>Esta aplicación independiente reutiliza el catálogo y el historial comercial del cotizador '
-            'Gioval. No copia ni modifica las cotizaciones.</p></section>',
-            unsafe_allow_html=True,
-        )
+        st.caption("Radar comercial · Herramienta interna de ventas")
     with c_conexion:
         st.markdown("**Conexión**")
-        st.markdown(f'<span class="radar-tag">{"Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Biblioteca local"}</span>', unsafe_allow_html=True)
-        if GIOVAL_REQUIRE_ACCESS and st.button("Salir", icon=":material/logout:", key="radar_logout", width="stretch"):
+        st.markdown(
+            f'<span class="radar-tag">{"Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Biblioteca local"}</span>',
+            unsafe_allow_html=True,
+        )
+        if GIOVAL_REQUIRE_ACCESS and st.button(
+            "Salir", icon=":material/logout:", key="radar_logout", width="stretch"
+        ):
             st.session_state.pop("radar_autenticado", None)
-            st.session_state.pop("radar_login", None)
             st.rerun()
+    st.markdown(
+        '<section class="hero-radar"><div class="kicker">Compras públicas / Rentabilidad</div>'
+        '<h1>Encuentra oportunidades. Cotiza con criterio.</h1>'
+        '<p>Detecta compras relevantes para Gioval, compara sus requerimientos con tu catálogo y '
+        'estima la rentabilidad antes de preparar una oferta.</p></section>',
+        unsafe_allow_html=True,
+    )
 
 with st.expander("Conexiones y criterios económicos", expanded=False):
     st.markdown("**Ticket de ChileCompra**")
@@ -169,10 +182,34 @@ with st.expander("Conexiones y criterios económicos", expanded=False):
         "de decidir si una oferta es rentable."
     )
 
+@st.cache_data(ttl=5, show_spinner=False)
+def filas_catalogo_cache(directorio: str) -> list[dict]:
+    """Reduce lecturas del sistema de archivos; los cambios se reflejan en unos segundos."""
+    return ct.Biblioteca(directorio).filas_catalogo()
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def resumen_historial_cache(ruta_db: str, firma_db: str) -> dict:
+    """Resume el historial comercial y evita recorrer SQLite en cada interacción."""
+    h = hs.Historial(Path(ruta_db).parent)
+    return resumen_historial_cotizador(h.listar())
+
+
 indice = catalogo.indice
-productos = catalogo.filas_catalogo()
+productos = filas_catalogo_cache(str(BIBLIOTECA_DIR))
 oportunidades_todas = store.listar()
-resumen_cotizador = resumen_historial_cotizador(historial.listar())
+ruta_cotizador_db = BIBLIOTECA_DIR / "cotizador.db"
+try:
+    _stat_db = ruta_cotizador_db.stat()
+    _firma_db = f"{_stat_db.st_mtime_ns}:{_stat_db.st_size}"
+except OSError:
+    _firma_db = "sin-base"
+resumen_cotizador = resumen_historial_cache(str(ruta_cotizador_db), _firma_db)
+try:
+    _stat_indice = (BIBLIOTECA_DIR / "indice.json").stat()
+    FIRMA_INDICE = f"{_stat_indice.st_mtime_ns}:{_stat_indice.st_size}"
+except OSError:
+    FIRMA_INDICE = "sin-indice"
 
 def clp(valor) -> str:
     try:
@@ -204,12 +241,66 @@ def detalle_a_texto(lineas: list[dict]) -> str:
             resultado.append(f"{qty} | {desc} | {unit}".rstrip(" |"))
     return "\n".join(resultado)
 
-# ─────────────────────────────────────── Panel
-tab_panel, tab_radar, tab_evaluar, tab_seguimiento = st.tabs(
-    ["Panel comercial", "Radar de oportunidades", "Evaluar rentabilidad", "Seguimiento"]
-)
 
-with tab_panel:
+def poner_aviso(mensaje: str, tipo: str = "success") -> None:
+    st.session_state["radar_aviso_pendiente"] = {"mensaje": mensaje, "tipo": tipo}
+
+
+def mostrar_aviso_pendiente() -> None:
+    aviso = st.session_state.pop("radar_aviso_pendiente", None)
+    if not isinstance(aviso, dict) or not aviso.get("mensaje"):
+        return
+    funcion = {
+        "success": st.success,
+        "warning": st.warning,
+        "error": st.error,
+        "info": st.info,
+    }.get(aviso.get("tipo"), st.info)
+    with st.container(key="radar-flash"):
+        funcion(aviso["mensaje"])
+
+
+def navegar_a_evaluacion(codigo: str) -> None:
+    """Abre el evaluador directamente en la oportunidad elegida."""
+    st.session_state["evaluar_codigo"] = codigo
+    st.session_state["radar_vista"] = "Evaluar rentabilidad"
+
+
+def estado_plazo(fecha_cierre: str) -> str:
+    if not fecha_cierre:
+        return "Sin fecha"
+    try:
+        dias = (date.fromisoformat(str(fecha_cierre)[:10]) - date.today()).days
+    except ValueError:
+        return "Verificar fecha"
+    if dias < 0:
+        return "Vencida"
+    if dias == 0:
+        return "Cierra hoy"
+    if dias == 1:
+        return "Cierra mañana"
+    if dias <= 3:
+        return f"Cierra en {dias} días"
+    return f"{dias} días"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def sugerencias_catalogo_cache(descripcion: str, firma_indice: str, _indice: dict) -> list[dict]:
+    """Memoiza coincidencias de catálogo sin invalidar por cada rerun de Streamlit."""
+    return sugerir_productos_catalogo(descripcion, _indice, limite=5)
+
+# ─────────────────────────────────────── Navegación
+vista_actual = st.segmented_control(
+    "Sección",
+    options=["Panel comercial", "Radar de oportunidades", "Evaluar rentabilidad", "Seguimiento"],
+    default="Panel comercial",
+    key="radar_vista",
+    label_visibility="collapsed",
+    width="stretch",
+)
+mostrar_aviso_pendiente()
+
+if vista_actual == "Panel comercial":
     st.subheader("Vista general")
     en_evaluacion = sum(1 for r in oportunidades_todas if r.get("decision") == "En evaluación")
     para_cotizar = sum(1 for r in oportunidades_todas if r.get("decision") in ("Cotizar", "Presentada"))
@@ -262,7 +353,7 @@ with tab_panel:
     )
 
 # ─────────────────────────────────────── Radar / importación
-with tab_radar:
+elif vista_actual == "Radar de oportunidades":
     st.subheader("Buscar oportunidades")
     st.write(
         "Busca procesos publicados y guarda una lista compartida de oportunidades. "
@@ -414,7 +505,7 @@ with tab_radar:
                     "detalle": detalle, "api_detalle_url": "",
                 }
                 store.guardar_oportunidad(reg)
-                st.success(f"Oportunidad guardada con identificador {codigo}.")
+                poner_aviso(f"Oportunidad guardada con identificador {codigo}.")
                 st.rerun()
 
     st.divider()
@@ -477,7 +568,7 @@ with tab_radar:
                         with st.spinner("Obteniendo detalle del proceso..."):
                             det = obtener_detalle_compra_agil(ticket, elegido)
                         store.guardar_detalle(elegido, det)
-                        st.success("Detalle actualizado.")
+                        poner_aviso("Detalle oficial actualizado.")
                         st.rerun()
                     except APICompraAgilError as exc:
                         st.error(str(exc))
@@ -497,13 +588,13 @@ with tab_radar:
                 guardar_seguimiento = st.form_submit_button("Guardar seguimiento")
             if guardar_seguimiento:
                 store.actualizar_seguimiento(elegido, nuevo_estado, nuevas_notas)
-                st.success("Seguimiento guardado para ambos trabajadores.")
+                poner_aviso("Seguimiento guardado para ambos trabajadores.")
                 st.rerun()
     else:
         st.info("Todavía no hay oportunidades registradas con esos filtros.")
 
 # ─────────────────────────────────────── Evaluador
-with tab_evaluar:
+elif vista_actual == "Evaluar rentabilidad":
     st.subheader("Evaluar compatibilidad y rentabilidad")
     if not oportunidades_todas:
         st.info("Primero busca, importa o registra una oportunidad en la pestaña Radar.")
@@ -548,7 +639,7 @@ with tab_evaluar:
                     actualizado = dict(detalle_eval)
                     actualizado["productos_solicitados"] = parsear_lineas_productos(texto_lineas)
                     store.guardar_detalle(codigo_eval, actualizado)
-                    st.success("Requisitos guardados.")
+                    poner_aviso("Requisitos de la oportunidad guardados.")
                     st.rerun()
 
             productos_req = (store.obtener(codigo_eval) or {}).get("detalle", {}).get("productos_solicitados") or []
@@ -720,7 +811,7 @@ with tab_evaluar:
                     decision_actual = (store.obtener(codigo_eval) or {}).get("decision", "Nueva")
                     if decision_actual in ("Nueva", "En evaluación"):
                         store.actualizar_seguimiento(codigo_eval, "En evaluación", (store.obtener(codigo_eval) or {}).get("notas", ""))
-                    st.success("Evaluación guardada en la base compartida de Radar Comercial.")
+                    poner_aviso("Evaluación guardada en la base compartida de Radar Comercial.")
                     st.rerun()
 
                 st.markdown("#### Checklist antes de decidir")
@@ -740,7 +831,7 @@ with tab_evaluar:
     )
 
 # ─────────────────────────────────────── Seguimiento y datos propios
-with tab_seguimiento:
+elif vista_actual == "Seguimiento":
     st.subheader("Seguimiento comercial")
     oportunidades = store.listar()
     if not oportunidades:
