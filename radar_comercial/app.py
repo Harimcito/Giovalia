@@ -1,10 +1,10 @@
 """Radar Comercial Gioval: oportunidades de Compra Ágil y rentabilidad estimada.
 
-Ejecutar desde la raíz del repositorio:
-    streamlit run radar_comercial/app.py --server.port 8502
+Giovalia: streamlit run radar_comercial/app.py --server.port 8502
+Repo independiente: streamlit run app.py --server.port 8502
 
-Lee solo los datos comerciales del cotizador. El seguimiento se guarda en
-GIOVAL_DATA_DIR/radar_comercial.db y nunca modifica el historial del cotizador.
+Puede funcionar con datos locales propios o leer, en modo solo lectura, una
+biblioteca compatible de Giovalia. El seguimiento se guarda en radar_comercial.db.
 """
 from __future__ import annotations
 
