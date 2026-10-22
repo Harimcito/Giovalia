@@ -1103,14 +1103,26 @@ def widget_numero_cotizacion():
         E["error_numero"] = "El número de cotización no puede quedar vacío."
     elif numero != registro["numero"]:
         try:
-            hist.renumerar(cot_id, numero)
+            if GIOVAL_REQUIRE_ACCESS:
+                hist.renumerar(
+                    cot_id, numero, version_esperada=E.get("_cotizacion_version")
+                )
+            else:
+                hist.renumerar(cot_id, numero)
             E.pop("error_numero", None)
             E["editado_manual"] = True
             for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
                 E.pop(k, None)
             actualizado = hist.obtener(cot_id)
-            if actualizado and actualizado.get("xlsx"):
-                E["ruta"] = Path(actualizado["xlsx"])
+            if actualizado:
+                E["_cotizacion_version"] = actualizado.get("actualizado")
+                if actualizado.get("xlsx"):
+                    E["ruta"] = Path(actualizado["xlsx"])
+        except hs.ConflictoActualizacion as exc:
+            E["_conflicto_guardado"] = True
+            E["_conflicto_guardado_id"] = cot_id
+            E["_conflicto_guardado_mensaje"] = str(exc)
+            return
         except ValueError as exc:
             E["error_numero"] = str(exc)
     else:
@@ -1635,10 +1647,22 @@ def pedido_ui():
             registro = hist.obtener(cot_id)
             if registro and _texto_seguro(E.get("cot_numero")) != registro["numero"]:
                 try:
-                    hist.renumerar(cot_id, _texto_seguro(E.get("cot_numero")))
+                    if GIOVAL_REQUIRE_ACCESS:
+                        hist.renumerar(
+                            cot_id,
+                            _texto_seguro(E.get("cot_numero")),
+                            version_esperada=E.get("_cotizacion_version"),
+                        )
+                    else:
+                        hist.renumerar(cot_id, _texto_seguro(E.get("cot_numero")))
                     registro_renumerado = hist.obtener(cot_id)
                     if registro_renumerado:
                         E["_cotizacion_version"] = registro_renumerado.get("actualizado")
+                except hs.ConflictoActualizacion as exc:
+                    E["_conflicto_guardado"] = True
+                    E["_conflicto_guardado_id"] = cot_id
+                    E["_conflicto_guardado_mensaje"] = str(exc)
+                    st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
                     return
