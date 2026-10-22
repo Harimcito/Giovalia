@@ -328,14 +328,9 @@ def buscar_compras_agiles(
         except APICompraAgilError as exc:
             errores.append(f"{termino}: {exc}")
             if exc.status_code in (401, 403, 429):
-                if on_progress:
-                    on_progress(numero, len(terminos), termino)
                 break
         finally:
-            if on_progress and not (
-                errores and errores[-1].startswith(f"{termino}:")
-                and any(code in str(errores[-1]) for code in ("HTTP 401", "HTTP 403", "HTTP 429"))
-            ):
+            if on_progress:
                 on_progress(numero, len(terminos), termino)
     return list(registros.values()), errores, llamadas
 
