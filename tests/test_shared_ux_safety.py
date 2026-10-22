@@ -46,6 +46,29 @@ class SharedQuotationConcurrencyTests(unittest.TestCase):
             self.assertNotIn("CLIENTE_PRIVADO", str(actual["datos"]))
             self.assertNotIn("RUT_PRIVADO", str(actual["datos"]))
 
+    def test_stale_session_cannot_renumber_shared_quote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "biblioteca"
+            session_a = self.historial.Historial(root)
+            quote_id, numero = session_a.crear(
+                {"nombre": "CLIENTE_PRIVADO", "rut": "RUT_PRIVADO"},
+                [{"cantidad": 1, "descripcion": "Resma oficio", "precio_neto": 1000}],
+                {"neto": 1000, "iva": 190, "total": 1190},
+            )
+            session_b = self.historial.Historial(root)
+            version_a = session_a.obtener(quote_id)["actualizado"]
+            version_b = session_b.obtener(quote_id)["actualizado"]
+
+            session_a.renumerar(quote_id, "COT-ACTUALIZADA", version_esperada=version_a)
+            with self.assertRaises(self.historial.ConflictoActualizacion):
+                session_b.renumerar(quote_id, "COT-OBSOLETA", version_esperada=version_b)
+
+            registro = session_a.obtener(quote_id)
+            self.assertEqual(registro["numero"], "COT-ACTUALIZADA")
+            self.assertEqual(registro["cliente"], "")
+            self.assertEqual(registro["rut"], "")
+            self.assertNotIn(numero, ("COT-ACTUALIZADA", "COT-OBSOLETA"))
+
     def test_product_can_explicitly_skip_a_technical_datasheet(self):
         from cotizador import Biblioteca
 
