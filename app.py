@@ -2637,6 +2637,31 @@ def configuracion_compacta():
     return carpeta, bib_panel, hist_panel, api_key_actual, usar_lo
 
 
+def guardar_conflicto_como_nueva():
+    """Conserva el trabajo de esta sesión como una cotización nueva sin tocar la versión compartida."""
+    lineas = list(E.get("lineas", []))
+    cliente = cliente_actual()
+    totales = totales_actuales()
+    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+    try:
+        nuevo_id, nuevo_numero = hist.crear(
+            cliente, lineas, totales, con_iva=con_iva,
+            fecha=cliente.get("fecha") or date.today(),
+            origen=E.get("origen_pedido", "pedido"),
+        )
+        E["cot_id"] = nuevo_id
+        E["cot_numero"] = nuevo_numero
+        nuevo_registro = hist.obtener(nuevo_id)
+        E["_cotizacion_version"] = nuevo_registro.get("actualizado") if nuevo_registro else None
+        E.pop("_conflicto_guardado", None)
+        E.pop("_conflicto_guardado_id", None)
+        E.pop("_conflicto_guardado_mensaje", None)
+        E["_mensaje_guardado"] = f"Guardé tus cambios como la cotización nueva {nuevo_numero}. La versión anterior no se modificó."
+        persistir_borrador()
+    except Exception as exc:
+        E["_conflicto_guardado_mensaje"] = f"No pude crear la copia de tus cambios: {exc}"
+
+
 # ============================================================== PANTALLA
 # Identidad visual alineada con Gioval.cl: marca, rubro y configuración secundaria.
 if GIOVAL_REQUIRE_ACCESS:
@@ -2661,6 +2686,35 @@ if GIOVAL_REQUIRE_ACCESS:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
             E.pop("gioval_autenticado", None)
             st.rerun()
+
+if E.get("_conflicto_guardado"):
+    st.error(
+        "Esta cotización cambió en otra sesión. Para proteger el trabajo del otro usuario, "
+        "Gioval detuvo el guardado de tus cambios. Tu edición sigue abierta en esta pantalla."
+    )
+    if E.get("_conflicto_guardado_mensaje"):
+        st.caption(E["_conflicto_guardado_mensaje"])
+    st.warning("Puedes recargar la versión central —descartando los cambios de esta sesión— o guardarlos como una cotización nueva.")
+    cc1, cc2 = st.columns(2)
+    conflicto_id = E.get("_conflicto_guardado_id") or E.get("cot_id")
+    cc1.button(
+        "Recargar versión compartida",
+        icon=":material/refresh:",
+        width="stretch",
+        on_click=restaurar_borrador,
+        args=(conflicto_id,),
+        key="conflicto_recargar",
+    )
+    cc2.button(
+        "Guardar mis cambios como cotización nueva",
+        icon=":material/content_copy:",
+        type="primary",
+        width="stretch",
+        on_click=guardar_conflicto_como_nueva,
+        key="conflicto_guardar_copia",
+    )
+if E.get("_mensaje_guardado"):
+    st.success(E.pop("_mensaje_guardado"))
 
 with st.container(key="app-navigation"):
     vista = st.radio("Secciones", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
