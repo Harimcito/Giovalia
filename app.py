@@ -1,5 +1,6 @@
 """Cotizaciones con fotos y fichas técnicas. Ejecutar con:  streamlit run app.py"""
 import io
+import os
 import re
 import tempfile
 import zipfile
@@ -18,7 +19,7 @@ import lector_ia as li
 import pdf_cotizacion as pc
 import revisor as rv
 
-APP_DIR = Path(__file__).parent
+APP_DIR = Path(os.environ.get("GIOVAL_DATA_DIR") or Path(__file__).parent).expanduser().resolve()
 E = st.session_state
 
 # Aplica datos de una cotización importada al inicio de la siguiente ejecución,
