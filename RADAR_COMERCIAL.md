@@ -31,6 +31,18 @@ Si Windows Firewall bloquea la conexión, permite el puerto TCP 8502 solamente e
 
 Ambas aplicaciones piden la clave compartida de Gioval cuando se utiliza el modo de acceso protegido. Se autentican por separado, ya que funcionan como aplicaciones diferentes.
 
+## Ayuda integrada con IA
+
+Radar ofrece una ventana **Ayuda / IA** accesible desde las secciones de la aplicación. Incluye guías rápidas locales y un chat contextual que conoce la sección en que estás. La IA orienta, pero no pulsa controles, modifica registros ni presenta ofertas.
+
+- Si existe la variable de entorno **OPENAI_API_KEY**, o está definida en el archivo **.env** de la raíz del proyecto, el asistente puede usar esa clave.
+- También puedes pegar la clave en la ventana de ayuda. En ese caso queda solo en la sesión de Streamlit y no se escribe a disco ni a la base de Radar.
+- El modelo predeterminado es **gpt-6-luna**; se puede cambiar con **GIOVAL_RADAR_AI_MODEL** si la cuenta tiene acceso a otro modelo.
+- Se envía la pregunta, el historial reciente de ese chat y las instrucciones de uso. No se adjuntan el catálogo, las cotizaciones, radar_comercial.db, el ticket de ChileCompra ni las credenciales de acceso.
+- La API de OpenAI se factura aparte de una suscripción a ChatGPT. Sin clave, la búsqueda, importación y evaluación siguen funcionando y queda disponible la guía local; no habrá respuestas generativas libres.
+
+No pegues claves, tickets de API, RUT ni datos personales en las preguntas. Si la conexión falla, comprueba la clave, la cuota/saldo y que el modelo esté habilitado para tu proyecto.
+
 ## Conectar con la API oficial Compra Ágil
 
 ChileCompra publicó la API Compra Ágil v2 con los endpoints de listado y detalle, filtros de región/estado/palabras clave, paginación y un mecanismo de ticket. La guía oficial vigente que se tomó como referencia está aquí:
