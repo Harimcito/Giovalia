@@ -55,11 +55,15 @@ def cloud_url() -> str:
 
 
 def check_package() -> None:
-    """Verifica dependencias clave durante la compilación sin abrir una ventana."""
+    """Verifica las dependencias de pywebview y del backend WebView2 sin abrir una ventana."""
+    from importlib import import_module
     import webview
 
     if not callable(webview.create_window) or not callable(webview.start):
         raise RuntimeError("El paquete de escritorio no contiene las funciones de ventana necesarias.")
+    # Carga explícitamente el backend Windows para que PyInstaller no deje fuera
+    # módulos que pywebview importa de forma dinámica.
+    import_module("webview.platforms.edgechromium")
     url = cloud_url()
     parsed = urlparse(url)
     if not parsed.hostname:
