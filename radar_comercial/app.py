@@ -334,8 +334,8 @@ with tab_radar:
         "en Excel y cárgalos aquí. La importación intenta reconocer columnas habituales; revisa los campos."
     )
     archivo = st.file_uploader(
-        "Archivo de resultados .xlsx, .xls o .csv",
-        type=["xlsx", "xls", "csv"],
+        "Archivo de resultados .xlsx o .csv",
+        type=["xlsx", "csv"],
         key="radar_import_file",
     )
     if st.button("Importar archivo seleccionado", disabled=archivo is None, key="radar_importar_archivo"):
