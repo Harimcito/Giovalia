@@ -535,19 +535,48 @@ elif vista_actual == "Radar de oportunidades":
 
     st.divider()
     st.markdown("#### Oportunidades guardadas")
-    filtros1, filtros2 = st.columns([2, 1])
-    buscar_guardadas = filtros1.text_input("Buscar en las guardadas", key="radar_buscar_guardadas")
-    decision_filtro = filtros2.selectbox("Seguimiento", ["Todas", *ESTADOS_SEGUIMIENTO], key="radar_decision_filtro")
+    filtros1, filtros2, filtros3 = st.columns([2.2, 1, 1.2])
+    buscar_guardadas = filtros1.text_input(
+        "Buscar", placeholder="Código, título u organismo", key="radar_buscar_guardadas"
+    )
+    decision_filtro = filtros2.selectbox(
+        "Seguimiento", ["Todas", *ESTADOS_SEGUIMIENTO], key="radar_decision_filtro"
+    )
+    plazo_filtro = filtros3.selectbox(
+        "Fecha de cierre",
+        ["Todas", "Cierra hoy", "Próximos 3 días", "Vencidas", "Con fecha vigente", "Sin fecha"],
+        key="radar_plazo_filtro",
+    )
     lista = store.listar(decision=decision_filtro, busqueda=buscar_guardadas)
+
+    def cumple_filtro_plazo(registro: dict) -> bool:
+        plazo = estado_plazo(registro.get("fecha_cierre", ""))
+        if plazo_filtro == "Todas":
+            return True
+        if plazo_filtro == "Cierra hoy":
+            return plazo == "Cierra hoy"
+        if plazo_filtro == "Próximos 3 días":
+            return plazo == "Cierra mañana" or plazo.startswith("Cierra en ")
+        if plazo_filtro == "Vencidas":
+            return plazo == "Vencida"
+        if plazo_filtro == "Con fecha vigente":
+            return plazo not in {"Vencida", "Sin fecha", "Verificar fecha"}
+        return plazo == "Sin fecha"
+
+    lista = [registro for registro in lista if cumple_filtro_plazo(registro)]
+    st.caption(f"{len(lista)} oportunidad(es) coinciden con los filtros actuales.")
     if lista:
         tabla = []
         for r in lista:
+            items_req = (r.get("detalle") or {}).get("productos_solicitados") or []
             tabla.append({
                 "Código": r["codigo"],
                 "Oportunidad": r["nombre"],
                 "Organismo": r["organismo"],
                 "Región": r["region_nombre"],
                 "Cierre": fecha_corta(r["fecha_cierre"]),
+                "Plazo": estado_plazo(r.get("fecha_cierre", "")),
+                "Ítems": len(items_req),
                 "Presupuesto ref. CLP": r["presupuesto_clp"],
                 "Seguimiento": r["decision"],
                 "Fuente": r["fuente"],
@@ -557,14 +586,10 @@ elif vista_actual == "Radar de oportunidades":
             options=[25, 50, 100],
             index=1,
             key="radar_limite_tabla",
-            help="Usa la búsqueda por código, organismo o título para reducir la lista.",
+            help="Reduce la lista con los filtros de búsqueda, seguimiento o fecha de cierre.",
         )
-        st.caption(f"Hay {len(lista)} oportunidad(es) con estos filtros; se muestran hasta {limite_tabla}.")
         st.dataframe(
-            pd.DataFrame([{
-                **fila,
-                "Plazo": estado_plazo(next((x.get("fecha_cierre") for x in lista if x["codigo"] == fila["Código"]), "")),
-            } for fila in tabla[:limite_tabla]]),
+            pd.DataFrame(tabla[:limite_tabla]),
             hide_index=True, width="stretch",
             column_config={"Presupuesto ref. CLP": st.column_config.NumberColumn(format="$ %d")},
         )
