@@ -546,8 +546,34 @@ def restaurar_respaldo_inicial(carpeta: Path, datos_zip: bytes) -> tuple[int, in
             tablas = {
                 fila[0] for fila in conexion.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
-        if integridad != "ok" or not {"cotizaciones", "clientes", "config"}.issubset(tablas):
-            raise ValueError("La base de datos del respaldo no supera la comprobación de integridad.")
+            if integridad != "ok" or not {"cotizaciones", "clientes", "config"}.issubset(tablas):
+                raise ValueError("La base de datos del respaldo no supera la comprobación de integridad.")
+
+            # El respaldo puede venir de otro computador y contener rutas absolutas del disco
+            # de origen. Al importar, reescribe esas rutas al destino central antes de moverlo.
+            registros = conexion.execute(
+                "SELECT id, numero FROM cotizaciones ORDER BY id"
+            ).fetchall()
+            for registro_id, numero in registros:
+                numero_seguro = re.sub(r"[^A-Za-z0-9._-]", "_", str(numero))
+                carpeta_archivos = stage / "cotizaciones" / numero_seguro
+                xlsx_stage = carpeta_archivos / f"{numero_seguro}.xlsx"
+                pdf_stage = carpeta_archivos / f"{numero_seguro}.pdf"
+                xlsx_destino = carpeta / "cotizaciones" / numero_seguro / f"{numero_seguro}.xlsx"
+                pdf_destino = carpeta / "cotizaciones" / numero_seguro / f"{numero_seguro}.pdf"
+                conexion.execute(
+                    "UPDATE cotizaciones SET xlsx=?, pdf=? WHERE id=?",
+                    (
+                        str(xlsx_destino) if xlsx_stage.is_file() else None,
+                        str(pdf_destino) if pdf_stage.is_file() else None,
+                        registro_id,
+                    ),
+                )
+            conexion.commit()
+            integridad = conexion.execute("PRAGMA integrity_check").fetchone()[0]
+            if integridad != "ok":
+                raise ValueError("La base de datos no superó la comprobación posterior a la migración.")
+
         indice_stage = stage / "indice.json"
         if indice_stage.exists():
             indice = json.loads(indice_stage.read_text("utf-8"))
