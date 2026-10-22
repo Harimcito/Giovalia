@@ -1203,6 +1203,8 @@ def refrescar_excel_actual():
         registro = hist.obtener(cot_id)
         if registro and registro.get("xlsx"):
             E["ruta"] = Path(registro["xlsx"])
+        if registro and registro.get("xlsx"):
+            E["ruta"] = Path(registro["xlsx"])
 
 
 def iniciar_borrador():
