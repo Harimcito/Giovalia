@@ -2225,10 +2225,23 @@ def paso_4():
         editar_cabecera()
 
         claves, _ = datos_productos()
-        con_foto = sum(1 for c in claves if bib.archivos(c)[0])
-        con_ficha = sum(1 for c in claves if bib.archivos(c)[1])
-        st.write(f"La cotización tiene **{len(E.get('lineas', []))} líneas**. Fotos: **{con_foto}** de {len(claves)}. "
-                 f"Fichas técnicas: **{con_ficha}** de {len(claves)}.")
+        con_foto = sum(1 for clave in claves if bib.archivos(clave)[0])
+        con_ficha = sum(1 for clave in claves if bib.archivos(clave)[1])
+        sin_ficha_requerida = sum(
+            1 for clave in claves
+            if not bib.archivos(clave)[1]
+            and not bib.indice.get(clave, {}).get("ficha_no_requerida", False)
+        )
+        ficha_no_requerida = sum(
+            1 for clave in claves if bib.indice.get(clave, {}).get("ficha_no_requerida", False)
+        )
+        st.write(
+            f"La cotización tiene **{len(E.get('lineas', []))} líneas**. "
+            f"Fotos: **{con_foto}** de {len(claves)} · "
+            f"Fichas disponibles: **{con_ficha}** · "
+            f"Fichas pendientes: **{sin_ficha_requerida}** · "
+            f"No requeridas: **{ficha_no_requerida}**."
+        )
         n_errores = panel_revision(en_paso_4=True)
         permitido = not bool(E.get("error_numero"))
         if n_errores:
@@ -2796,13 +2809,17 @@ def configuracion_compacta():
                     ),
                     reverse=True,
                 )[:5]
-                df_recientes = pd.DataFrame({
+                datos_recientes = {
                     "N° cotización": [registro.get("numero", "") for registro in recientes],
                     "Fecha": [fecha_corta(registro.get("fecha") or "") for registro in recientes],
-                    "Cliente": [registro.get("cliente") or "Sin cliente" for registro in recientes],
                     "Total": [registro.get("total") or 0 for registro in recientes],
                     "Estado": [registro.get("estado") or "Borrador" for registro in recientes],
-                })
+                }
+                if not GIOVAL_REQUIRE_ACCESS:
+                    datos_recientes["Cliente"] = [
+                        registro.get("cliente") or "Sin cliente" for registro in recientes
+                    ]
+                df_recientes = pd.DataFrame(datos_recientes)
                 st.dataframe(
                     df_recientes,
                     hide_index=True,
