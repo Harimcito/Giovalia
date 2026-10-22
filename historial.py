@@ -178,8 +178,8 @@ class Historial:
         with self._con() as con:
             return con.execute("SELECT 1 FROM cotizaciones WHERE numero=?", (numero,)).fetchone() is not None
 
-    def renumerar(self, cot_id: int, nuevo_numero: str) -> str:
-        """Cambia el número de una cotización y renombra los archivos asociados."""
+    def renumerar(self, cot_id: int, nuevo_numero: str, version_esperada: str | None = None) -> str:
+        """Cambia el número de una cotización; el modo compartido exige la versión abierta."""
         reg = self.obtener(cot_id)
         if not reg:
             raise ValueError("No encontré la cotización que quieres renumerar.")
@@ -191,6 +191,39 @@ class Historial:
         anterior = reg["numero"]
         if nuevo_numero == anterior:
             return anterior
+
+        if PRIVACIDAD_COMPARTIDA:
+            if not version_esperada:
+                raise ConflictoActualizacion(
+                    "No conozco la versión de la cotización que abriste. Recarga antes de cambiar el número."
+                )
+            # El modo compartido no almacena archivos PDF/Excel; cambia el correlativo
+            # y verifica la versión dentro de la misma transacción SQLite.
+            with self._con() as con:
+                con.execute("BEGIN IMMEDIATE")
+                actual = con.execute(
+                    "SELECT numero, actualizado FROM cotizaciones WHERE id=?", (cot_id,)
+                ).fetchone()
+                if not actual:
+                    raise ConflictoActualizacion("La cotización ya no existe.")
+                if (actual["actualizado"] or "") != version_esperada:
+                    raise ConflictoActualizacion(
+                        "Otra sesión modificó esta cotización. Recarga la versión compartida antes de cambiar el número."
+                    )
+                duplicado = con.execute(
+                    "SELECT 1 FROM cotizaciones WHERE numero=? AND id<>?", (nuevo_numero, cot_id)
+                ).fetchone()
+                if duplicado:
+                    raise ValueError(f"Ya existe una cotización con el número «{nuevo_numero}».")
+                cur = con.execute(
+                    "UPDATE cotizaciones SET numero=?, actualizado=? WHERE id=? AND actualizado=?",
+                    (nuevo_numero, _ahora(), cot_id, actual["actualizado"]),
+                )
+                if cur.rowcount != 1:
+                    raise ConflictoActualizacion(
+                        "Otra sesión modificó esta cotización. Recarga antes de cambiar el número."
+                    )
+            return nuevo_numero
         if self._existe(nuevo_numero):
             raise ValueError(f"Ya existe una cotización con el número «{nuevo_numero}».")
 
