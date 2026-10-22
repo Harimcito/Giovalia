@@ -828,7 +828,10 @@ class RadarStore:
         if filtros:
             sql += " WHERE " + " AND ".join(filtros)
         sql += (
-            " ORDER BY CASE o.decision WHEN 'Nueva' THEN 0 WHEN 'En evaluación' THEN 1 ELSE 2 END, "
+            " ORDER BY CASE o.decision "
+            "WHEN 'Cotizar' THEN 0 WHEN 'Nueva' THEN 1 WHEN 'En evaluación' THEN 2 "
+            "WHEN 'Presentada' THEN 3 ELSE 4 END, "
+            "CASE WHEN COALESCE(o.fecha_cierre, '')='' THEN 1 ELSE 0 END, "
             "o.fecha_cierre ASC, o.actualizado DESC"
         )
         with self._connection() as con:
