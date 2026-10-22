@@ -10,7 +10,7 @@ import stat
 import tempfile
 import zipfile
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote_plus
 
@@ -2324,16 +2324,30 @@ def historial_cotizaciones():
     m1.metric("Cotizaciones", len(todos))
     m2.metric("Monto cotizado", rv.clp(sum(r["total"] or 0 for r in todos)))
     m3.metric("Monto aceptado", rv.clp(sum(r["total"] or 0 for r in todos if r["estado"] == "Aceptada")))
-    f1, f2 = st.columns([3, 2])
+    f1, f2, f3 = st.columns([2.5, 1, 1.4])
     texto = f1.text_input(
         "Buscar",
         placeholder="Número de cotización" if GIOVAL_REQUIRE_ACCESS else "Número, cliente, RUT o notas",
         key="h_texto",
     )
     estado = f2.selectbox("Estado", ["Todos"] + hs.ESTADOS, key="h_estado")
+    periodo = f3.selectbox(
+        "Período", ["Todas las fechas", "Últimos 30 días", "Últimos 90 días", "Este año"],
+        key="h_periodo",
+    )
     regs = hist.listar(texto, estado)
+    hoy = date.today()
+    if periodo == "Últimos 30 días":
+        minimo = hoy - timedelta(days=30)
+        regs = [r for r in regs if str(r.get("fecha") or "")[:10] >= minimo.isoformat()]
+    elif periodo == "Últimos 90 días":
+        minimo = hoy - timedelta(days=90)
+        regs = [r for r in regs if str(r.get("fecha") or "")[:10] >= minimo.isoformat()]
+    elif periodo == "Este año":
+        regs = [r for r in regs if str(r.get("fecha") or "")[:4] == str(hoy.year)]
+    st.caption(f"Mostrando {len(regs)} cotización(es) con los filtros seleccionados.")
     if not regs:
-        st.warning("No encontré cotizaciones con ese filtro.")
+        st.info("No encontré cotizaciones con esos filtros. Cambia el estado, período o búsqueda.")
         return
     datos_tabla = {
         "id": [r["id"] for r in regs], "N°": [r["numero"] for r in regs],
