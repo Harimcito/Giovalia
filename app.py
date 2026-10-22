@@ -1,12 +1,17 @@
 """Cotizaciones con fotos y fichas técnicas. Ejecutar con:  streamlit run app.py"""
+import hmac
 import io
+import json
 import os
 import re
+import shutil
+import sqlite3
+import stat
 import tempfile
 import zipfile
 import time
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote_plus
 
 import pandas as pd
@@ -21,6 +26,9 @@ import revisor as rv
 
 APP_DIR = Path(os.environ.get("GIOVAL_DATA_DIR") or Path(__file__).parent).expanduser().resolve()
 E = st.session_state
+GIOVAL_REQUIRE_ACCESS = os.environ.get("GIOVAL_REQUIRE_ACCESS", "false").strip().lower() in {"1", "true", "yes", "on"}
+GIOVAL_ACCESS_PASSWORD = os.environ.get("GIOVAL_ACCESS_PASSWORD", "")
+GIOVAL_ALLOW_INITIAL_IMPORT = os.environ.get("GIOVAL_ALLOW_INITIAL_IMPORT", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 # Aplica datos de una cotización importada al inicio de la siguiente ejecución,
 # antes de crear widgets con esas claves (Streamlit no permite cambiarlas después).
@@ -102,6 +110,25 @@ preparar_tema()
 
 st.set_page_config(page_title="Gioval · Cotizador comercial", page_icon=":material/description:",
                    layout="wide", initial_sidebar_state="collapsed")
+
+# El espacio compartido falla cerrado: nunca muestra cotizaciones si falta la clave del servidor.
+if GIOVAL_REQUIRE_ACCESS:
+    if not GIOVAL_ACCESS_PASSWORD:
+        st.error("El acceso al espacio compartido no está configurado. Contacta al administrador.")
+        st.stop()
+    if not E.get("gioval_autenticado"):
+        st.markdown("## Gioval · Biblioteca compartida")
+        st.caption("Ingresa la clave de acceso del equipo para consultar y actualizar la biblioteca central.")
+        with st.form("gioval_login_compartido"):
+            clave_ingresada = st.text_input("Clave de acceso", type="password", autocomplete="current-password")
+            entrar = st.form_submit_button("Entrar a Gioval", type="primary", width="stretch")
+        if entrar:
+            if hmac.compare_digest(clave_ingresada.encode("utf-8"), GIOVAL_ACCESS_PASSWORD.encode("utf-8")):
+                E["gioval_autenticado"] = True
+                st.rerun()
+            else:
+                st.error("La clave no es correcta.")
+        st.stop()
 
 CSS_BASE = """
 html, body, .stApp { font-size: 16px; line-height: 1.5; }
@@ -425,18 +452,122 @@ st.markdown("<style>" + CSS_BASE + CSS_TINTA + (CSS_ANIMACION if ANIMAR_FONDO el
 
 
 def crear_respaldo_biblioteca(carpeta: Path) -> bytes:
-    """Empaqueta biblioteca, base SQLite, cotizaciones, fotos y fichas sin tocar los originales."""
+    """Empaqueta una copia consistente de SQLite y los archivos compartidos."""
     if not carpeta.exists():
         raise FileNotFoundError(f"No existe la carpeta de biblioteca: {carpeta}")
+    db_origen = carpeta / "cotizador.db"
+    if not db_origen.is_file():
+        raise FileNotFoundError(f"No existe la base de datos de la biblioteca: {db_origen}")
+
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
-        for ruta in sorted(carpeta.rglob("*")):
-            if not ruta.is_file() or "__pycache__" in ruta.parts or ".git" in ruta.parts:
-                continue
-            archivo_zip.write(ruta, arcname=str(Path(carpeta.name) / ruta.relative_to(carpeta)))
+    with tempfile.TemporaryDirectory(prefix="gioval-respaldo-") as temporal:
+        db_copia = Path(temporal) / "cotizador.db"
+        origen = sqlite3.connect(str(db_origen), timeout=30)
+        destino = sqlite3.connect(str(db_copia), timeout=30)
+        try:
+            # El backup API de SQLite captura una instantánea coherente aunque otro usuario
+            # esté guardando una cotización en ese momento.
+            origen.backup(destino)
+        finally:
+            destino.close()
+            origen.close()
+
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
+            for ruta in sorted(carpeta.rglob("*")):
+                if not ruta.is_file() or "__pycache__" in ruta.parts or ".git" in ruta.parts:
+                    continue
+                if ruta.name in {"cotizador.db-wal", "cotizador.db-shm"}:
+                    continue
+                nombre_zip = str(Path(carpeta.name) / ruta.relative_to(carpeta))
+                archivo_zip.write(db_copia if ruta == db_origen else ruta, arcname=nombre_zip)
     if buffer.tell() == 0:
         raise ValueError("La biblioteca no contiene archivos para respaldar.")
     return buffer.getvalue()
+
+
+def restaurar_respaldo_inicial(carpeta: Path, datos_zip: bytes) -> tuple[int, int]:
+    """Importa un respaldo ZIP solo si la biblioteca compartida todavía está vacía."""
+    carpeta = carpeta.resolve()
+    carpeta.mkdir(parents=True, exist_ok=True)
+    hist_actual = hs.Historial(carpeta)
+    bib_actual = ct.Biblioteca(carpeta)
+    if hist_actual.listar() or bib_actual.indice:
+        raise ValueError("La biblioteca central ya tiene cotizaciones o productos. No se sobrescribió nada.")
+    permitidos_vacios = {"cotizador.db", "indice.json"}
+    adicionales = [
+        p for p in carpeta.rglob("*")
+        if p.is_file() and p.name not in permitidos_vacios
+    ]
+    if adicionales:
+        raise ValueError("La biblioteca central no está vacía. No se sobrescribió nada.")
+
+    with tempfile.TemporaryDirectory(prefix="gioval-restaurar-") as temporal:
+        stage = Path(temporal) / "biblioteca"
+        stage.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(datos_zip)) as archivo_zip:
+            miembros = archivo_zip.infolist()
+            archivos = [m for m in miembros if not m.is_dir()]
+            if not archivos:
+                raise ValueError("El ZIP no contiene archivos.")
+            total_descomprimido = sum(m.file_size for m in archivos)
+            if total_descomprimido > 500 * 1024 * 1024:
+                raise ValueError("El respaldo supera el límite de 500 MB.")
+            raices = {
+                PurePosixPath(m.filename.replace("\\", "/")).parts[0]
+                for m in miembros if PurePosixPath(m.filename.replace("\\", "/")).parts
+            }
+            if len(raices) != 1:
+                raise ValueError("El ZIP debe contener una sola carpeta de biblioteca.")
+            for miembro in miembros:
+                ruta_zip = PurePosixPath(miembro.filename.replace("\\", "/"))
+                if ruta_zip.is_absolute() or any(parte in {".", ".."} for parte in ruta_zip.parts):
+                    raise ValueError("El ZIP contiene una ruta no permitida.")
+                modo = (miembro.external_attr >> 16) & 0xFFFF
+                if stat.S_ISLNK(modo):
+                    raise ValueError("El ZIP contiene un enlace simbólico no permitido.")
+                relativa = ruta_zip.parts[1:]
+                if not relativa:
+                    continue
+                destino = stage.joinpath(*relativa)
+                if not destino.resolve().is_relative_to(stage.resolve()):
+                    raise ValueError("El ZIP intenta escribir fuera de la biblioteca.")
+                if miembro.is_dir():
+                    destino.mkdir(parents=True, exist_ok=True)
+                    continue
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                with archivo_zip.open(miembro) as origen, destino.open("wb") as salida:
+                    shutil.copyfileobj(origen, salida)
+
+        db_stage = stage / "cotizador.db"
+        if not db_stage.is_file():
+            raise ValueError("El respaldo no contiene cotizador.db.")
+        with sqlite3.connect(db_stage) as conexion:
+            integridad = conexion.execute("PRAGMA integrity_check").fetchone()[0]
+            tablas = {
+                fila[0] for fila in conexion.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+        if integridad != "ok" or not {"cotizaciones", "clientes", "config"}.issubset(tablas):
+            raise ValueError("La base de datos del respaldo no supera la comprobación de integridad.")
+        indice_stage = stage / "indice.json"
+        if indice_stage.exists():
+            indice = json.loads(indice_stage.read_text("utf-8"))
+            if not isinstance(indice, dict):
+                raise ValueError("El índice de productos del respaldo no es válido.")
+        else:
+            indice_stage.write_text("{}", encoding="utf-8")
+
+        # Solo se copia al destino después de validar el ZIP completo y la base de datos.
+        for origen in stage.rglob("*"):
+            destino = carpeta / origen.relative_to(stage)
+            if origen.is_dir():
+                destino.mkdir(parents=True, exist_ok=True)
+            else:
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(origen, destino)
+
+    hist_final = hs.Historial(carpeta)
+    bib_final = ct.Biblioteca(carpeta)
+    return len(hist_final.listar()), len(bib_final.indice)
 
 
 E.setdefault("paso", 1)
@@ -2106,7 +2237,9 @@ def vista_productos():
 
 def configuracion_compacta():
     """Muestra opciones secundarias bajo demanda y devuelve los servicios activos de la app."""
-    E.setdefault("config_carpeta", "biblioteca")
+    carpeta_compartida = str((APP_DIR / "biblioteca").resolve())
+    if not GIOVAL_REQUIRE_ACCESS:
+        E.setdefault("config_carpeta", carpeta_compartida)
     api_key, origen_key = li.buscar_api_key(APP_DIR)
 
     with st.popover(
@@ -2120,11 +2253,22 @@ def configuracion_compacta():
         st.markdown("### Preferencias")
         st.caption("Las opciones avanzadas están aquí para mantener despejada la pantalla de trabajo.")
 
-        carpeta = st.text_input(
-            "Carpeta de datos y productos",
-            key="config_carpeta",
-            help="Normalmente puedes dejar «biblioteca» como está.",
-        )
+        if GIOVAL_REQUIRE_ACCESS:
+            carpeta = carpeta_compartida
+            st.text_input(
+                "Biblioteca compartida",
+                value=carpeta,
+                disabled=True,
+                help="Todos los usuarios autorizados trabajan sobre estos mismos datos.",
+                key="config_carpeta_compartida",
+            )
+            st.caption("Los cambios quedan guardados en el servidor central y se ven en las demás instalaciones.")
+        else:
+            carpeta = st.text_input(
+                "Carpeta de datos y productos",
+                key="config_carpeta",
+                help="Normalmente puedes dejar la biblioteca de este computador como está.",
+            )
         bib_panel = ct.Biblioteca(carpeta)
         hist_panel = hs.Historial(carpeta)
         st.caption(f"{len(bib_panel.indice)} productos en el catálogo")
@@ -2177,6 +2321,12 @@ def configuracion_compacta():
         st.markdown("**Conexión de inteligencia artificial**")
         if api_key:
             st.caption(f"Conectada · Clave encontrada en {origen_key}")
+        elif GIOVAL_REQUIRE_ACCESS:
+            st.caption(
+                "La IA no está configurada en el servidor. El administrador puede definir "
+                "OPENAI_API_KEY en las variables del servicio Render; no se guardan claves "
+                "personales desde una sesión compartida."
+            )
         else:
             api_key = st.text_input(
                 "Clave de OpenAI",
@@ -2243,6 +2393,39 @@ def configuracion_compacta():
                     key="descargar_respaldo",
                 )
 
+            if GIOVAL_REQUIRE_ACCESS and GIOVAL_ALLOW_INITIAL_IMPORT:
+                st.divider()
+                st.markdown("**Importar respaldo inicial al espacio compartido**")
+                st.caption("Solo debe usarse cuando la biblioteca central está vacía, antes de que el equipo empiece a trabajar.")
+                archivo_inicial = st.file_uploader(
+                    "Respaldo ZIP de otro computador",
+                    type=["zip"],
+                    key="respaldo_inicial_zip",
+                    max_upload_size=500,
+                )
+                confirmar_importacion = st.checkbox(
+                    "Confirmo que quiero cargar este respaldo en la biblioteca central vacía.",
+                    key="confirmar_respaldo_inicial",
+                )
+                if st.button(
+                    "Importar biblioteca inicial",
+                    icon=":material/cloud_upload:",
+                    disabled=not (archivo_inicial and confirmar_importacion),
+                    key="importar_biblioteca_inicial",
+                    width="stretch",
+                ):
+                    try:
+                        cantidad_cot, cantidad_prod = restaurar_respaldo_inicial(
+                            bib_panel.dir, archivo_inicial.getvalue()
+                        )
+                        st.success(
+                            f"Biblioteca inicial importada: {cantidad_cot} cotizaciones y "
+                            f"{cantidad_prod} productos. Desactiva GIOVAL_ALLOW_INITIAL_IMPORT en el servidor."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"No pude importar el respaldo: {exc}")
+
         st.divider()
         st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=lambda: E.clear())
 
@@ -2257,7 +2440,10 @@ def configuracion_compacta():
 
 # ============================================================== PANTALLA
 # Identidad visual alineada con Gioval.cl: marca, rubro y configuración secundaria.
-col_marca, col_ajustes = st.columns([6, 1])
+if GIOVAL_REQUIRE_ACCESS:
+    col_marca, col_salir, col_ajustes = st.columns([5.5, 1, 1])
+else:
+    col_marca, col_ajustes = st.columns([6, 1])
 with col_marca:
     st.markdown(
         '<div class="marca-app">'
@@ -2265,12 +2451,17 @@ with col_marca:
         '<div class="marca-texto">'
         '<div class="marca-nombre">Gioval</div>'
         '<div class="marca-descripcion">Tintas, tóners y artículos de oficina</div>'
-        '<div class="marca-pill">Cotizador comercial</div>'
+        f'<div class="marca-pill">{"Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Cotizador comercial"}</div>'
         '</div></div>',
         unsafe_allow_html=True,
     )
 with col_ajustes:
     carpeta, bib, hist, api_key, usar_lo = configuracion_compacta()
+if GIOVAL_REQUIRE_ACCESS:
+    with col_salir:
+        if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
+            E.pop("gioval_autenticado", None)
+            st.rerun()
 
 with st.container(key="app-navigation"):
     vista = st.radio("Secciones", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")

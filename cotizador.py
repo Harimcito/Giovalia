@@ -20,8 +20,9 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 import unicodedata
-from copy import copy
+from copy import copy, deepcopy
 from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -43,6 +44,8 @@ from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Tabl
 # Líneas de la cotización que no son productos (no llevan foto ni ficha)
 PALABRAS_NO_PRODUCTO = ("despacho", "flete", "envio", "transporte", "instalacion", "servicio")
 EXT_FOTO = (".jpg", ".jpeg", ".png", ".webp")
+_INDICE_LOCK = threading.RLock()
+_INDICE_ABSENT = object()
 # Tokens que parecen un código pero son medidas (64GB, 500ML, 75GR...)
 _MEDIDA = re.compile(r"^(\d+(GB|TB|MB|ML|GR|G|KG|MM|CM|W|V|MAH|HZ|MP|PX)|\d+(X\d+)+(CM|MM|M)?)$")
 
@@ -101,9 +104,76 @@ class Biblioteca:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._idx = self.dir / "indice.json"
         self.indice: dict = json.loads(self._idx.read_text("utf-8")) if self._idx.exists() else {}
+        if not isinstance(self.indice, dict):
+            raise ValueError(f"El índice de productos no es válido: {self._idx}")
+        self._snapshot_indice = deepcopy(self.indice)
 
     def _guardar_indice(self):
-        self._idx.write_text(json.dumps(self.indice, ensure_ascii=False, indent=2), "utf-8")
+        """Guarda solo los cambios de esta instancia sin borrar productos añadidos por otra sesión."""
+        with _INDICE_LOCK:
+            indice_actual = json.loads(self._idx.read_text("utf-8")) if self._idx.exists() else {}
+            if not isinstance(indice_actual, dict):
+                raise ValueError(f"El índice de productos no es válido: {self._idx}")
+
+            original = self._snapshot_indice
+            local = self.indice
+            combinado = deepcopy(indice_actual)
+
+            # Propaga las eliminaciones solo si ninguna otra sesión cambió esa ficha después de leerla.
+            for clave in original:
+                if clave not in local and combinado.get(clave, _INDICE_ABSENT) == original[clave]:
+                    combinado.pop(clave, None)
+
+            for clave, ficha_local in local.items():
+                ficha_original = original.get(clave, _INDICE_ABSENT)
+                ficha_actual = combinado.get(clave, _INDICE_ABSENT)
+
+                if ficha_original is _INDICE_ABSENT:
+                    # Dos personas pueden registrar códigos distintos al mismo tiempo.
+                    if ficha_actual is _INDICE_ABSENT:
+                        combinado[clave] = deepcopy(ficha_local)
+                    elif isinstance(ficha_actual, dict) and isinstance(ficha_local, dict):
+                        fusion = deepcopy(ficha_actual)
+                        for campo, valor in ficha_local.items():
+                            if campo == "aliases":
+                                fusion[campo] = sorted(set(fusion.get(campo, [])) | set(valor or []))
+                            elif campo not in fusion:
+                                fusion[campo] = deepcopy(valor)
+                        combinado[clave] = fusion
+                    continue
+
+                if ficha_local == ficha_original:
+                    continue
+                if ficha_actual is _INDICE_ABSENT or ficha_actual == ficha_original:
+                    combinado[clave] = deepcopy(ficha_local)
+                    continue
+
+                # Si dos sesiones editaron una misma ficha, combina los campos cambiados
+                # por separado para preservar, por ejemplo, los alias de ambas sesiones.
+                if isinstance(ficha_actual, dict) and isinstance(ficha_original, dict) and isinstance(ficha_local, dict):
+                    fusion = deepcopy(ficha_actual)
+                    campos = set(ficha_original) | set(ficha_local)
+                    for campo in campos:
+                        base = ficha_original.get(campo, _INDICE_ABSENT)
+                        valor = ficha_local.get(campo, _INDICE_ABSENT)
+                        if valor == base:
+                            continue
+                        if valor is _INDICE_ABSENT:
+                            if fusion.get(campo, _INDICE_ABSENT) == base:
+                                fusion.pop(campo, None)
+                        elif campo == "aliases":
+                            fusion[campo] = sorted(set(fusion.get(campo, [])) | set(valor or []))
+                        else:
+                            fusion[campo] = deepcopy(valor)
+                    combinado[clave] = fusion
+                else:
+                    combinado[clave] = deepcopy(ficha_local)
+
+            temporal = self._idx.with_suffix(".json.tmp")
+            temporal.write_text(json.dumps(combinado, ensure_ascii=False, indent=2), "utf-8")
+            os.replace(temporal, self._idx)
+            self.indice = combinado
+            self._snapshot_indice = deepcopy(combinado)
 
     @staticmethod
     def _slug(clave: str) -> str:

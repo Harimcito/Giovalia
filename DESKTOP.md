@@ -1,50 +1,18 @@
-# Gioval como aplicación de escritorio (Windows)
+# Cliente de escritorio de Gioval
 
-## Qué hace
+El instalador de Windows abre una ventana propia con pywebview/WebView2, pero el contenido y los datos comerciales están alojados en un único servicio central. El cliente no inicia una base de datos local ni guarda copias autónomas del catálogo.
 
-Gioval.exe abre el cotizador en una ventana de escritorio propia. No abre una pestaña en Chrome o Edge. El instalador crea accesos directos en el menú Inicio y en el escritorio.
+Lee SHARED_LIBRARY.md para configurar Render, proteger el acceso, importar la biblioteca existente y distribuir instaladores.
 
-La aplicación mantiene Streamlit como motor local, alojado únicamente en 127.0.0.1. No publica la aplicación en internet ni en la red local.
+## Cliente Windows
 
-## Crear y descargar el instalador
+El flujo GitHub Actions "Crear instalador de escritorio para Windows" compila el cliente y publica el artefacto Gioval-Instalador-Windows-x64. Después de completar un despliegue en Render y confirmar la URL del servicio:
 
-El flujo automático de GitHub Actions compila para Windows x64 el programa y el instalador. Después de integrar los cambios en main:
+1. Descarga el artefacto más reciente de GitHub Actions.
+2. Extrae Gioval-Setup.exe del ZIP.
+3. Ejecuta el instalador en cada computador.
+4. Comparte la clave de acceso de la biblioteca solo con las personas autorizadas.
 
-1. Abre la pestaña **Actions** del repositorio.
-2. Selecciona el flujo **Crear instalador de escritorio para Windows**.
-3. En la última ejecución, descarga el artefacto **Gioval-Instalador-Windows-x64**.
-4. Envía el archivo **Gioval-Setup.exe** a la persona que lo instalará.
+El cliente requiere conexión a internet y Microsoft Edge WebView2 Runtime. No requiere que la persona instale Python ni ejecute comandos.
 
-El flujo vuelve a crear el artefacto cuando cambian los archivos principales del cotizador. Es un instalador por usuario y está diseñado para Windows x64.
-
-## Datos del usuario
-
-La base local y la biblioteca predeterminada se guardan fuera de la carpeta del programa, en:
-
-    %LOCALAPPDATA%\Gioval\
-        biblioteca\
-        .streamlit\
-        .env
-
-Esto evita guardar datos en la carpeta de instalación y permite conservarlos al actualizar o desinstalar. El instalador no incluye una copia del catálogo ni del historial que tengas en tu computador; esos datos son locales. Para trasladarlos, usa **Ajustes → Copia de seguridad** y restaura o copia la biblioteca en el otro computador. Cada computador mantiene su propia base de datos e historial.
-
-La clave de OpenAI no forma parte del instalador. Cada usuario puede configurarla en Ajustes. Las funciones de interpretación con IA y búsqueda de imágenes/fichas requieren conexión a internet.
-
-## Requisitos
-
-- Windows x64.
-- El instalador intenta instalar Microsoft Edge WebView2 Runtime si no lo encuentra. En ese caso necesita conexión a internet para descargar el runtime; en Windows 11 suele venir incluido.
-- No es necesario instalar Python ni ejecutar comandos en el computador de destino.
-
-## Desarrollo local
-
-Después de instalar las dependencias de requirements-desktop.txt, ejecuta desde la carpeta del proyecto:
-
-    python desktop_launcher.py
-
-Para generar el paquete en un computador Windows con Inno Setup instalado, ejecuta:
-
-    python -m PyInstaller --noconfirm --clean gioval_desktop.spec
-    Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "installer/webview2/MicrosoftEdgeWebview2Setup.exe"
-    $compiler = [System.IO.Path]::Combine([Environment]::GetFolderPath("ProgramFilesX86"), "Inno Setup 6\ISCC.exe")
-    & $compiler "installer/Gioval.iss"
+No distribuyas el instalador antes de que el servicio central esté desplegado y la URL configurada. Si la dirección cambia, actualiza DEFAULT_CLOUD_URL en desktop_launcher.py y genera el instalador de nuevo.
