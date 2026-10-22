@@ -2,6 +2,9 @@ name: Crear instalador de escritorio para Windows
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -49,6 +52,39 @@ jobs:
           python -m PyInstaller --noconfirm --clean gioval_desktop.spec
           if (-not (Test-Path "dist/Gioval/Gioval.exe")) {
             throw "PyInstaller no generó dist/Gioval/Gioval.exe"
+          }
+
+
+      - name: Probar arranque del servidor empaquetado
+        shell: pwsh
+        run: |
+          $probeDir = Join-Path $env:RUNNER_TEMP "gioval-desktop-smoke"
+          New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+          $env:GIOVAL_DATA_DIR = $probeDir
+          $port = 18765
+          $exe = (Resolve-Path "dist/Gioval/Gioval.exe").Path
+          $outLog = Join-Path $probeDir "stdout.log"
+          $errLog = Join-Path $probeDir "stderr.log"
+          $process = Start-Process -FilePath $exe -ArgumentList @("--gioval-server", "--port", "$port") -WorkingDirectory $probeDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              if ($process.HasExited) {
+                throw "El servidor de Giovalia se cerró antes de responder."
+              }
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/_stcore/health" -TimeoutSec 2 -UseBasicParsing
+                if ($response.StatusCode -eq 200) { $ready = $true; break }
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ready) {
+              $stdout = if (Test-Path $outLog) { Get-Content $outLog -Raw } else { "" }
+              $stderr = if (Test-Path $errLog) { Get-Content $errLog -Raw } else { "" }
+              throw "El servidor empaquetado no respondió. stdout=$stdout stderr=$stderr"
+            }
+            Write-Host "OK: el servidor empaquetado respondió en localhost."
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
 
       - name: Obtener instalador oficial de WebView2
