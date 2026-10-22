@@ -755,7 +755,21 @@ def cargar(ruta: Path, origen_pedido: str):
             registro_guardado = hist.obtener(E["cot_id"])
             if registro_guardado and registro_guardado.get("xlsx"):
                 E["ruta"] = Path(registro_guardado["xlsx"])
-        hist.actualizar(E["cot_id"], origen=origen_pedido)
+        try:
+            if GIOVAL_REQUIRE_ACCESS:
+                hist.actualizar_si_version(
+                    E["cot_id"], E.get("_cotizacion_version"), origen=origen_pedido
+                )
+            else:
+                hist.actualizar(E["cot_id"], origen=origen_pedido)
+            registro_actual = hist.obtener(E["cot_id"])
+            if registro_actual:
+                E["_cotizacion_version"] = registro_actual.get("actualizado")
+        except hs.ConflictoActualizacion as exc:
+            E["_conflicto_guardado"] = True
+            E["_conflicto_guardado_id"] = E.get("cot_id")
+            E["_conflicto_guardado_mensaje"] = str(exc)
+            return
     persistir_borrador()
 
 
@@ -968,9 +982,9 @@ def guardar_precios_inventario(lineas: list[dict]):
 
 
 def persistir_borrador():
-    """Persiste el trabajo actual en SQLite para recuperarlo tras reiniciar la app."""
+    """Persiste el trabajo actual en SQLite y evita sobrescribir otra sesión."""
     cot_id = E.get("cot_id")
-    if not cot_id:
+    if not cot_id or E.get("_conflicto_guardado"):
         return
     registro = hist.obtener(cot_id)
     if not registro:
@@ -1007,11 +1021,34 @@ def persistir_borrador():
         "editado_manual": bool(E.get("editado_manual", False)),
     }
     fecha = cliente.get("fecha") or date.today()
-    hist.actualizar(
-        cot_id, datos=datos, fecha=fecha, cliente=cliente["nombre"], rut=cliente["rut"],
-        neto=tot["neto"], iva=tot["iva"], total=tot["total"],
-        con_iva=int(modo_precios == OPCIONES_PRECIO[0]),
-    )
+    campos_guardado = {
+        "fecha": fecha, "cliente": cliente["nombre"], "rut": cliente["rut"],
+        "neto": tot["neto"], "iva": tot["iva"], "total": tot["total"],
+        "con_iva": int(modo_precios == OPCIONES_PRECIO[0]),
+    }
+    try:
+        if GIOVAL_REQUIRE_ACCESS:
+            version_esperada = E.get("_cotizacion_version")
+            if not version_esperada:
+                E["_conflicto_guardado"] = True
+                E["_conflicto_guardado_id"] = cot_id
+                E["_conflicto_guardado_mensaje"] = (
+                    "Esta sesión no tiene una versión base de la cotización. Recárgala antes de guardar."
+                )
+                return
+            hist.actualizar_si_version(
+                cot_id, version_esperada, datos=datos, **campos_guardado
+            )
+        else:
+            hist.actualizar(cot_id, datos=datos, **campos_guardado)
+    except hs.ConflictoActualizacion as exc:
+        E["_conflicto_guardado"] = True
+        E["_conflicto_guardado_id"] = cot_id
+        E["_conflicto_guardado_mensaje"] = str(exc)
+        return
+    registro_actual = hist.obtener(cot_id)
+    if registro_actual:
+        E["_cotizacion_version"] = registro_actual.get("actualizado")
     guardar_precios_inventario(lineas)
     E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
@@ -1239,6 +1276,7 @@ def iniciar_borrador():
         cot_id=cot_id, cot_numero=numero, c_fecha=fecha, precios_modo=OPCIONES_PRECIO[0],
         paso=1, vista=VISTAS[0], lineas=[], orden_texto="", fuente_orden="",
         editor_version=1, editado_manual=False, origen_pedido="pedido",
+        _cotizacion_version=(hist.obtener(cot_id) or {}).get("actualizado"),
     )
     persistir_borrador()
 
@@ -1270,6 +1308,7 @@ def restaurar_borrador(cot_id: int):
         c_rut=cliente.get("rut", registro.get("rut", "")),
         c_dir=cliente.get("direccion", ""), c_ciudad=cliente.get("ciudad", ""),
         c_tel=cliente.get("telefono", ""), c_email=cliente.get("email", ""),
+        _cotizacion_version=registro.get("actualizado"),
         precios_modo=datos.get("precios_modo", OPCIONES_PRECIO[0 if registro.get("con_iva", 1) else 1]),
         origen_pedido=datos.get("origen_pedido", registro.get("origen", "pedido")),
         paso=int(datos.get("paso", 1)), lineas=lineas_restauradas,
@@ -2124,8 +2163,13 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         E["c_fecha"] = date.today()
     if mantener:
         E["cot_id"] = cot_id
+        E["_cotizacion_version"] = rec.get("actualizado")
     else:
         E.pop("cot_id", None)
+        E.pop("_cotizacion_version", None)
+    E.pop("_conflicto_guardado", None)
+    E.pop("_conflicto_guardado_id", None)
+    E.pop("_conflicto_guardado_mensaje", None)
     E["paso"], E["vista"] = 1, VISTAS[0]
 
 
