@@ -224,7 +224,7 @@ class Biblioteca:
         self._guardar_indice()
 
     # ---------------------------------------------------------- catálogo editable
-    CAMPOS_EDITABLES = ("nombre", "costo_neto", "margen_pct", "notas", "precio_neto")
+    CAMPOS_EDITABLES = ("nombre", "costo_neto", "margen_pct", "notas", "precio_neto", "ficha_no_requerida")
 
     def actualizar(self, clave: str, **campos):
         """Cambia nombre, costo neto, margen %, notas o último precio. None borra el dato."""
@@ -237,6 +237,8 @@ class Biblioteca:
             if v is None or v == "" or (isinstance(v, float) and math.isnan(v)):
                 if k != "nombre":
                     ficha.pop(k, None)
+            elif k == "ficha_no_requerida":
+                ficha[k] = bool(v)
             else:
                 ficha[k] = float(v) if k in ("costo_neto", "margen_pct", "precio_neto") else str(v).strip()
         self._guardar_indice()
@@ -286,6 +288,7 @@ class Biblioteca:
         for clave, f in sorted(self.indice.items()):
             foto, ficha = self.archivos(clave)
             filas.append({"clave": clave, "nombre": f.get("nombre", clave), "foto": bool(foto), "ficha": bool(ficha),
+                          "ficha_no_requerida": bool(f.get("ficha_no_requerida", False)),
                           "precio_neto": f.get("precio_neto"), "costo_neto": f.get("costo_neto"),
                           "margen_pct": f.get("margen_pct"), "sugerido_neto": self.precio_sugerido(clave),
                           "notas": f.get("notas", "")})
@@ -470,9 +473,10 @@ def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="
             vistos.add(clave)
             if not foto:
                 informe["sin_foto"].append(clave)
-            if not ficha:
+            ficha_no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+            if not ficha and not ficha_no_requerida:
                 informe["sin_ficha"].append(clave)
-            else:
+            elif ficha:
                 fichas.append((clave, ficha))
                 try:  # ¿la ficha guardada realmente nombra este producto?
                     if es_codigo(clave) and len(menciones_clave(ficha.read_bytes(), [clave])) == 0:
