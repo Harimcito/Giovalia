@@ -2302,6 +2302,12 @@ def configuracion_compacta():
         st.markdown("**Conexión de inteligencia artificial**")
         if api_key:
             st.caption(f"Conectada · Clave encontrada en {origen_key}")
+        elif GIOVAL_REQUIRE_ACCESS:
+            st.caption(
+                "La IA no está configurada en el servidor. El administrador puede definir "
+                "OPENAI_API_KEY en las variables del servicio Render; no se guardan claves "
+                "personales desde una sesión compartida."
+            )
         else:
             api_key = st.text_input(
                 "Clave de OpenAI",
@@ -2316,7 +2322,7 @@ def configuracion_compacta():
                 width="stretch",
             ):
                 li.guardar_api_key(APP_DIR, api_key)
-                st.success("Clave guardada en la configuración compartida." if GIOVAL_REQUIRE_ACCESS else "Clave guardada en este computador.")
+                st.success("Clave guardada en este computador.")
 
         with st.expander("Opciones para crear el PDF", expanded=False):
             st.checkbox(
