@@ -793,6 +793,35 @@ with tab_seguimiento:
             mime="text/csv", icon=":material/download:",
         )
     st.divider()
+    with st.expander("Copia de seguridad de Radar", expanded=False):
+        st.caption(
+            "Este ZIP conserva oportunidades, estados, notas comerciales y evaluaciones del Radar. "
+            "Es independiente del respaldo de la biblioteca y cotizaciones del cotizador."
+        )
+        if st.button("Preparar respaldo de Radar", icon=":material/archive:", key="radar_preparar_respaldo"):
+            try:
+                st.session_state["radar_respaldo_zip"] = store.crear_respaldo_zip()
+                st.session_state["radar_respaldo_nombre"] = f"gioval_radar_{date.today():%Y%m%d}.zip"
+                st.session_state["radar_respaldo_fecha"] = date.today().strftime("%d/%m/%Y")
+                st.success("Respaldo preparado. Descárgalo y guarda una copia fuera del computador central.")
+            except Exception as exc:
+                st.session_state.pop("radar_respaldo_zip", None)
+                st.error(f"No pude preparar el respaldo: {exc}")
+        if st.session_state.get("radar_respaldo_zip"):
+            st.download_button(
+                "Descargar respaldo ZIP",
+                st.session_state["radar_respaldo_zip"],
+                file_name=st.session_state.get("radar_respaldo_nombre", "gioval_radar.zip"),
+                mime="application/zip",
+                icon=":material/download:",
+                key="radar_descargar_respaldo",
+            )
+            if st.session_state.get("radar_respaldo_fecha"):
+                st.caption(
+                    f"ZIP preparado el {st.session_state['radar_respaldo_fecha']}. "
+                    "La fecha no confirma la descarga; conserva otra copia segura."
+                )
+    st.divider()
     st.markdown("#### Fuente de datos")
     st.markdown(
         "- **Catálogo y costos:** se leen desde la biblioteca local o compartida del cotizador.\n"
