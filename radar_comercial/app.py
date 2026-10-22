@@ -266,9 +266,33 @@ def mostrar_aviso_pendiente() -> None:
         funcion(aviso["mensaje"])
 
 
+def recordar_campo_radar(clave: str) -> None:
+    """Conserva un borrador de campo aunque Streamlit deje de renderizar su sección."""
+    if clave not in st.session_state:
+        return
+    borradores = dict(st.session_state.get("_radar_borradores_widgets", {}))
+    borradores[clave] = st.session_state[clave]
+    st.session_state["_radar_borradores_widgets"] = borradores
+
+
+def restaurar_campo_radar(clave: str, valor_inicial):
+    """Restaura el último valor de sesión cuando una sección vuelve a renderizarse."""
+    if clave not in st.session_state:
+        borradores = st.session_state.get("_radar_borradores_widgets", {})
+        st.session_state[clave] = borradores.get(clave, valor_inicial)
+    return st.session_state[clave]
+
+
+def recordar_oportunidad_evaluacion() -> None:
+    codigo = st.session_state.get("evaluar_codigo")
+    if codigo:
+        st.session_state["_radar_evaluar_codigo"] = codigo
+
+
 def navegar_a_evaluacion(codigo: str) -> None:
     """Abre el evaluador directamente en la oportunidad elegida."""
     st.session_state["evaluar_codigo"] = codigo
+    st.session_state["_radar_evaluar_codigo"] = codigo
     st.session_state["radar_vista"] = "Evaluar rentabilidad"
 
 
@@ -726,12 +750,19 @@ elif vista_actual == "Evaluar rentabilidad":
         st.info("Primero busca, importa o registra una oportunidad en la pestaña Radar.")
     else:
         codigos_evaluables = [r["codigo"] for r in oportunidades_todas]
+        seleccion_previa = st.session_state.get("_radar_evaluar_codigo")
+        if seleccion_previa not in codigos_evaluables:
+            seleccion_previa = codigos_evaluables[0]
+        if st.session_state.get("evaluar_codigo") not in codigos_evaluables:
+            st.session_state["evaluar_codigo"] = seleccion_previa
         codigo_eval = st.selectbox(
             "Oportunidad a evaluar",
             options=codigos_evaluables,
             format_func=lambda k: f"{k} · {next((x['nombre'] for x in oportunidades_todas if x['codigo']==k), '')}",
             key="evaluar_codigo",
+            on_change=recordar_oportunidad_evaluacion,
         )
+        st.session_state["_radar_evaluar_codigo"] = codigo_eval
         rec_eval = store.obtener(codigo_eval)
         if rec_eval:
             detalle_eval = rec_eval.get("detalle") or {}
@@ -754,12 +785,15 @@ elif vista_actual == "Evaluar rentabilidad":
             with st.expander("Requisitos de la oportunidad", expanded=not bool(texto_base)):
                 if detalle_eval.get("descripcion"):
                     st.write(detalle_eval["descripcion"])
+                clave_requisitos = f"requisitos_eval_{slug(codigo_eval)}"
+                restaurar_campo_radar(clave_requisitos, texto_base)
                 texto_lineas = st.text_area(
                     "Una línea por requisito: cantidad | descripción | unidad",
-                    value=texto_base,
                     height=140,
-                    key=f"requisitos_eval_{slug(codigo_eval)}",
-                    help="Se usa para buscar coincidencias en el catálogo. Verifica presentación, marca, modelo, unidad y especificaciones.",
+                    key=clave_requisitos,
+                    on_change=recordar_campo_radar,
+                    args=(clave_requisitos,),
+                    help="Formato: cantidad | descripción | unidad. Verifica presentación, marca, modelo y especificaciones.",
                 )
                 if st.button("Guardar requisitos", key=f"guardar_requisitos_{slug(codigo_eval)}"):
                     actualizado = dict(detalle_eval)
