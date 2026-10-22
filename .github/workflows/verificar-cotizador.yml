@@ -83,3 +83,6 @@ jobs:
 
       - name: Verificar aislamiento de datos personales en modo compartido
         run: python -m unittest discover -s tests -v
+
+      - name: Verificar servicios del Radar Comercial
+        run: python -m unittest discover -s tests -p 'test_radar_comercial.py' -v
