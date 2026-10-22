@@ -266,14 +266,17 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 [data-testid="stProgress"] {
     background:transparent !important;
 }
-[data-testid="stProgress"] > div,
+[data-testid="stProgress"] > div:not([role="progressbar"]):not([data-baseweb="progress-bar"]):not([data-testid="stProgressBar"]) {
+    background:transparent !important;
+}
 [data-testid="stProgress"] [role="progressbar"],
+[data-testid="stProgress"] [data-baseweb="progress-bar"],
 [data-testid="stProgress"] [data-testid="stProgressBar"] {
     background:#20232E !important;
     border-radius:999px !important;
 }
-[data-testid="stProgress"] > div > div,
 [data-testid="stProgress"] [role="progressbar"] > div,
+[data-testid="stProgress"] [data-baseweb="progress-bar"] > div,
 [data-testid="stProgress"] [data-testid="stProgressBar"] > div {
     background:#3A3E49 !important;
     border-radius:999px !important;
