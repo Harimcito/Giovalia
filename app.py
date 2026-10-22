@@ -295,6 +295,7 @@ def cargar(ruta: Path, origen_pedido: str):
         con_iva=(E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]) if origen_pedido == "pedido" else False,
     )
     E["tabla_edit"] = E["tabla"].copy()
+    E["tabla_base"] = E["tabla"].copy()
     E["editor_version"] = int(E.get("editor_version", 0)) + 1
     E["ruta"] = Path(ruta)
     _cabecera_pendiente = E.get("_pending_import_header")
@@ -702,9 +703,15 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
 
 def editor_productos():
     """Lista editable de cantidades, descripciones, códigos y precios para todos los pasos."""
-    base = E.get("tabla_edit", E.get("tabla"))
-    if base is None:
-        base = pd.DataFrame(columns=[COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_PRECIO, COL_ORIGEN])
+    # No pases de vuelta el dataframe ya editado como nuevo origen: Streamlit mantiene
+    # un delta de edición propio del widget y, si el origen cambia en cada rerun,
+    # algunas modificaciones quedan una interacción atrasadas.
+    base = E.get("tabla_base")
+    if not isinstance(base, pd.DataFrame):
+        base = E.get("tabla", E.get("tabla_edit"))
+        if base is None:
+            base = pd.DataFrame(columns=[COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_PRECIO, COL_ORIGEN])
+        E["tabla_base"] = base.copy()
     version = int(E.get("editor_version", 0))
     editada = editor(
         base, num_rows="dynamic", hide_index=True, width="stretch",
@@ -837,9 +844,12 @@ def restaurar_borrador(cot_id: int):
             df["Cantidad"] = pd.to_numeric(df["Cantidad"], errors="coerce")
             df["Precio unitario"] = pd.to_numeric(df["Precio unitario"], errors="coerce")
         E["orden_df"] = df
+        E["orden_df_base"] = df.copy()
+        E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
     if E["lineas"]:
         E["tabla"] = tabla_desde_lineas(E["lineas"])
         E["tabla_edit"] = E["tabla"].copy()
+        E["tabla_base"] = E["tabla"].copy()
         if registro.get("xlsx") and Path(registro["xlsx"]).exists():
             E["ruta"] = Path(registro["xlsx"])
         else:
@@ -983,7 +993,8 @@ def pedido_ui():
                 "Producto": [fila["descripcion"] for fila in filas],
                 "Precio unitario": precios,
             })
-            E.pop("orden_editor", None)
+            E["orden_df_base"] = E["orden_df"].copy()
+            E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
             E["editor_version"] = int(E.get("editor_version", 0)) + 1
 
     st.subheader("Datos de la cotización")
@@ -1013,8 +1024,14 @@ def pedido_ui():
     st.divider()
     st.subheader("Productos y precios")
     st.caption("Puedes cambiar cantidades, nombres y precios, agregar filas y dejar precios pendientes. Los totales se actualizan antes de avanzar.")
+    orden_base = E.get("orden_df_base")
+    if not isinstance(orden_base, pd.DataFrame):
+        orden_base = E["orden_df"].copy()
+        E["orden_df_base"] = orden_base.copy()
+    orden_version = int(E.get("orden_editor_version", 0))
     orden = editor(
-        E["orden_df"], num_rows="dynamic", hide_index=True, width="stretch", key="orden_editor",
+        orden_base, num_rows="dynamic", hide_index=True, width="stretch",
+        key=f"orden_editor_{orden_version}",
         column_config={
             "Incluir": st.column_config.CheckboxColumn("Incluir", width="small"),
             "Cantidad": st.column_config.NumberColumn(min_value=0, step=1, width="small"),
@@ -1169,6 +1186,7 @@ def agregar_desde_catalogo():
             E["lineas"] = lineas_actuales
             E["tabla"] = tabla_desde_lineas(lineas_actuales, con_iva=con_iva)
             E["tabla_edit"] = E["tabla"].copy()
+            E["tabla_base"] = E["tabla"].copy()
             E["editor_version"] = int(E.get("editor_version", 0)) + 1
             E["editado_manual"] = True
             for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
@@ -1206,7 +1224,8 @@ def paso_2():
                 if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None
                 for ln in E.get("lineas", [])],
         })
-        E.pop("orden_editor", None)
+        E["orden_df_base"] = E["orden_df"].copy()
+        E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
         ir_a(1)
     if sigue.button("Siguiente: fotos y fichas →", type="primary", width="stretch"):
         claves, _ = datos_productos()
@@ -1627,8 +1646,8 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
     datos = rec["datos"]
     lineas, cli = datos.get("lineas", []), datos.get("cliente", {})
     con_iva = bool(rec["con_iva"])
-    for k in ("lineas", "ruta", "tabla", "tabla_edit", "info_desc", "pdf_bytes", "pdf_nombre", "informe",
-              "orden_editor", "ok_riesgo", "ok_sin_precio", "cli_sel", "origen_pedido"):
+    for k in ("lineas", "ruta", "tabla", "tabla_edit", "tabla_base", "info_desc", "pdf_bytes", "pdf_nombre", "informe",
+              "orden_df_base", "orden_editor_version", "orden_editor", "ok_riesgo", "ok_sin_precio", "cli_sel", "origen_pedido"):
         E.pop(k, None)
     E["precios_modo"] = OPCIONES_PRECIO[0 if con_iva else 1]
     E["orden_df"] = pd.DataFrame({
@@ -1638,6 +1657,8 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         "Precio unitario": [ct.precio_para_mostrar(
             ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"), con_iva)
             if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None for ln in lineas]})
+    E["orden_df_base"] = E["orden_df"].copy()
+    E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
     E.update(c_nombre=cli.get("nombre", ""), c_rut=cli.get("rut", ""), c_dir=cli.get("direccion", ""),
              c_ciudad=cli.get("ciudad", ""), c_tel=cli.get("telefono", ""), c_email=cli.get("email", ""))
     try:
