@@ -834,24 +834,41 @@ elif vista_actual == "Evaluar rentabilidad":
                         expanded=(i == 0 or not equivalencia_guardada or not codigo_guardado),
                     ):
                         c1, c2 = st.columns([2.2, 1])
+                        clave_linea = f"{slug(codigo_eval)}_{i}"
+                        clave_match = f"match_{clave_linea}"
+                        valor_match = restaurar_campo_radar(clave_match, defecto)
+                        if valor_match not in opciones_codigo:
+                            st.session_state[clave_match] = defecto
                         codigo_prod = c1.selectbox(
                             "Producto de tu biblioteca",
                             options=opciones_codigo,
-                            index=idx_defecto,
                             format_func=lambda k: etiquetas_codigo.get(k, k),
-                            key=f"match_{slug(codigo_eval)}_{i}",
+                            key=clave_match,
+                            on_change=recordar_campo_radar,
+                            args=(clave_match,),
                         )
-                        cantidad_default = old.get("cantidad", req.get("cantidad", 1))
+                        cantidad_default = max(
+                            0.0, float(old.get("cantidad", req.get("cantidad", 1)) or 0)
+                        )
+                        clave_cantidad = f"qty_{clave_linea}"
+                        restaurar_campo_radar(clave_cantidad, cantidad_default)
                         cantidad = c2.number_input(
                             "Cantidad requerida",
-                            min_value=0.0, step=1.0,
-                            value=max(0.0, float(cantidad_default or 0)),
-                            key=f"qty_{slug(codigo_eval)}_{i}",
+                            min_value=0.0,
+                            step=1.0,
+                            key=clave_cantidad,
+                            on_change=recordar_campo_radar,
+                            args=(clave_cantidad,),
+                        )
+                        clave_equivalencia = f"eq_{clave_linea}"
+                        restaurar_campo_radar(
+                            clave_equivalencia, bool(old.get("equivalencia_confirmada", False))
                         )
                         confirmada = st.checkbox(
                             "Confirmé modelo, presentación y especificaciones",
-                            value=bool(old.get("equivalencia_confirmada", False)),
-                            key=f"eq_{slug(codigo_eval)}_{i}",
+                            key=clave_equivalencia,
+                            on_change=recordar_campo_radar,
+                            args=(clave_equivalencia,),
                         )
                         ficha = indice.get(codigo_prod, {}) if codigo_prod else {}
                         if matches:
@@ -873,17 +890,24 @@ elif vista_actual == "Evaluar rentabilidad":
                         precio_old = old.get("precio_oferta_unitario_neto")
                         if precio_old is None:
                             precio_old = sugerido_neto
+                        clave_precio = f"offer_{clave_linea}"
+                        restaurar_campo_radar(clave_precio, max(0.0, float(precio_old or 0)))
                         precio_oferta = st.number_input(
                             "Precio unitario de oferta neto (sin IVA)",
-                            min_value=0.0, step=100.0,
-                            value=max(0.0, float(precio_old or 0)),
-                            key=f"offer_{slug(codigo_eval)}_{i}",
+                            min_value=0.0,
+                            step=100.0,
+                            key=clave_precio,
+                            on_change=recordar_campo_radar,
+                            args=(clave_precio,),
                             help="Puedes partir del precio sugerido del catálogo y corregirlo según el proceso.",
                         )
+                        clave_incluir = f"include_{clave_linea}"
+                        restaurar_campo_radar(clave_incluir, bool(old.get("incluir", True)))
                         incluir = st.checkbox(
                             "Incluir esta línea en la estimación",
-                            value=bool(old.get("incluir", True)),
-                            key=f"include_{slug(codigo_eval)}_{i}",
+                            key=clave_incluir,
+                            on_change=recordar_campo_radar,
+                            args=(clave_incluir,),
                         )
                         if not confirmada and codigo_prod:
                             st.warning("La equivalencia aún no está confirmada. El cálculo quedará incompleto.")
@@ -899,30 +923,49 @@ elif vista_actual == "Evaluar rentabilidad":
                 e1, e2 = st.columns(2)
                 despacho_guardado = eval_guardada.get("despacho_neto", 0)
                 otros_guardados = eval_guardada.get("otros_costos_netos", 0)
+                clave_despacho = f"despacho_{slug(codigo_eval)}"
+                clave_otros = f"otros_costos_{slug(codigo_eval)}"
+                clave_costos_ok = f"costos_confirmados_{slug(codigo_eval)}"
+                clave_margen = f"margen_objetivo_{slug(codigo_eval)}"
+                restaurar_campo_radar(clave_despacho, max(0.0, float(despacho_guardado or 0)))
+                restaurar_campo_radar(clave_otros, max(0.0, float(otros_guardados or 0)))
+                restaurar_campo_radar(
+                    clave_costos_ok, bool(eval_guardada.get("costos_adicionales_confirmados", False))
+                )
+                margen_default = float(store.config("margen_objetivo_pct", "0") or 0)
+                restaurar_campo_radar(clave_margen, margen_default)
                 with e1:
                     despacho = st.number_input(
                         "Despacho / logística neta estimada (CLP)",
-                        min_value=0.0, step=100.0,
-                        value=max(0.0, float(despacho_guardado or 0)),
-                        key=f"despacho_{slug(codigo_eval)}",
+                        min_value=0.0,
+                        step=100.0,
+                        key=clave_despacho,
+                        on_change=recordar_campo_radar,
+                        args=(clave_despacho,),
                     )
                 with e2:
                     otros_costos = st.number_input(
                         "Otros costos netos (CLP)",
-                        min_value=0.0, step=100.0,
-                        value=max(0.0, float(otros_guardados or 0)),
-                        key=f"otros_costos_{slug(codigo_eval)}",
+                        min_value=0.0,
+                        step=100.0,
+                        key=clave_otros,
+                        on_change=recordar_campo_radar,
+                        args=(clave_otros,),
                     )
                 costos_confirmados = st.checkbox(
                     "Confirmo que despacho y otros costos están revisados (pueden ser $0)",
-                    value=bool(eval_guardada.get("costos_adicionales_confirmados", False)),
-                    key=f"costos_confirmados_{slug(codigo_eval)}",
+                    key=clave_costos_ok,
+                    on_change=recordar_campo_radar,
+                    args=(clave_costos_ok,),
                 )
-                margen_default = float(store.config("margen_objetivo_pct", "0") or 0)
                 margen_objetivo = st.number_input(
                     "Margen objetivo sobre la venta neta (%) · 0 = no definido",
-                    min_value=0.0, max_value=90.0, value=margen_default, step=1.0,
-                    key=f"margen_objetivo_{slug(codigo_eval)}",
+                    min_value=0.0,
+                    max_value=90.0,
+                    step=1.0,
+                    key=clave_margen,
+                    on_change=recordar_campo_radar,
+                    args=(clave_margen,),
                 )
                 if margen_objetivo <= 0:
                     st.caption("Aún no se fijó un margen objetivo empresarial. Se mostrará el resultado estimado, sin declarar que cumple un umbral.")
