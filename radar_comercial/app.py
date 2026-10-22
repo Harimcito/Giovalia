@@ -376,12 +376,20 @@ vista_actual = st.segmented_control(
 )
 
 # Ayuda contextual disponible desde todas las secciones.
-from radar_comercial.asistente import (
-    GUIAS_RAPIDAS,
-    buscar_api_key as buscar_clave_asistente,
-    responder_con_ia,
-    responder_local as responder_sin_ia,
-)
+try:
+    from radar_comercial.asistente import (
+        GUIAS_RAPIDAS,
+        buscar_api_key as buscar_clave_asistente,
+        responder_con_ia,
+        responder_local as responder_sin_ia,
+    )
+except ModuleNotFoundError:
+    from asistente import (
+        GUIAS_RAPIDAS,
+        buscar_api_key as buscar_clave_asistente,
+        responder_con_ia,
+        responder_local as responder_sin_ia,
+    )
 
 with st.popover("Ayuda / IA", icon=":material/help:"):
     st.markdown("### Asistente de uso de Gioval")
