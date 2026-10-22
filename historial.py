@@ -73,7 +73,12 @@ def _json(obj) -> str:
 
 
 def _ahora() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    # Microsegundos para que dos guardados en el mismo segundo tengan versiones distintas.
+    return datetime.now().isoformat(timespec="microseconds")
+
+
+class ConflictoActualizacion(RuntimeError):
+    """La cotización cambió desde que esta sesión la abrió."""
 
 
 class Historial:
@@ -286,7 +291,20 @@ class Historial:
         return cur.lastrowid, numero
 
     def actualizar(self, cot_id: int, datos: dict | None = None, **campos):
-        """Cambia campos permitidos (y, si se pasa `datos`, las líneas y el cliente)."""
+        """Actualiza los campos permitidos sin control de versión (para acciones puntuales)."""
+        self._actualizar(cot_id, datos=datos, version_esperada=None, **campos)
+
+    def actualizar_si_version(self, cot_id: int, version_esperada: str,
+                              datos: dict | None = None, **campos):
+        """Guarda solo si nadie cambió la cotización desde la versión que leyó el usuario."""
+        if not version_esperada:
+            raise ConflictoActualizacion(
+                "No conozco la versión que abriste. Recarga la cotización antes de guardar para evitar sobrescribir cambios."
+            )
+        self._actualizar(cot_id, datos=datos, version_esperada=version_esperada, **campos)
+
+    def _actualizar(self, cot_id: int, datos: dict | None = None,
+                    version_esperada: str | None = None, **campos):
         sets, valores = [], []
         for k, v in campos.items():
             if PRIVACIDAD_COMPARTIDA and k in {"cliente", "rut", "notas", "xlsx", "pdf"}:
@@ -301,10 +319,30 @@ class Historial:
             valores.append(_json(datos))
         if not sets:
             return
+        marca_tiempo = _ahora()
         sets.append("actualizado=?")
-        valores += [_ahora(), cot_id]
+        valores += [marca_tiempo, cot_id]
         with self._con() as con:
-            con.execute(f"UPDATE cotizaciones SET {', '.join(sets)} WHERE id=?", valores)
+            # Bloquea brevemente otros escritores mientras compara la versión y guarda.
+            con.execute("BEGIN IMMEDIATE")
+            if version_esperada is not None:
+                fila = con.execute(
+                    "SELECT actualizado FROM cotizaciones WHERE id=?", (cot_id,)
+                ).fetchone()
+                if not fila:
+                    raise ConflictoActualizacion(
+                        "La cotización ya no existe. Recarga el historial antes de continuar."
+                    )
+                version_actual = fila["actualizado"] or ""
+                if version_actual != version_esperada:
+                    raise ConflictoActualizacion(
+                        "Otra sesión modificó esta cotización desde que la abriste. "
+                        "Tus cambios siguen en esta pantalla; recarga la versión compartida "
+                        "o guárdalos como una cotización nueva."
+                    )
+            cur = con.execute(f"UPDATE cotizaciones SET {', '.join(sets)} WHERE id=?", valores)
+            if cur.rowcount != 1:
+                raise ConflictoActualizacion("No pude guardar la cotización porque ya no existe.")
 
     def obtener(self, cot_id: int) -> dict | None:
         with self._con() as con:
