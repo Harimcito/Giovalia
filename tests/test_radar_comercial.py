@@ -1,7 +1,9 @@
 """Tests de los servicios del Radar Comercial sin realizar llamadas reales a ChileCompra."""
+import io
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from radar_comercial.servicio import (
@@ -165,6 +167,31 @@ class RadarComercialTests(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertEqual(lines[0]["cantidad"], 2)
         self.assertEqual(lines[1]["nombre"], "Resma oficio")
+
+    def test_backup_zip_contains_radar_database_and_readme(self):
+        self.store.guardar_oportunidad({
+            "codigo": "BACKUP-1",
+            "nombre": "Oportunidad para respaldo",
+            "fuente": "Manual",
+            "detalle": {},
+        })
+        raw = self.store.crear_respaldo_zip()
+        with zipfile.ZipFile(io.BytesIO(raw)) as backup:
+            self.assertIn("radar_comercial.db", backup.namelist())
+            self.assertIn("LEEME.txt", backup.namelist())
+            self.assertIn("Respaldo de Radar Comercial", backup.read("LEEME.txt").decode("utf-8"))
+            db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+            try:
+                db.write(backup.read("radar_comercial.db"))
+                db.close()
+                import sqlite3
+                with sqlite3.connect(db.name) as con:
+                    row = con.execute(
+                        "SELECT nombre FROM oportunidades WHERE codigo='BACKUP-1'"
+                    ).fetchone()
+                self.assertEqual(row[0], "Oportunidad para respaldo")
+            finally:
+                Path(db.name).unlink(missing_ok=True)
 
     def test_quote_history_summary_does_not_return_client_identifiers(self):
         summary = resumen_historial_cotizador([
