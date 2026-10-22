@@ -36,11 +36,12 @@ búsqueda, pega el enlace directo de una imagen o PDF, o usa los botones de Goog
 - **Historial:** cada cotización queda guardada con su número correlativo (formato editable en ⚙️ Ajustes →
   Numeración), su estado (Borrador, Enviada, Aceptada, Rechazada), su Excel y su PDF. Puedes duplicarla como
   base de una nueva o seguir editándola conservando el número.
-- **Clientes:** se guardan solos y se pueden elegir al crear un pedido. También se editan en Historial → Clientes.
+- **Clientes:** en una instalación local independiente se guardan y se pueden reutilizar. En el modo de biblioteca compartida no se guardan datos identificatorios; cada trabajador los introduce al preparar cada documento.
 - **Mis productos:** catálogo con foto, ficha, último precio, costo y margen. Precio sugerido = costo × (1 + margen);
   al armar un pedido esos productos aparecen con su precio ya puesto. Aquí también se cambia el código,
   se combinan duplicados y se eliminan productos.
-- Todo se guarda en la carpeta de la biblioteca (`cotizador.db` y `cotizaciones/`): respáldala copiándola.
+- **Biblioteca compartida:** el servidor central comparte productos, fotos, fichas y el historial comercial de cotizaciones (líneas, cantidades, precios, totales y estado). Los datos del cliente y los PDF/Excel finales no se guardan en el historial común; los documentos se descargan desde la sesión que los genera.
+- Para respaldar el modo local, copia la biblioteca. Para el modo compartido, usa Ajustes → Copia de seguridad y conserva los ZIP fuera del computador central.
 
 ## Cómo busca ahora
 - Todo producto se puede buscar: si no tiene código de fabricante, la app crea una clave
