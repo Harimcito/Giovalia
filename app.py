@@ -2478,73 +2478,183 @@ def borrar_producto(clave: str):
 def vista_productos():
     E.setdefault("p_ver", 0)
     st.header("Catálogo de productos")
-    st.write("Aquí están los productos que he aprendido. Puedes corregir nombres, anotar el **costo** y el **margen** "
-             "para que te sugiera el precio de venta, y cambiar su foto o su ficha.")
+    st.caption("Precios, costos, márgenes y archivos de producto se comparten desde la biblioteca central.")
     if "p_msg" in E:
         nivel, texto = E.pop("p_msg")
         (st.success if nivel == "ok" else st.error)(texto)
-    with st.expander("Agregar un producto a mano"):
-        n1, n2 = st.columns(2)
+
+    with st.expander("Agregar un producto", expanded=False):
+        n1, n2 = st.columns([1, 2])
         nuevo_cod = n1.text_input("Código del producto", key="np_cod")
-        nuevo_nom = n2.text_input("Nombre", key="np_nom")
-        if st.button("Agregar", disabled=not nuevo_cod.strip()):
-            bib.registrar(nuevo_cod.strip().upper(), nombre=nuevo_nom.strip() or nuevo_cod.strip())
+        nuevo_nom = n2.text_input("Nombre o descripción", key="np_nom")
+        if st.button("Agregar producto", icon=":material/add:", disabled=not nuevo_cod.strip(),
+                     key="cat_agregar_producto"):
+            clave_nueva = nuevo_cod.strip().upper()
+            bib.registrar(clave_nueva, nombre=nuevo_nom.strip() or clave_nueva)
             E["p_ver"] += 1
+            st.success(f"Producto {clave_nueva} agregado al catálogo.")
             st.rerun()
 
-    filas = bib.filas_catalogo()
-    if not filas:
-        st.info("Todavía no hay productos guardados. Se irán agregando solos a medida que armes cotizaciones.")
+    todas = bib.filas_catalogo()
+    if not todas:
+        st.info("Todavía no hay productos. Agrega uno aquí o se irán incorporando al preparar cotizaciones.")
         return
-    f1, f2 = st.columns([3, 2])
-    texto = f1.text_input("Buscar", placeholder="Código o nombre", key="p_texto")
-    solo = f2.checkbox("Solo los incompletos (sin foto o sin ficha)", key="p_solo")
-    filas = [f for f in filas if (not texto or texto.lower() in (f["clave"] + " " + f["nombre"]).lower())
-             and (not solo or not (f["foto"] and f["ficha"]))]
+
+    total_sin_foto = sum(not f["foto"] for f in todas)
+    total_sin_ficha = sum(not f["ficha"] and not f.get("ficha_no_requerida", False) for f in todas)
+    total_sin_precio = sum(f.get("precio_neto") is None for f in todas)
+    total_margen_pendiente = sum(f.get("costo_neto") is None or f.get("margen_pct") is None for f in todas)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Productos", len(todas))
+    m2.metric("Sin foto", total_sin_foto)
+    m3.metric("Sin ficha pendiente", total_sin_ficha)
+    m4.metric("Sin precio reciente", total_sin_precio)
+
+    f1, f2 = st.columns([1.5, 1])
+    texto = f1.text_input("Buscar producto", placeholder="Código, modelo, marca o nombre", key="p_texto")
+    filtro = f2.selectbox(
+        "Filtrar por estado",
+        ["Todos", "Incompletos", "Sin foto", "Sin ficha pendiente", "Sin precio",
+         "Margen pendiente", "Ficha no requerida"],
+        key="p_filtro_estado",
+    )
+    consulta = texto.strip().casefold()
+    filas = []
+    for producto in todas:
+        clave, nombre = producto["clave"], producto["nombre"]
+        sin_ficha = not producto["ficha"] and not producto.get("ficha_no_requerida", False)
+        sin_precio = producto.get("precio_neto") is None
+        margen_pendiente = producto.get("costo_neto") is None or producto.get("margen_pct") is None
+        incompleto = not producto["foto"] or sin_ficha
+        coincide_texto = not consulta or consulta in f"{clave} {nombre}".casefold()
+        coincide_filtro = (
+            filtro == "Todos"
+            or (filtro == "Incompletos" and incompleto)
+            or (filtro == "Sin foto" and not producto["foto"])
+            or (filtro == "Sin ficha pendiente" and sin_ficha)
+            or (filtro == "Sin precio" and sin_precio)
+            or (filtro == "Margen pendiente" and margen_pendiente)
+            or (filtro == "Ficha no requerida" and producto.get("ficha_no_requerida", False))
+        )
+        if coincide_texto and coincide_filtro:
+            filas.append(producto)
+
+    st.caption(
+        f"Mostrando {len(filas)} de {len(todas)} productos · "
+        f"{total_margen_pendiente} con costo o margen pendiente."
+    )
     if not filas:
-        st.warning("No hay productos con ese filtro.")
+        st.info("No hay productos que coincidan con esos filtros.")
         return
-    mostrar = pd.DataFrame({
-        "Código": [f["clave"] for f in filas], "Producto": [f["nombre"] for f in filas],
-        "Foto": ["Disponible" if f["foto"] else "Falta" for f in filas], "Ficha": ["Disponible" if f["ficha"] else "Falta" for f in filas],
-        "Último precio neto": [f["precio_neto"] for f in filas], "Costo neto": [f["costo_neto"] for f in filas],
+
+    mostrar_detalles = st.checkbox(
+        "Mostrar notas y sugerencia con IVA", value=False, key="p_mostrar_detalles"
+    )
+    mostrar = {
+        "Código": [f["clave"] for f in filas],
+        "Producto": [f["nombre"] for f in filas],
+        "Foto": ["Disponible" if f["foto"] else "Falta" for f in filas],
+        "Ficha": [
+            "Disponible" if f["ficha"] else
+            "No requerida" if f.get("ficha_no_requerida", False) else "Falta"
+            for f in filas
+        ],
+        "Último precio neto": [f["precio_neto"] for f in filas],
+        "Costo neto": [f["costo_neto"] for f in filas],
         "Margen %": [f["margen_pct"] for f in filas],
         "Sugerido neto": [f["sugerido_neto"] for f in filas],
-        "Sugerido con IVA": [None if f["sugerido_neto"] is None else f["sugerido_neto"] * (1 + rv.IVA) for f in filas],
-        "Notas": [f["notas"] for f in filas]})
+    }
+    if mostrar_detalles:
+        mostrar["Sugerido con IVA"] = [
+            None if f["sugerido_neto"] is None else f["sugerido_neto"] * (1 + rv.IVA)
+            for f in filas
+        ]
+        mostrar["Notas"] = [f["notas"] or "" for f in filas]
+
+    mostrar_df = pd.DataFrame(mostrar)
+    cols_numero = ["Último precio neto", "Costo neto", "Sugerido neto"]
+    if mostrar_detalles:
+        cols_numero.append("Sugerido con IVA")
+    configuracion_columnas = {
+        col: st.column_config.NumberColumn(format="$ %d", width="small")
+        for col in cols_numero
+    }
+    configuracion_columnas["Margen %"] = st.column_config.NumberColumn(
+        format="%.1f %%", min_value=0, step=1, width="small"
+    )
+    configuracion_columnas["Código"] = st.column_config.TextColumn(width="medium")
+    configuracion_columnas["Producto"] = st.column_config.TextColumn(width="large")
+    configuracion_columnas["Foto"] = st.column_config.TextColumn(width="small")
+    configuracion_columnas["Ficha"] = st.column_config.TextColumn(width="small")
+
     editado = editor(
-        mostrar, hide_index=True, width="stretch", key=f"p_tabla_{E['p_ver']}_{texto}_{solo}",
-        disabled=["Código", "Foto", "Ficha", "Último precio neto", "Sugerido neto", "Sugerido con IVA"],
-        column_config={c: st.column_config.NumberColumn(format="$ %d") for c in
-                       ("Último precio neto", "Costo neto", "Sugerido neto", "Sugerido con IVA")}
-                      | {"Margen %": st.column_config.NumberColumn(format="%.1f %%", min_value=0, step=1)})
-    st.caption("Precio sugerido = costo × (1 + margen). El margen es sobre el costo: con costo $10.000 y margen 30 % "
-               "el precio neto sugerido es $13.000. Al crear un pedido, estos productos aparecen con su precio ya puesto.")
-    if st.button("Guardar cambios de la tabla", icon=":material/save:"):
+        mostrar_df, hide_index=True, width="stretch",
+        key=f"p_tabla_{E['p_ver']}_{texto}_{filtro}_{mostrar_detalles}",
+        disabled=[
+            "Código", "Foto", "Ficha", "Último precio neto", "Sugerido neto",
+            *(["Sugerido con IVA"] if mostrar_detalles else []),
+        ],
+        column_config=configuracion_columnas,
+    )
+    with st.expander("Cómo se calcula el precio sugerido"):
+        st.caption(
+            "Precio sugerido neto = costo neto × (1 + margen sobre el costo). "
+            "Por ejemplo, un costo de $10.000 con margen de 30 % produce un precio neto "
+            "sugerido de $13.000. La sugerencia con IVA se calcula aparte al 19 %."
+        )
+
+    if st.button("Guardar cambios", icon=":material/save:", type="primary", key="cat_guardar_cambios"):
         cambios = 0
-        for (_, fila), f in zip(editado.iterrows(), filas):
-            nuevos = {"nombre": fila["Producto"], "costo_neto": fila["Costo neto"], "margen_pct": fila["Margen %"],
-                      "notas": fila["Notas"] if isinstance(fila["Notas"], str) else ""}
-            viejos = {"nombre": f["nombre"], "costo_neto": f["costo_neto"], "margen_pct": f["margen_pct"],
-                      "notas": f["notas"] or ""}
-            if any(not (pd.isna(nuevos[k]) and viejos[k] is None) and nuevos[k] != viejos[k] for k in nuevos):
-                bib.actualizar(f["clave"], **nuevos)
+        for (_, fila), producto in zip(editado.iterrows(), filas):
+            notas = (
+                fila["Notas"] if "Notas" in fila.index and isinstance(fila["Notas"], str)
+                else producto.get("notas") or ""
+            )
+            nuevos = {
+                "nombre": str(fila["Producto"] or "").strip() or producto["clave"],
+                "costo_neto": fila["Costo neto"],
+                "margen_pct": fila["Margen %"],
+                "notas": notas,
+            }
+            viejos = {
+                "nombre": producto["nombre"],
+                "costo_neto": producto["costo_neto"],
+                "margen_pct": producto["margen_pct"],
+                "notas": producto["notas"] or "",
+            }
+            distintos = False
+            for campo in nuevos:
+                nuevo, viejo = nuevos[campo], viejos[campo]
+                try:
+                    ambos_vacios = pd.isna(nuevo) and viejo is None
+                except (TypeError, ValueError):
+                    ambos_vacios = False
+                if not ambos_vacios and nuevo != viejo:
+                    distintos = True
+                    break
+            if distintos:
+                bib.actualizar(producto["clave"], **nuevos)
                 cambios += 1
         E["p_ver"] += 1
-        st.success(f"Guardado ({cambios} productos actualizados).")
+        E["p_msg"] = ("ok", f"Guardado: {cambios} producto(s) actualizado(s) en la biblioteca compartida.")
         st.rerun()
 
     st.divider()
+    st.subheader("Detalle del producto")
     codigos = [f["clave"] for f in filas]
-    elegido = st.selectbox("Elige un producto para ver o cambiar su foto y su ficha", codigos, key="p_sel")
-    nombre = next(f["nombre"] for f in filas if f["clave"] == elegido)
-    tarjeta(elegido, nombre)
-    with st.expander("Cambiar el código o eliminar este producto"):
+    elegido = st.selectbox("Selecciona un producto", codigos, key="p_sel")
+    producto_elegido = next(f for f in filas if f["clave"] == elegido)
+    tarjeta(elegido, producto_elegido["nombre"])
+    with st.expander("Acciones avanzadas: cambiar código o eliminar"):
         st.text_input("Nuevo código", key=f"ren_{elegido}")
-        st.checkbox("Si ya existe un producto con ese código, combinarlos", key=f"comb_{elegido}")
-        st.button("Cambiar el código", key=f"renb_{elegido}", on_click=renombrar_producto, args=(elegido,))
+        st.checkbox("Combinar si ese código ya existe", key=f"comb_{elegido}")
+        st.button("Cambiar el código", key=f"renb_{elegido}",
+                  on_click=renombrar_producto, args=(elegido,))
         st.divider()
-        seguro = st.checkbox("Sí, quiero eliminar este producto con su foto y su ficha", key=f"delp_{elegido}")
+        seguro = st.checkbox(
+            "Confirmo que quiero eliminar el producto y sus archivos",
+            key=f"delp_{elegido}",
+        )
         st.button("Eliminar producto", disabled=not seguro, key=f"delpb_{elegido}",
                   on_click=borrar_producto, args=(elegido,))
 
