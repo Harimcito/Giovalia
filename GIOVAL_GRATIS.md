@@ -15,6 +15,14 @@ Compartir una sola biblioteca entre todos los usuarios sin pagar alojamiento. Un
 5. Ejecuta `iniciar_servidor_gioval.bat`. La primera vez pedirá una clave de acceso compartida de al menos 12 caracteres. La clave se guarda cifrada con las herramientas de Windows para el mismo usuario; no se sube a GitHub. Comparte la clave solo con el equipo autorizado.
 6. Mantén abierta la ventana del servidor. La dirección en el propio computador es `http://localhost:8501`.
 
+### Importar datos ya existentes
+
+1. En tu instalación actual, abre Ajustes → Copia de seguridad → Preparar respaldo y descarga el ZIP.
+2. Copia el ZIP al computador central.
+3. Detén el servidor con Ctrl+C. Vuelve a iniciarlo una sola vez con `iniciar_servidor_gioval.bat -PermitirImportacionInicial`.
+4. En Gioval, abre Ajustes → Copia de seguridad → Importar respaldo inicial, carga el ZIP y confirma.
+5. Detén el servidor y vuelve a iniciarlo normalmente con `iniciar_servidor_gioval.bat` (sin argumento). Así la importación inicial vuelve a quedar desactivada.
+
 Los datos se guardan en `%LOCALAPPDATA%\Gioval\Datos\biblioteca`, fuera de la carpeta del código. Actualizar o volver a descargar la aplicación no debería reemplazar esa biblioteca.
 
 ## 2. Conectar equipos de la misma oficina
