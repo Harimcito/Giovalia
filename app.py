@@ -104,7 +104,7 @@ st.set_page_config(page_title="Gioval · Cotizador comercial", page_icon=":mater
 
 CSS_BASE = """
 html, body, .stApp { font-size: 16px; line-height: 1.5; }
-.block-container { max-width: 1580px; padding: .85rem 1.65rem 3rem; }
+.block-container { max-width: 1580px; padding: 4rem 1.65rem 3rem !important; }
 h1 { font-size: 2rem !important; line-height: 1.18; margin-bottom: .7rem; }
 h2 { font-size: 1.45rem !important; line-height: 1.3; }
 h3 { font-size: 1.15rem !important; line-height: 1.35; }
@@ -271,9 +271,18 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 [data-testid="stAlert"] p { color:inherit; }
 [data-testid="stAlert"] [data-testid="stMarkdownContainer"] { color:inherit; }
 .st-key-app-navigation {
-    margin:.45rem 0 1.2rem; padding:.22rem .35rem 0;
+    margin:.65rem 0 1.35rem; padding:.22rem .35rem 0;
     border:1px solid #242733; border-bottom:1px solid #2F3241;
     border-radius:7px 7px 0 0; background:#0E1017;
+}
+.st-key-app-navigation [data-testid="stRadio"] label [data-baseweb="radio"] {
+    display:none !important;
+}
+.st-key-app-navigation [data-testid="stRadio"] label {
+    cursor:pointer;
+}
+.st-key-app-navigation [data-testid="stRadio"] label:has([aria-checked="true"]) {
+    box-shadow:inset 0 -1px 0 rgba(1,14,208,.14);
 }
 .st-key-app-navigation [data-testid="stRadio"] div[role="radiogroup"] {
     gap:.18rem; border:0; background:transparent; align-items:stretch;
@@ -321,8 +330,8 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     background:var(--gioval-blue); right:6px; top:6px; box-shadow:0 0 9px rgba(1,14,208,.7);
 }
 .marca-texto { display:flex; flex-direction:column; gap:3px; }
-.marca-nombre { color:#FFFFFF; font-size:1.35rem; font-weight:800; letter-spacing:-.04em; line-height:1.05; }
-.marca-descripcion { color:#9297A7; font-size:.83rem; font-weight:500; line-height:1.3; }
+.marca-nombre { color:#FFFFFF !important; font-size:1.35rem; font-weight:800; letter-spacing:-.04em; line-height:1.05; }
+.marca-descripcion { color:#A9ADBA !important; font-size:.83rem; font-weight:500; line-height:1.3; }
 .marca-pill {
     display:inline-flex; width:fit-content; align-items:center; margin-top:4px;
     padding:3px 8px; border:1px solid rgba(1,14,208,.58); border-radius:4px;
@@ -366,9 +375,33 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     padding:4px 9px; font-size:.77rem; font-weight:600;
 }
 .inicio-section-label { color:#868B9A; font-size:.7rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
-.st-key-settings-popover button { min-height:2.6rem; }
+.st-key-settings-popover {
+    display:flex;
+    justify-content:flex-end;
+    position:relative;
+    z-index:5;
+    padding-top:2px;
+}
+.st-key-settings-popover button {
+    min-height:2.7rem;
+    padding:.62rem 1.05rem;
+    background:#151720 !important;
+    color:#F3F4F8 !important;
+    border:1px solid #41465A !important;
+    border-radius:6px;
+    box-shadow:0 2px 8px rgba(0,0,0,.18);
+}
+.st-key-settings-popover button:hover {
+    background:#1B1E2A !important;
+    border-color:var(--gioval-blue) !important;
+    color:#FFFFFF !important;
+}
 @media (max-width:800px) {
-    .block-container { padding-left:.85rem; padding-right:.85rem; padding-top:.65rem; }
+    .block-container {
+        padding-left:.85rem !important;
+        padding-right:.85rem !important;
+        padding-top:4.25rem !important;
+    }
     .marca-app { gap:10px; }
     .marca-simbolo { flex-basis:39px; width:39px; height:39px; }
     .marca-nombre { font-size:1.22rem; }
