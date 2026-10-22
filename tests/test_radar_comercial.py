@@ -5,7 +5,9 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
+from radar_comercial import servicio
 from radar_comercial.servicio import (
     RadarStore,
     evaluar_rentabilidad,
@@ -143,13 +145,47 @@ class RadarComercialTests(unittest.TestCase):
             "resultado_calculo": {"resultado": "Incompleto"},
             "api_ticket": "NO-GUARDAR-ESTE-TICKET",
         })
-        listed = self.store.listar()
+        with patch.object(self.store, "evaluacion", side_effect=AssertionError("N+1 evaluation query")):
+            listed = self.store.listar()
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["decision"], "Cotizar")
         self.assertEqual(listed[0]["notas"], "Verificar costo de despacho")
         self.assertEqual(listed[0]["detalle"]["productos_solicitados"][0]["nombre"], "Resma oficio")
         self.assertEqual(listed[0]["evaluacion"]["resultado_calculo"]["resultado"], "Incompleto")
         self.assertNotIn("api_ticket", json.dumps(listed[0]["evaluacion"]))
+
+    def test_api_search_reports_progress_once_per_term_and_deduplicates(self):
+        events = []
+
+        def fake_request(ticket, url, params):
+            termino = params["q"]
+            return {
+                "success": "OK",
+                "payload": {
+                    "items": [{
+                        "codigo": f"COD-{termino.upper()}",
+                        "nombre": f"Compra de {termino}",
+                        "estado": {"codigo": "publicada", "glosa": "Publicada"},
+                        "institucion": {"organismo_comprador": "Organismo de prueba", "region": 15,
+                                        "nombre_region": "Arica y Parinacota"},
+                        "montos": {"moneda": "CLP", "monto_disponible_clp": 100000},
+                    }]
+                }
+            }
+
+        with patch.object(servicio, "_request_json", side_effect=fake_request):
+            results, errors, calls = servicio.buscar_compras_agiles(
+                ticket="ticket-no-persistido",
+                palabras=["toner", "tinta", "toner", "  tinta  "],
+                regiones=[15],
+                estados=["publicada"],
+                on_progress=lambda actual, total, termino: events.append((actual, total, termino)),
+            )
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(errors, [])
+        self.assertEqual(events, [(1, 2, "toner"), (2, 2, "tinta")])
 
     def test_manual_import_and_line_parser(self):
         record = normalizar_importacion({

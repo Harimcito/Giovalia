@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 from urllib.parse import quote
 
 import requests
@@ -283,8 +283,9 @@ def buscar_compras_agiles(
     regiones: Iterable[int] = (15,),
     estados: Iterable[str] = ("publicada",),
     tamano_pagina: int = 50,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[list[dict], list[str], int]:
-    """Busca hasta ocho términos, una página por término; devuelve registros, avisos y llamadas."""
+    """Busca hasta ocho términos; admite callback de progreso y no realiza llamadas ocultas."""
     terminos = []
     vistos = set()
     for termino in palabras:
@@ -310,25 +311,27 @@ def buscar_compras_agiles(
 
     registros, errores = {}, []
     llamadas = 0
-    for termino in terminos:
+    for numero, termino in enumerate(terminos, start=1):
         params = {**params_base, "q": termino}
         try:
             body = _request_json(ticket, API_LIST_URL, params)
             llamadas += 1
+            payload = body.get("payload") or {}
+            items = payload.get("items") or []
+            for item in items:
+                try:
+                    registro = registro_desde_api(item)
+                except ValueError:
+                    continue
+                registro["_coincidencia_busqueda"] = termino
+                registros[registro["codigo"]] = registro
         except APICompraAgilError as exc:
             errores.append(f"{termino}: {exc}")
             if exc.status_code in (401, 403, 429):
                 break
-            continue
-        payload = body.get("payload") or {}
-        items = payload.get("items") or []
-        for item in items:
-            try:
-                registro = registro_desde_api(item)
-            except ValueError:
-                continue
-            registro["_coincidencia_busqueda"] = termino
-            registros[registro["codigo"]] = registro
+        finally:
+            if on_progress:
+                on_progress(numero, len(terminos), termino)
     return list(registros.values()), errores, llamadas
 
 
@@ -775,46 +778,65 @@ class RadarStore:
         except (TypeError, json.JSONDecodeError):
             return {}
 
-    def obtener(self, codigo: str) -> dict | None:
-        with self._connection() as con:
-            row = con.execute("SELECT * FROM oportunidades WHERE codigo=?", (codigo,)).fetchone()
-            if not row:
-                return None
-            rec = dict(row)
+    @staticmethod
+    def _expandir_registro_oportunidad(row) -> dict:
+        """Decodifica oportunidad y evaluación desde una sola fila del JOIN."""
+        rec = dict(row)
+        datos_eval = rec.pop("_evaluacion_json", None)
+        fecha_eval = rec.pop("_evaluacion_actualizado", None)
         try:
             rec["detalle"] = json.loads(rec.pop("detalle_json") or "{}")
         except (TypeError, json.JSONDecodeError):
             rec["detalle"] = {}
-        rec["evaluacion"] = self.evaluacion(codigo)
+        try:
+            eval_datos = json.loads(datos_eval or "{}")
+        except (TypeError, json.JSONDecodeError):
+            eval_datos = {}
+        if not isinstance(eval_datos, dict):
+            eval_datos = {}
+        if fecha_eval:
+            eval_datos["actualizado"] = fecha_eval
+        rec["evaluacion"] = eval_datos
         return rec
 
+    def obtener(self, codigo: str) -> dict | None:
+        with self._connection() as con:
+            row = con.execute(
+                "SELECT o.*, e.datos_json AS _evaluacion_json, "
+                "e.actualizado AS _evaluacion_actualizado "
+                "FROM oportunidades o LEFT JOIN evaluaciones e ON e.codigo=o.codigo "
+                "WHERE o.codigo=?",
+                (codigo,),
+            ).fetchone()
+        return self._expandir_registro_oportunidad(row) if row else None
+
     def listar(self, decision: str | None = None, busqueda: str = "") -> list[dict]:
-        sql = "SELECT * FROM oportunidades"
+        sql = (
+            "SELECT o.*, e.datos_json AS _evaluacion_json, "
+            "e.actualizado AS _evaluacion_actualizado "
+            "FROM oportunidades o LEFT JOIN evaluaciones e ON e.codigo=o.codigo"
+        )
         args = []
         filtros = []
         if decision and decision != "Todas":
-            filtros.append("decision=?")
+            filtros.append("o.decision=?")
             args.append(decision)
         if busqueda.strip():
-            filtros.append("(codigo LIKE ? OR nombre LIKE ? OR organismo LIKE ? OR descripcion LIKE ?)")
+            filtros.append("(o.codigo LIKE ? OR o.nombre LIKE ? OR o.organismo LIKE ? OR o.descripcion LIKE ?)")
             q = f"%{busqueda.strip()}%"
             args.extend((q, q, q, q))
         if filtros:
             sql += " WHERE " + " AND ".join(filtros)
-        sql += " ORDER BY CASE decision WHEN 'Nueva' THEN 0 WHEN 'En evaluación' THEN 1 ELSE 2 END, fecha_cierre ASC, actualizado DESC"
+        sql += (
+            " ORDER BY CASE o.decision "
+            "WHEN 'Cotizar' THEN 0 WHEN 'Nueva' THEN 1 WHEN 'En evaluación' THEN 2 "
+            "WHEN 'Presentada' THEN 3 ELSE 4 END, "
+            "CASE WHEN COALESCE(o.fecha_cierre, '')='' THEN 1 ELSE 0 END, "
+            "o.fecha_cierre ASC, o.actualizado DESC"
+        )
         with self._connection() as con:
             rows = con.execute(sql, args).fetchall()
-            result = []
-            for row in rows:
-                r = dict(row)
-                try:
-                    r["detalle"] = json.loads(r.pop("detalle_json") or "{}")
-                except (TypeError, json.JSONDecodeError):
-                    r["detalle"] = {}
-                result.append(r)
-        for r in result:
-            r["evaluacion"] = self.evaluacion(r["codigo"])
-        return result
+        return [self._expandir_registro_oportunidad(row) for row in rows]
 
     def total(self) -> int:
         with self._connection() as con:

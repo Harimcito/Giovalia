@@ -20,7 +20,7 @@ jobs:
       - name: Comprobar sintaxis Python
         run: python -m compileall -q .
       - name: Instalar dependencias para la prueba de catálogo
-        run: python -m pip install openpyxl pillow pypdf reportlab requests
+        run: python -m pip install openpyxl pillow pypdf reportlab requests pandas 'streamlit>=1.50'
       - name: Comprobar persistencia y numeración
         run: |
           python - <<'PY'
