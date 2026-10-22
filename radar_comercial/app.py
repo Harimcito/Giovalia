@@ -266,6 +266,11 @@ def navegar_a_evaluacion(codigo: str) -> None:
     st.session_state["radar_vista"] = "Evaluar rentabilidad"
 
 
+def navegar_a_vista(vista: str) -> None:
+    if vista in {"Panel comercial", "Radar de oportunidades", "Evaluar rentabilidad", "Seguimiento"}:
+        st.session_state["radar_vista"] = vista
+
+
 def estado_plazo(fecha_cierre: str) -> str:
     if not fecha_cierre:
         return "Sin fecha"
@@ -290,6 +295,15 @@ def sugerencias_catalogo_cache(descripcion: str, firma_indice: str, _indice: dic
     return sugerir_productos_catalogo(descripcion, _indice, limite=5)
 
 # ─────────────────────────────────────── Navegación
+st.markdown(
+    '<div class="panel-nota">'
+    '<b>Estado de trabajo</b> &nbsp; · &nbsp; '
+    + ("Biblioteca central compartida" if GIOVAL_REQUIRE_ACCESS else "Biblioteca local")
+    + " &nbsp; · &nbsp; "
+    + ("API de ChileCompra lista para consultar" if ticket.strip() else "Sin ticket API: puedes importar Excel/CSV o ingresar oportunidades manualmente")
+    + "</div>",
+    unsafe_allow_html=True,
+)
 vista_actual = st.segmented_control(
     "Sección",
     options=["Panel comercial", "Radar de oportunidades", "Evaluar rentabilidad", "Seguimiento"],
@@ -321,6 +335,37 @@ if vista_actual == "Panel comercial":
             f"Hay {productos_sin_costo} producto(s) sin costo registrado. Las estimaciones de rentabilidad "
             "quedarán incompletas mientras no se confirme ese dato."
         )
+    atajo1, atajo2, atajo3 = st.columns(3)
+    atajo1.button(
+        "Buscar oportunidades",
+        icon=":material/travel_explore:",
+        type="primary",
+        width="stretch",
+        on_click=navegar_a_vista,
+        args=("Radar de oportunidades",),
+        key="panel_ir_radar",
+    )
+    pendientes_evaluables = [
+        r for r in oportunidades_todas
+        if r.get("decision") in ("Nueva", "En evaluación", "Cotizar")
+    ]
+    atajo2.button(
+        "Continuar evaluación",
+        icon=":material/calculate:",
+        width="stretch",
+        disabled=not pendientes_evaluables,
+        on_click=navegar_a_evaluacion,
+        args=(pendientes_evaluables[0]["codigo"],) if pendientes_evaluables else ("",),
+        key="panel_ir_evaluacion",
+    )
+    atajo3.button(
+        "Ver seguimiento",
+        icon=":material/track_changes:",
+        width="stretch",
+        on_click=navegar_a_vista,
+        args=("Seguimiento",),
+        key="panel_ir_seguimiento",
+    )
     st.divider()
     p1, p2 = st.columns([1.25, 1])
     with p1:
