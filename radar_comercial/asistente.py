@@ -53,7 +53,7 @@ def responder_local(pregunta: str, vista_actual: str = "") -> str:
             return (
                 "Un margen puede salir incompleto si faltan datos que el Radar exige para no crear una cifra engañosa: "
                 "confirma manualmente la equivalencia de cada producto, verifica que el costo del catálogo exista, "
-                "ingresa el precio de oferta unitario neto y confirma que despacho/otros costos están revisados "
+                "ingresa precio y costos adicionales en valores netos y confirma que despacho/otros gastos están revisados "
                 "(pueden ser $0). Luego revisa que la línea esté incluida y vuelve a mirar el resultado."
             )
         return GUIAS_RAPIDAS["IVA, costos y margen"]
@@ -80,8 +80,8 @@ def instrucciones_ia(vista_actual: str) -> str:
         "La app no presenta ofertas ni modifica el historial del cotizador. No puedes ver bases, archivos, credenciales ni datos de procesos en tiempo real; "
         "solo recibes el mensaje y la conversación reciente. No pidas ni expongas tickets, contraseñas, RUT ni datos personales. "
         "No afirmes que ejecutas acciones ni inventes controles; cuando no estés seguro, dilo y pide verificar en la interfaz. "
-        "Guías de referencia para responder con precisión:\\n"
-        + "\\n".join(f"{k}: {v}" for k, v in GUIAS_RAPIDAS.items())
+        "Guías de referencia para responder con precisión:\n"
+        + "\n".join(f"{k}: {v}" for k, v in GUIAS_RAPIDAS.items())
     )
 
 
