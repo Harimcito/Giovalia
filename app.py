@@ -1988,9 +1988,7 @@ def configuracion_compacta():
                 )
 
         st.divider()
-        if st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch"):
-            E.clear()
-            st.rerun()
+        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=lambda: E.clear())
 
     # Crear servicios fuera del popover garantiza que estén disponibles aunque no se abra el panel.
     carpeta_activa = E.get("config_carpeta", "biblioteca")
