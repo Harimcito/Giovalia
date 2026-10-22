@@ -127,28 +127,71 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 """
 
 CSS_TINTA = """
-.stApp { background: #F5F7FA; color: #193344; }
-[data-testid="stHeader"] { background: rgba(245,247,250,.96); }
-[data-testid="stSidebar"] > div:first-child { background: #FAFBFC; border-right: 1px solid #E1E7ED; }
-h1, h2, h3 { color: #193344; letter-spacing: -.012em; }
-h1.titulo { font-size: 2.15rem; font-weight: 760; margin: 0 0 1rem 0; padding: 0; color: #17394F; }
-.gota { display: inline-flex; align-items: center; justify-content: center; width: 1.2em; height: 1.2em; margin-right: .5rem; vertical-align: -.08em; border-radius: 6px; background: #176B7A; }
-.gota::after { content: "G"; color: #FFFFFF; font-size: .65em; font-weight: 800; line-height: 1; }
-button[kind="primary"], [data-testid="stBaseButton-primary"] { background: #176B7A; border: 1px solid #176B7A; color: #FFFFFF; box-shadow: 0 2px 6px rgba(23,107,122,.12); }
-button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover { background: #125967; border-color: #125967; color: #FFFFFF; }
-button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled { opacity: .5; box-shadow: none; }
-button[kind="secondary"], [data-testid="stBaseButton-secondary"] { background: #FFFFFF; border: 1px solid #CDD8E1; color: #193344; }
-button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #EFF4F7; border-color: #176B7A; }
-[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) {
-    background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 13px; box-shadow: 0 2px 8px rgba(25,51,68,.035);
+.stApp {
+    background:
+        radial-gradient(circle at 8% 0%, rgba(33,140,141,.10), transparent 28rem),
+        radial-gradient(circle at 96% 16%, rgba(61,129,187,.07), transparent 26rem),
+        #F5F7FA;
+    color: #193344;
 }
+[data-testid="stHeader"] { background: rgba(245,247,250,.94); }
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+h1, h2, h3 { color: #193344; letter-spacing: -.012em; }
+h1.titulo { font-size: 2.15rem; font-weight: 780; margin: 0 0 .75rem 0; padding: 0; color: #17394F; }
+.gota { display: inline-flex; align-items: center; justify-content: center; width: 1.2em; height: 1.2em; margin-right: .5rem; vertical-align: -.08em; border-radius: 6px; background: #176B7A; box-shadow: 0 3px 9px rgba(23,107,122,.2); }
+.gota::after { content: "G"; color: #FFFFFF; font-size: .65em; font-weight: 800; line-height: 1; }
+button[kind="primary"], [data-testid="stBaseButton-primary"] {
+    background: linear-gradient(115deg, #176B7A 0%, #218C8D 100%);
+    border: 1px solid #176B7A; color: #FFFFFF;
+    box-shadow: 0 3px 8px rgba(23,107,122,.17);
+}
+button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
+    background: linear-gradient(115deg, #125967 0%, #176B7A 100%);
+    border-color: #125967; color: #FFFFFF; transform: translateY(-1px);
+    box-shadow: 0 5px 12px rgba(23,107,122,.2);
+}
+button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled { opacity: .5; box-shadow: none; transform: none; }
+button[kind="secondary"], [data-testid="stBaseButton-secondary"] {
+    background: rgba(255,255,255,.88); border: 1px solid #CDD8E1; color: #193344;
+}
+button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover { background: #EFF8F7; border-color: #63A7A5; }
+[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) {
+    background: #FFFFFF; border: 1px solid #DCE6EC; border-radius: 14px;
+    box-shadow: 0 4px 15px rgba(25,51,68,.045);
+}
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-testid="stMetric"]) {
+    background: linear-gradient(155deg, #FFFFFF 0%, #F8FCFC 100%);
+    border-radius: 13px;
+}
+[data-testid="stMetric"] {
+    border-top: 3px solid #73B9AF !important;
+    box-shadow: 0 3px 10px rgba(25,51,68,.025);
+    transition: box-shadow .16s ease, transform .16s ease;
+}
+[data-testid="stMetric"]:hover { box-shadow: 0 5px 14px rgba(25,51,68,.075); transform: translateY(-1px); }
 [data-testid="stTabs"] [data-baseweb="tab-list"] { gap: .35rem; border-bottom: 1px solid #D7E0E7; }
-[data-testid="stTabs"] button[role="tab"] { font-size: 1rem; font-weight: 600; padding: .7rem .95rem; }
-.inicio-hero { background: #FFFFFF; border: 1px solid #E1E7ED; border-radius: 14px;
-    padding: 26px 28px; margin: 4px 0 22px; box-shadow: 0 2px 10px rgba(25,51,68,.035); }
-.inicio-hero h2 { margin: 5px 0 8px; color: #193344; font-size: 1.75rem !important; }
-.inicio-hero p { margin: 0; color: #526674; font-size: 1.02rem; line-height: 1.6; }
-.inicio-kicker { color: #176B7A; font-size: .78rem; font-weight: 800; letter-spacing: .1em; }
+[data-testid="stTabs"] button[role="tab"] { font-size: 1rem; font-weight: 650; padding: .7rem .95rem; }
+[data-testid="stProgress"] > div > div { background: linear-gradient(90deg, #176B7A, #52AFA6); }
+.inicio-hero {
+    position: relative; overflow: hidden;
+    background:
+        radial-gradient(circle at 92% 5%, rgba(255,255,255,.19) 0, transparent 13rem),
+        radial-gradient(circle at 80% 115%, rgba(92,199,183,.23) 0, transparent 18rem),
+        linear-gradient(118deg, #17394F 0%, #176B7A 62%, #238D8A 100%);
+    border: 1px solid rgba(255,255,255,.18); border-radius: 17px;
+    padding: 29px 30px; margin: 4px 0 22px;
+    box-shadow: 0 10px 24px rgba(23,75,91,.14);
+}
+.inicio-hero h2 { margin: 5px 0 8px; color: #FFFFFF; font-size: 1.82rem !important; }
+.inicio-hero p { margin: 0; color: rgba(255,255,255,.88); font-size: 1.02rem; line-height: 1.62; max-width: 850px; }
+.inicio-kicker { color: #BCECE3; font-size: .78rem; font-weight: 800; letter-spacing: .12em; }
+.st-key-settings-popover button { border-radius: 9px; min-height: 2.65rem; box-shadow: 0 2px 6px rgba(25,51,68,.04); }
+[data-testid="stPopover"] { border-radius: 13px; }
+@media (max-width: 800px) {
+    h1.titulo { font-size: 1.8rem; }
+    .inicio-hero { padding: 22px 21px; }
+    .inicio-hero h2 { font-size: 1.55rem !important; }
+}
 """
 CSS_ANIMACION = """
 @keyframes tinta { 0% { background-position: 0% 0%, 100% 0%, 60% 100%, 0% 100%, 0 0; }
@@ -183,53 +226,8 @@ COL_PRECIO = "Precio unitario"
 ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
           "descripcion": "Descripción", "": ""}
 
-# ============================================================== AJUSTES (barra lateral)
-with st.sidebar:
-    st.header("Ajustes")
-    carpeta = st.text_input("Carpeta donde guardo las fotos y fichas", "biblioteca",
-                            help="No hace falta cambiarla.")
-    bib = ct.Biblioteca(carpeta)
-    hist = hs.Historial(carpeta)
-    st.caption(f"{len(bib.indice)} productos guardados")
-    api_key, origen_key = li.buscar_api_key(APP_DIR)
-    if api_key:
-        st.caption(f"Clave de OpenAI lista ({origen_key})")
-    else:
-        api_key = st.text_input("Clave de OpenAI", type="password",
-                                help="Sirve para entender mejor los productos y leer pedidos en PDF o foto.")
-        if api_key and st.button("Guardar esta clave", icon=":material/save:"):
-            li.guardar_api_key(APP_DIR, api_key)
-            st.success("Guardada. La próxima vez se carga sola.")
-    with st.expander("Opciones avanzadas"):
-        usar_lo = st.checkbox("Usar LibreOffice para el PDF", value=False,
-                              help="Dejar desmarcado. Solo para un formato idéntico al Excel; "
-                                   "puede abrir un cuadro de impresora.")
-    with st.expander("Numeración de cotizaciones"):
-        fmt = st.text_input("Formato del número", value=hist.config("formato_numero", hs.FORMATO_DEFECTO),
-                            help="{n} = número correlativo, {aa} = año con 2 cifras, {aaaa} = año completo. "
-                                 "Ejemplo: {n:04d}-COT{aa}")
-        sig = st.number_input("Próximo número", min_value=1, step=1, value=hist.siguiente_correlativo())
-        st.caption(f"Se verá así: {hist.formatear(int(sig), date.today(), fmt)}")
-        if st.button("Guardar numeración", icon=":material/save:"):
-            hist.set_config("formato_numero", fmt)
-            hist.set_config("siguiente_correlativo", int(sig))
-            st.success("Guardado.")
-    with st.expander("Copia de seguridad"):
-        st.caption("Descarga la biblioteca completa: base de datos, catálogo, fotos, fichas y archivos de cotizaciones.")
-        if st.button("Preparar respaldo actualizado", key="preparar_respaldo"):
-            try:
-                E["_respaldo_zip"] = crear_respaldo_biblioteca(bib.dir)
-                E["_respaldo_nombre"] = f"respaldo_giovalia_{datetime.now():%Y%m%d_%H%M%S}.zip"
-                st.success("El respaldo está preparado. Descárgalo y guárdalo fuera de esta carpeta.")
-            except Exception as exc:
-                E.pop("_respaldo_zip", None)
-                st.error(f"No pude preparar el respaldo: {exc}")
-        if E.get("_respaldo_zip"):
-            st.download_button("Descargar respaldo ZIP", E["_respaldo_zip"], icon=":material/download:",
-                               file_name=E.get("_respaldo_nombre", "respaldo_giovalia.zip"),
-                               mime="application/zip", width="stretch", key="descargar_respaldo")
-    st.divider()
-    st.button("Volver a los borradores", on_click=lambda: E.clear())
+# ============================================================== CONFIGURACIÓN COMPACTA
+# La configuración se renderiza en un popover junto al título, para no ocupar la pantalla.
 
 
 # ============================================================== FUNCIONES COMUNES
@@ -1894,14 +1892,130 @@ def vista_productos():
                   on_click=borrar_producto, args=(elegido,))
 
 
+def configuracion_compacta():
+    """Muestra opciones secundarias bajo demanda y devuelve los servicios activos de la app."""
+    E.setdefault("config_carpeta", "biblioteca")
+    api_key, origen_key = li.buscar_api_key(APP_DIR)
+
+    with st.popover(
+        "Ajustes",
+        icon=":material/settings:",
+        type="secondary",
+        width="content",
+        key="settings-popover",
+        help="Preferencias, conexión de IA, numeración y copia de seguridad.",
+    ):
+        st.markdown("### Preferencias")
+        st.caption("Las opciones avanzadas están aquí para mantener despejada la pantalla de trabajo.")
+
+        carpeta = st.text_input(
+            "Carpeta de datos y productos",
+            key="config_carpeta",
+            help="Normalmente puedes dejar «biblioteca» como está.",
+        )
+        bib_panel = ct.Biblioteca(carpeta)
+        hist_panel = hs.Historial(carpeta)
+        st.caption(f"{len(bib_panel.indice)} productos en el catálogo")
+
+        st.divider()
+        st.markdown("**Conexión de inteligencia artificial**")
+        if api_key:
+            st.caption(f"Conectada · Clave encontrada en {origen_key}")
+        else:
+            api_key = st.text_input(
+                "Clave de OpenAI",
+                type="password",
+                key="config_api_key",
+                help="Se usa para interpretar pedidos en PDF o foto y mejorar la identificación de productos.",
+            )
+            if api_key and st.button(
+                "Guardar clave",
+                icon=":material/save:",
+                key="config_guardar_api",
+                width="stretch",
+            ):
+                li.guardar_api_key(APP_DIR, api_key)
+                st.success("Clave guardada en este computador.")
+
+        with st.expander("Opciones para crear el PDF", expanded=False):
+            st.checkbox(
+                "Usar LibreOffice para convertir a PDF",
+                value=False,
+                key="config_usar_lo",
+                help="Déjalo desmarcado salvo que necesites conservar exactamente el formato de Excel.",
+            )
+            st.caption("La opción normal genera el PDF sin abrir LibreOffice.")
+
+        with st.expander("Numeración de cotizaciones", expanded=False):
+            E.setdefault("config_formato_numero", hist_panel.config("formato_numero", hs.FORMATO_DEFECTO))
+            E.setdefault("config_siguiente_numero", hist_panel.siguiente_correlativo())
+            fmt = st.text_input(
+                "Formato del número",
+                key="config_formato_numero",
+                help="{n} = correlativo, {aa} = año de 2 cifras, {aaaa} = año completo. Ej.: {n:04d}-COT{aa}",
+            )
+            sig = st.number_input(
+                "Próximo número",
+                min_value=1,
+                step=1,
+                key="config_siguiente_numero",
+            )
+            st.caption(f"Vista previa: {hist_panel.formatear(int(sig), date.today(), fmt)}")
+            if st.button("Guardar numeración", icon=":material/save:", key="config_guardar_num", width="stretch"):
+                hist_panel.set_config("formato_numero", fmt)
+                hist_panel.set_config("siguiente_correlativo", int(sig))
+                st.success("Numeración guardada.")
+
+        with st.expander("Copia de seguridad", expanded=False):
+            st.caption("Incluye la base de datos, catálogo, fotos, fichas y cotizaciones guardadas.")
+            if st.button("Preparar respaldo", icon=":material/archive:", key="preparar_respaldo", width="stretch"):
+                try:
+                    E["_respaldo_zip"] = crear_respaldo_biblioteca(bib_panel.dir)
+                    E["_respaldo_nombre"] = f"respaldo_giovalia_{datetime.now():%Y%m%d_%H%M%S}.zip"
+                    st.success("Respaldo preparado. Descárgalo y guárdalo fuera de la carpeta del programa.")
+                except Exception as exc:
+                    E.pop("_respaldo_zip", None)
+                    st.error(f"No pude preparar el respaldo: {exc}")
+            if E.get("_respaldo_zip"):
+                st.download_button(
+                    "Descargar respaldo ZIP",
+                    E["_respaldo_zip"],
+                    icon=":material/download:",
+                    file_name=E.get("_respaldo_nombre", "respaldo_giovalia.zip"),
+                    mime="application/zip",
+                    width="stretch",
+                    key="descargar_respaldo",
+                )
+
+        st.divider()
+        if st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch"):
+            E.clear()
+            st.rerun()
+
+    # Crear servicios fuera del popover garantiza que estén disponibles aunque no se abra el panel.
+    carpeta_activa = E.get("config_carpeta", "biblioteca")
+    bib = ct.Biblioteca(carpeta_activa)
+    hist = hs.Historial(carpeta_activa)
+    api_key_actual, _ = li.buscar_api_key(APP_DIR)
+    if not api_key_actual:
+        api_key_actual = E.get("config_api_key", "")
+    usar_lo = bool(E.get("config_usar_lo", False))
+    return carpeta_activa, bib, hist, api_key_actual, usar_lo
+
+
 # ============================================================== PANTALLA
-if TEMA_ACTIVO:
-    st.markdown('<h1 class="titulo"><span class="gota"></span>Giovalia · Cotizador comercial</h1>',
-                unsafe_allow_html=True)
-else:
-    st.title("Giovalia · Cotizador comercial", icon=":material/receipt_long:")
-    st.info("Instalé el nuevo diseño. Presiona la tecla **F5** (actualizar la página) para verlo. "
-            "Si sigue igual, cierra la ventana negra y abre el programa de nuevo.")
+# Barra superior compacta: identidad a la izquierda y ajustes a demanda a la derecha.
+col_marca, col_ajustes = st.columns([6, 1])
+with col_marca:
+    if TEMA_ACTIVO:
+        st.markdown('<h1 class="titulo"><span class="gota"></span>Giovalia · Cotizador comercial</h1>',
+                    unsafe_allow_html=True)
+    else:
+        st.title("Giovalia · Cotizador comercial", icon=":material/receipt_long:")
+        st.info("El diseño se acaba de instalar. Actualiza la página si los cambios aún no aparecen.")
+with col_ajustes:
+    carpeta, bib, hist, api_key, usar_lo = configuracion_compacta()
+
 with st.container(key="app-navigation"):
     vista = st.radio("Ir a", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
 if vista == VISTAS[1]:
