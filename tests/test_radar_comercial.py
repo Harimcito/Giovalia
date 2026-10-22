@@ -108,7 +108,7 @@ class RadarComercialTests(unittest.TestCase):
         )
         self.assertFalse(result_pending["costos_completos"])
         self.assertIsNone(result_pending["margen_sobre_venta_pct"])
-        self.assertIn("equivalencia", result_pending["resultado"].lower())
+        self.assertTrue(result_pending["faltan_equivalencias"])
 
     def test_store_preserves_follow_up_and_attaches_saved_evaluation(self):
         record = {
