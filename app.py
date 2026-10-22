@@ -664,6 +664,19 @@ def editor(df, **kw):
         extra = 1 if kw.get("num_rows") == "dynamic" else 0
         return st.data_editor(df, height=min(35 * (len(df) + 1 + extra) + 8, 2400), **kw)
 
+def limpiar_estado_trabajo():
+    """Reinicia la cotización actual sin cerrar el login ni borrar preferencias útiles."""
+    conservar = (
+        "gioval_autenticado",
+        "config_usar_lo",
+        "config_api_key",
+        "_respaldo_zip",
+        "_respaldo_nombre",
+    )
+    valores = {clave: E[clave] for clave in conservar if clave in E}
+    E.clear()
+    E.update(valores)
+
 
 def ir_a(paso: int):
     E["paso"] = paso
@@ -1315,7 +1328,7 @@ def refrescar_excel_actual():
 
 def iniciar_borrador():
     """Crea inmediatamente una cotización vacía, lista para guardar avances."""
-    E.clear()
+    limpiar_estado_trabajo()
     fecha = date.today()
     cliente = {"nombre": "", "rut": "", "direccion": "", "ciudad": "", "telefono": "", "email": "", "fecha": fecha}
     cot_id, numero = hist.crear(cliente, [], {"neto": 0, "iva": 0, "total": 0},
@@ -1345,7 +1358,7 @@ def restaurar_borrador(cot_id: int):
         ln.setdefault("incluir", True)
         ln.setdefault("clave_auto", bib.detectar(descripcion) or (ct.clave_descriptiva(descripcion) if ln.get("es_producto") and descripcion else ""))
         ln.setdefault("origen", "biblioteca" if bib.detectar(descripcion) else "descripcion")
-    E.clear()
+    limpiar_estado_trabajo()
     try:
         fecha = date.fromisoformat(str(registro.get("fecha") or "")[:10])
     except ValueError:
@@ -2334,7 +2347,7 @@ def paso_4():
         atras, nueva = st.columns(2)
         if atras.button("← Volver a fotos y fichas", width="stretch"):
             ir_a(3)
-        nueva.button("Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
+        nueva.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
     else:
         nueva = st.button("Hacer otra cotización", width="stretch", on_click=lambda: E.clear())
 
