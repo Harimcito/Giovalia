@@ -1,0 +1,82 @@
+name: Construir instalador de Giovalia
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: giovalia-installer-main
+  cancel-in-progress: true
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-desktop.txt
+
+      - name: Instalar dependencias de escritorio
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-desktop.txt
+          python desktop_launcher.py --check-package
+
+      - name: Descargar instalador de WebView2
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "installer/webview2" | Out-Null
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "installer/webview2/MicrosoftEdgeWebview2Setup.exe"
+
+      - name: Construir aplicación de escritorio
+        shell: pwsh
+        run: python -m PyInstaller --noconfirm --clean gioval_desktop.spec
+
+      - name: Instalar Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Construir instalador
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "No se encontró Inno Setup en $iscc" }
+          & $iscc "installer/Gioval.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup terminó con error $LASTEXITCODE" }
+          if (-not (Test-Path "installer/Output/Gioval-Setup.exe")) { throw "No se generó installer/Output/Gioval-Setup.exe" }
+
+      - name: Publicar artefacto descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Giovalia-Windows-Installer
+          path: installer/Output/Gioval-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publicar versión más reciente
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Giovalia — última versión
+          body: |
+            Instalador de Windows generado automáticamente desde la rama main.
+            Descarga Gioval-Setup.exe en Assets.
+            Cada ejecución exitosa de este flujo reemplaza el instalador de esta versión.
+          files: installer/Output/Gioval-Setup.exe
+          overwrite_files: true
+          make_latest: true
+          prerelease: false
