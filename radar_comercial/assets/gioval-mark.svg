@@ -1,11 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
   <title id="title">Gioval</title>
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5965ff"/>
-      <stop offset="1" stop-color="#010ed0"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4658ff"/>
+      <stop offset=".55" stop-color="#2639ed"/>
+      <stop offset="1" stop-color="#121bb1"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <rect x="2" y="2" width="60" height="60" rx="17" fill="url(#g)"/>
-  <path d="M43.5 20.5A18 18 0 1 0 49 34H32v-8h26v5a26 26 0 1 1-8-19z" fill="#fff"/>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="#0b1045"/>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#tile)"/>
+  <path d="M42.2 20.4A17.2 17.2 0 1 0 48 33H31v-7h25v5a24 24 0 1 1-7.3-18.1z" fill="#fff"/>
+  <path d="M42.2 20.4A17.2 17.2 0 1 0 48 33H31v-7h25v5a24 24 0 1 1-7.3-18.1z" fill="url(#shine)"/>
+  <circle cx="49.5" cy="14.5" r="3.5" fill="#ffd36e"/>
+  <circle cx="49.5" cy="14.5" r="1.35" fill="#fff4ce"/>
 </svg>

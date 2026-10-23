@@ -80,36 +80,40 @@ def render_header(st, app_name: str, shared: bool, auth_key: str | None = None,
             before_switch()
         clear_profile_work(st.session_state, auth_key)
 
-    left, right = st.columns([5, 2], vertical_alignment="center")
-    with left:
-        st.markdown(
-            '<div class="gioval-topbar-brand">'
-            f'<img src="{_logo_data_uri()}" alt="Gioval" />'
-            '<div><strong>Gioval</strong>'
-            f'<span>{html.escape(app_name)} · {"Biblioteca compartida" if shared else "Biblioteca local"}</span></div></div>',
-            unsafe_allow_html=True,
-        )
-    with right:
-        with st.popover(f"Perfil · {active}", icon=":material/account_circle:", width="stretch"):
-            st.caption("El perfil solo personaliza esta sesión. No es una cuenta ni una autenticación.")
-            selected = st.selectbox(
-                "Perfil activo", names, index=names.index(active), key=PROFILE_SELECTOR_KEY,
-                on_change=switch_profile,
+    with st.container(key="gioval-header"):
+        left, right = st.columns([5, 2], vertical_alignment="center")
+        with left:
+            st.markdown(
+                '<div class="gioval-topbar-brand">'
+                f'<img src="{_logo_data_uri()}" alt="" />'
+                '<div class="gioval-topbar-copy"><strong>Gioval</strong>'
+                f'<span>{html.escape(app_name)}</span></div>'
+                '<span class="gioval-topbar-divider" aria-hidden="true"></span>'
+                f'<span class="gioval-topbar-status"><i></i>{"Biblioteca compartida" if shared else "Biblioteca local"}</span>'
+                '</div>',
+                unsafe_allow_html=True,
             )
-            st.session_state[PROFILE_KEY] = selected
-            with st.form("gioval_add_profile_form"):
-                st.text_input("Agregar perfil", max_chars=40, key=NEW_PROFILE_KEY,
-                              placeholder="Nombre para el saludo")
-                st.form_submit_button(
-                    "Agregar perfil", width="stretch",
-                    on_click=add_session_profile,
-                    args=(st.session_state, auth_key, before_switch),
+        with right:
+            with st.popover(f"Perfil · {active}", icon=":material/account_circle:", width="stretch"):
+                st.caption("El perfil solo personaliza esta sesión. No es una cuenta ni una autenticación.")
+                selected = st.selectbox(
+                    "Perfil activo", names, index=names.index(active), key=PROFILE_SELECTOR_KEY,
+                    on_change=switch_profile,
                 )
-            st.caption(
-                ("El catálogo, el historial y el seguimiento son comunes al espacio de trabajo; "
-                 "el perfil solo cambia el saludo de esta sesión." if shared else
-                 "El perfil solo cambia el saludo de esta sesión; no crea cuentas ni protege los datos locales.")
-            )
+                st.session_state[PROFILE_KEY] = selected
+                with st.form("gioval_add_profile_form"):
+                    st.text_input("Agregar perfil", max_chars=40, key=NEW_PROFILE_KEY,
+                                  placeholder="Nombre para el saludo")
+                    st.form_submit_button(
+                        "Agregar perfil", width="stretch",
+                        on_click=add_session_profile,
+                        args=(st.session_state, auth_key, before_switch),
+                    )
+                st.caption(
+                    ("El catálogo, el historial y el seguimiento son comunes al espacio de trabajo; "
+                     "el perfil solo cambia el saludo de esta sesión." if shared else
+                     "El perfil solo cambia el saludo de esta sesión; no crea cuentas ni protege los datos locales.")
+                )
     return st.session_state[PROFILE_KEY]
 
 

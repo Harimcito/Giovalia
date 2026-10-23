@@ -14,6 +14,12 @@ Consulta [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md) para ejecutar el servidor en un co
 
 La modalidad de red local no tiene costo de alojamiento, pero el computador servidor debe permanecer encendido. El cliente requiere Windows x64, conexión a la red del servidor y Microsoft Edge WebView2 Runtime. No requiere Python en los equipos clientes.
 
+## Actualizar equipos ya instalados
+
+Puedes ejecutar el nuevo `Gioval-Setup.exe` sobre la versión existente: mantiene el mismo identificador de instalación y la misma carpeta de preferencias, por lo que conserva la dirección del servidor configurada y los datos que viven fuera del programa. No desinstales Gioval ni borres `%LOCALAPPDATA%\Gioval\Datos`. El instalador actualiza el icono y crea o renueva el acceso directo **Gioval** en el escritorio.
+
+La barra y las pantallas de bienvenida se entregan desde el servidor. En un servidor Windows actualiza el código de Gioval y reinicia sus servicios; en Render, publica el despliegue correspondiente. Instalar el cliente por sí solo no cambia la interfaz que entrega un servidor sin actualizar.
+
 ## Perfiles y privacidad
 
 Gioval muestra un selector de perfiles por sesión para personalizar el saludo. Los perfiles se guardan solo en la sesión actual del navegador y no son cuentas ni verifican la identidad de quien usa el equipo. Al cambiar de perfil se limpian los datos transitorios de esa sesión; el borrador actual se guarda primero mediante el flujo normal de la aplicación. El catálogo, el historial y los datos de Radar siguen perteneciendo al espacio compartido y no se separan por perfil. En modo compartido se mantienen las reglas existentes que excluyen datos identificatorios de clientes del historial común.
