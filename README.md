@@ -13,6 +13,11 @@ El instalador de Windows abre Gioval en una ventana independiente y se conecta a
 
 Para la alternativa alojada, consulta [SHARED_LIBRARY.md](SHARED_LIBRARY.md). No necesitas contratar Render para usar la modalidad gratuita.
 
+
+### Actualización automática del servidor
+
+Para un servidor Windows que se actualice desde GitHub, consulta la sección de [actualizaciones automáticas](GIOVAL_GRATIS.md#11-actualizaciones-automaticas-desde-github-windows). El instalador `instalar_actualizaciones_servidor_gioval.bat` configura una tarea al iniciar sesión y actualiza la rama `main` cada cinco minutos. Los datos compartidos permanecen fuera del repositorio.
+
 ## Radar Comercial (aplicación independiente)
 
 Gioval incluye una segunda aplicación para detectar oportunidades de Compra Ágil y estimar rentabilidad a partir del catálogo comercial del cotizador. Consulta [RADAR_COMERCIAL.md](RADAR_COMERCIAL.md) para instalación y uso.
