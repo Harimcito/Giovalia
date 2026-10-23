@@ -29,7 +29,7 @@ Esta función mantiene actualizados el cotizador y Radar Comercial sin que tenga
 
 El supervisor consulta la rama `main` cada cinco minutos. Cuando detecta una versión nueva, detiene brevemente las dos aplicaciones, descarga el código, instala los requisitos actualizados y comprueba que los puertos 8501 y 8502 respondan. Si la versión nueva no arranca, intenta restaurar la versión anterior. No reemplaza los datos de `%LOCALAPPDATA%\Gioval\Datos`.
 
-Por seguridad, si detecta cambios locales sin confirmar en el repositorio, omite esa actualización para no sobrescribir archivos editados. Revisa el registro en `%LOCALAPPDATA%\Gioval\logs\\actualizador-servidor.log`; los registros de inicio de cada aplicación se guardan en la misma carpeta.
+Por seguridad, si detecta cambios locales sin confirmar en el repositorio, omite esa actualización para no sobrescribir archivos editados. Revisa el registro en `%LOCALAPPDATA%\Gioval\logs\actualizador-servidor.log`; los registros de inicio de cada aplicación se guardan en la misma carpeta.
 
 Para desactivar la tarea automática, ejecuta `desinstalar_actualizaciones_servidor_gioval.bat`. El cierre puede tardar hasta unos 30 segundos. Después puedes iniciar las aplicaciones manualmente con `iniciar_servidor_gioval.bat` y `iniciar_radar_gioval.bat`.
 
