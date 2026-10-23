@@ -2357,7 +2357,7 @@ def paso_4():
         else:
             st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
         st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"], icon=":material/download:",
-                           mime="application/pdf", type="primary", width="stretch")
+                           mime="application/pdf", type="primary", width="stretch", on_click="ignore")
         if E.get("ruta") and Path(E["ruta"]).exists():
             st.download_button("Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(), icon=":material/download:",
                                file_name=Path(E["ruta"]).name, width="stretch")
@@ -2553,7 +2553,7 @@ def historial_cotizaciones():
         pdf, xlsx = Path(rec["pdf"] or ""), Path(rec["xlsx"] or "")
         if rec["pdf"] and pdf.exists():
             d1.download_button("Descargar el PDF", pdf.read_bytes(), file_name=pdf.name, mime="application/pdf", icon=":material/download:",
-                               width="stretch", key=f"dp_{rec['id']}")
+                               width="stretch", key=f"dp_{rec['id']}", on_click="ignore")
         else:
             d1.caption(
                 "El PDF no se archiva para proteger los datos del cliente. Abre la cotización y vuelve a generarlo."

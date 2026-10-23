@@ -14,6 +14,8 @@ Consulta [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md) para ejecutar el servidor en un co
 
 La modalidad de red local no tiene costo de alojamiento, pero el computador servidor debe permanecer encendido. El cliente requiere Windows x64, conexión a la red del servidor y Microsoft Edge WebView2 Runtime. No requiere Python en los equipos clientes.
 
+La ventana de escritorio permite descargas del navegador integrado. Así los botones de PDF del cotizador y del historial pueden guardar el archivo en el computador cliente; en una pestaña normal del navegador, Streamlit usa la descarga habitual.
+
 ## Actualizar equipos ya instalados
 
 Puedes ejecutar el nuevo `Gioval-Setup.exe` sobre la versión existente: mantiene el mismo identificador de instalación y la misma carpeta de preferencias, por lo que conserva la dirección del servidor configurada y los datos que viven fuera del programa. No desinstales Gioval ni borres `%LOCALAPPDATA%\Gioval\Datos`. El instalador actualiza el icono y crea o renueva el acceso directo **Gioval** en el escritorio.
