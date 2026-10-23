@@ -22,6 +22,25 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
+      - name: Validar sintaxis de scripts PowerShell del servidor
+        shell: pwsh
+        run: |
+          $files = @(
+            "supervisar_servidor_gioval.ps1",
+            "instalar_actualizaciones_servidor_gioval.ps1",
+            "desinstalar_actualizaciones_servidor_gioval.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error ("{0}:{1}: {2}" -f $file, $_.Extent.StartLineNumber, $_.Message) }
+              throw "Sintaxis PowerShell inválida en $file"
+            }
+            Write-Host "Sintaxis correcta: $file"
+          }
+
       - name: Preparar Python
         uses: actions/setup-python@v5
         with:
