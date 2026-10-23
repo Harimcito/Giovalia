@@ -124,7 +124,7 @@ function Update-RepositoryIfNeeded {
         return
     }
 
-    $branch = Invoke-GitText @("branch", "--show-current")
+    $branch = Invoke-GitText -GitArgs @("branch", "--show-current")
     if ($branch -ne "main") {
         Write-Log "La carpeta está en la rama '$branch', no en 'main'. No se aplicó ninguna actualización."
         return
@@ -141,9 +141,9 @@ function Update-RepositoryIfNeeded {
     }
 
     try {
-        $null = Invoke-GitText @("fetch", "--quiet", "origin", "main")
-        $current = Invoke-GitText @("rev-parse", "HEAD")
-        $remote = Invoke-GitText @("rev-parse", "origin/main")
+        $null = Invoke-GitText -GitArgs @("fetch", "--quiet", "origin", "main")
+        $current = Invoke-GitText -GitArgs @("rev-parse", "HEAD")
+        $remote = Invoke-GitText -GitArgs @("rev-parse", "origin/main")
         if ($current -eq $remote) { return }
 
         & $script:gitExe -C $script:repoRoot merge-base --is-ancestor $current $remote *> $null
@@ -157,12 +157,12 @@ function Update-RepositoryIfNeeded {
         Stop-AppProcesses
 
         try {
-            $null = Invoke-GitText @("pull", "--ff-only", "origin", "main")
+            $null = Invoke-GitText -GitArgs @("pull", "--ff-only", "origin", "main")
             & $script:venvPython -m pip install -r (Join-Path $script:repoRoot "requirements.txt")
             if ($LASTEXITCODE -ne 0) { throw "Falló la instalación de requirements.txt." }
 
             Start-AppProcesses
-            $newHead = Invoke-GitText @("rev-parse", "HEAD")
+            $newHead = Invoke-GitText -GitArgs @("rev-parse", "HEAD")
             Write-Log "Actualización aplicada correctamente: $newHead"
         } catch {
             $updateError = $_.Exception.Message
@@ -200,18 +200,35 @@ try {
     }
 
     Write-Log "Supervisor iniciado para $script:repoRoot. Consultará GitHub cada 5 minutos."
-    Start-AppProcesses
+    $stopSignal = Join-Path $script:baseDir "detener-actualizador.flag"
+    try {
+        Start-AppProcesses
+    } catch {
+        Stop-AppProcesses
+        Write-Log ("El inicio no se completó; se reintentará en 30 segundos: {0}" -f $_.Exception.Message)
+    }
     $nextUpdateCheck = (Get-Date).AddSeconds($script:updateIntervalSeconds)
 
     while ($true) {
         Start-Sleep -Seconds $script:pollSeconds
+
+        if (Test-Path $stopSignal) {
+            Remove-Item -LiteralPath $stopSignal -Force -ErrorAction SilentlyContinue
+            Write-Log "Se recibió una solicitud de detención. Cerrando las aplicaciones de forma ordenada."
+            break
+        }
 
         $cotizadorDead = ($null -eq $script:cotizadorProcess -or $script:cotizadorProcess.HasExited)
         $radarDead = ($null -eq $script:radarProcess -or $script:radarProcess.HasExited)
         if ($cotizadorDead -or $radarDead) {
             Write-Log "Se detectó un proceso detenido. Reiniciando las aplicaciones."
             Stop-AppProcesses
-            try { Start-AppProcesses } catch { Write-Log ("No pude reiniciar las aplicaciones: {0}" -f $_.Exception.Message) }
+            try {
+                Start-AppProcesses
+            } catch {
+                Stop-AppProcesses
+                Write-Log ("No pude reiniciar las aplicaciones; volveré a intentarlo: {0}" -f $_.Exception.Message)
+            }
         }
 
         if ((Get-Date) -ge $nextUpdateCheck) {
