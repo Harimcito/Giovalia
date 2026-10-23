@@ -150,6 +150,9 @@ def launch_desktop() -> None:
     try:
         import webview
 
+        # Streamlit serves generated PDFs through a browser download link. pywebview
+        # disables downloads by default, so enable them for the desktop client.
+        webview.settings["ALLOW_DOWNLOADS"] = True
         webview.create_window(
             APP_TITLE,
             url,

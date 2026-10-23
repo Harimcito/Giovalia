@@ -1,5 +1,9 @@
 # Gioval · Radar Comercial (aplicación independiente)
 
+## Perfiles de presentación
+
+El selector permite agregar nombres para saludos personalizados en la sesión actual del navegador. No crea usuarios ni autentica personas. El catálogo, el historial de cotizaciones y el seguimiento de oportunidades permanecen en el espacio de trabajo compartido; el nombre del perfil no se asocia a esos registros.
+
 ## Para qué sirve
 
 Radar Comercial es una segunda aplicación Streamlit, separada del cotizador. Está diseñada para los dos trabajadores de Gioval y ayuda a descubrir Compra Ágil, evaluar si el catálogo puede responder a los productos solicitados y estimar ingresos, costos y margen antes de preparar una oferta.

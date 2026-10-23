@@ -18,6 +18,7 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir=Output
 OutputBaseFilename=Gioval-Setup
+SetupIconFile=..\assets\gioval.ico
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
@@ -36,8 +37,8 @@ Source: "webview2\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: dele
 Source: "..\configurar_cliente_gioval.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Gioval"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{localappdata}\Gioval"
-Name: "{autodesktop}\Gioval"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{localappdata}\Gioval"
+Name: "{autoprograms}\Gioval"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{localappdata}\Gioval"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\Gioval"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{localappdata}\Gioval"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{autoprograms}\Configurar conexión de Gioval"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\configurar_cliente_gioval.ps1"""; WorkingDir: "{localappdata}\Gioval"
 
 [Run]

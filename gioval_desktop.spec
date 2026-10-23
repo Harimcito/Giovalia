@@ -4,6 +4,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 ROOT = Path(SPECPATH).resolve()
+ICON = ROOT / "assets" / "gioval.ico"
 datas = []
 binaries = []
 hiddenimports = [
@@ -48,6 +49,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="Gioval",
+    icon=str(ICON),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

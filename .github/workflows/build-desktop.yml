@@ -20,6 +20,9 @@ on:
       - "requirements.txt"
       - "requirements-desktop.txt"
       - "desktop_launcher.py"
+      - "assets/**"
+      - "radar_comercial/gioval_ui.py"
+      - "radar_comercial/assets/**"
       - "render.yaml"
       - "SHARED_LIBRARY.md"
       - "GIOVAL_GRATIS.md"
@@ -72,9 +75,14 @@ jobs:
       - name: Empaquetar aplicación de escritorio
         shell: pwsh
         run: |
+          if (-not (Test-Path "assets/gioval.ico")) { throw "No se encontró el icono de Gioval" }
           python -m PyInstaller --noconfirm --clean gioval_desktop.spec
           if (-not (Test-Path "dist/Gioval/Gioval.exe")) {
             throw "PyInstaller no generó dist/Gioval/Gioval.exe"
+          }
+          $installer = Get-Content "installer/Gioval.iss" -Raw
+          if ($installer -notmatch '\{autodesktop\}\\Gioval') {
+            throw "El instalador debe crear el acceso directo de Gioval en el escritorio"
           }
 
 

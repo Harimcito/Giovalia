@@ -26,6 +26,11 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 try:
+    from radar_comercial.gioval_ui import greeting_tip, profile_names, render_header, PROFILE_KEY
+except ModuleNotFoundError:
+    from gioval_ui import greeting_tip, profile_names, render_header, PROFILE_KEY
+
+try:
     from radar_comercial.integracion import BibliotecaLectura, HistorialLectura
     from radar_comercial.servicio import (
         APICompraAgilError,
@@ -116,6 +121,32 @@ div[data-testid="stDataFrame"] { border:1px solid #2A2D39; border-radius:8px; ov
 [data-testid="stNumberInput"] input { border-radius:7px !important; }
 button[kind="primary"] { font-weight:650 !important; }
 .st-key-radar-header { margin-bottom:.7rem; }
+.st-key-gioval-header { margin:.15rem 0 1.05rem; padding:.55rem 0 .85rem; border-bottom:1px solid #282C39; }
+.gioval-topbar-brand { display:flex; align-items:center; gap:13px; min-height:58px; flex-wrap:wrap; }
+.gioval-topbar-brand img { width:50px; height:50px; flex:0 0 50px; filter:drop-shadow(0 5px 12px rgba(25,42,220,.28)); }
+.gioval-topbar-copy { display:flex; flex-direction:column; gap:3px; min-width:130px; }
+.gioval-topbar-brand strong { color:#fff; font-size:1.38rem; letter-spacing:-.045em; line-height:1.05; }
+.gioval-topbar-copy span { color:#9298AA; font-size:.76rem; font-weight:550; letter-spacing:.015em; }
+.gioval-topbar-divider { width:1px; height:30px; background:#343847; margin:0 3px 0 5px; }
+.gioval-topbar-status { display:inline-flex; align-items:center; gap:8px; padding:7px 11px; border:1px solid #30364B;
+  border-radius:999px; color:#C7CBDB; background:linear-gradient(180deg,#171B28,#12151E); font-size:.76rem; font-weight:650; white-space:nowrap; }
+.gioval-topbar-status i { width:7px; height:7px; border-radius:50%; background:#58D49B; box-shadow:0 0 9px rgba(88,212,155,.55); }
+.st-key-gioval-header [data-testid="stPopover"] > button { min-height:44px; border:1px solid #343A4D !important;
+  border-radius:10px !important; color:#F2F3F8 !important; background:#151824 !important; font-weight:650 !important; }
+.st-key-gioval-header [data-testid="stPopover"] > button:hover { border-color:#5864E9 !important; background:#1A1E2E !important; }
+.gioval-welcome { margin:.4rem 0 1rem; padding:1.05rem 1.2rem; border:1px solid #30354B;
+  border-left:3px solid #010ED0; border-radius:8px; background:linear-gradient(110deg,#141724,#10121A); }
+.gioval-welcome-kicker { color:#AAB0FF; font-size:.7rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+.gioval-welcome h2 { margin:.25rem 0 .4rem; color:#fff; font-size:1.45rem !important; }
+.gioval-welcome p { margin:0; color:#B8BBC7; }
+@media (max-width: 700px) {
+  .gioval-topbar-brand { gap:9px; }
+  .gioval-topbar-brand img { width:43px; height:43px; flex-basis:43px; }
+  .gioval-topbar-divider { display:none; }
+  .gioval-topbar-status { padding:6px 8px; font-size:.68rem; }
+  .gioval-topbar-copy { min-width:0; }
+  .gioval-topbar-brand strong { font-size:1.2rem; }
+}
 .radar-flash { margin:.6rem 0 1rem; }
 @media (max-width: 700px) {
   .block-container { padding-left:.8rem; padding-right:.8rem; }
@@ -163,21 +194,12 @@ if base_actual not in base_opciones:
     base_actual = "Incluyen IVA"
 
 with st.container(key="radar-header"):
-    c_marca, c_conexion = st.columns([5, 1.35])
-    with c_marca:
-        st.markdown("### GIOVAL")
-        st.caption("Radar comercial · Herramienta interna de ventas")
-    with c_conexion:
-        st.markdown("**Conexión**")
-        st.markdown(
-            f'<span class="radar-tag">{"Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Biblioteca local"}</span>',
-            unsafe_allow_html=True,
-        )
-        if GIOVAL_REQUIRE_ACCESS and st.button(
-            "Salir", icon=":material/logout:", key="radar_logout", width="stretch"
-        ):
-            st.session_state.pop("radar_autenticado", None)
-            st.rerun()
+    render_header(st, "Radar Comercial", GIOVAL_REQUIRE_ACCESS, auth_key="radar_autenticado")
+    if GIOVAL_REQUIRE_ACCESS and st.button(
+        "Salir", icon=":material/logout:", key="radar_logout", width="content"
+    ):
+        st.session_state.pop("radar_autenticado", None)
+        st.rerun()
     st.markdown(
         '<section class="hero-radar"><div class="kicker">Compras públicas / Rentabilidad</div>'
         '<h1>Encuentra oportunidades. Cotiza con criterio.</h1>'
@@ -473,6 +495,11 @@ with st.popover("Ayuda / IA", icon=":material/help:"):
 mostrar_aviso_pendiente()
 
 if vista_actual == "Panel comercial":
+    profile_names(st.session_state)
+    greeting_tip(
+        st.session_state[PROFILE_KEY],
+        "Compara siempre el costo estimado con el precio mínimo aceptable antes de decidir si cotizar.",
+    )
     st.subheader("Vista general")
     en_evaluacion = sum(1 for r in oportunidades_todas if r.get("decision") == "En evaluación")
     para_cotizar = sum(1 for r in oportunidades_todas if r.get("decision") in ("Cotizar", "Presentada"))

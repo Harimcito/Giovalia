@@ -13,6 +13,8 @@ El instalador de Windows abre Gioval en una ventana independiente y se conecta a
 
 Para la alternativa alojada, consulta [SHARED_LIBRARY.md](SHARED_LIBRARY.md). No necesitas contratar Render para usar la modalidad gratuita.
 
+La barra de Gioval incluye perfiles de presentación con saludo personalizado. Son nombres locales a cada sesión, no cuentas de usuario. Cambiar de perfil limpia el trabajo transitorio de esa sesión después de guardar el borrador; los datos comerciales compartidos no se filtran ni se particionan por perfil.
+
 
 ### Actualización automática del servidor
 
