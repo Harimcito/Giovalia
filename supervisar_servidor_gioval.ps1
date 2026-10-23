@@ -144,6 +144,14 @@ function Update-RepositoryIfNeeded {
         $null = Invoke-GitText -GitArgs @("fetch", "--quiet", "origin", "main")
         $current = Invoke-GitText -GitArgs @("rev-parse", "HEAD")
         $remote = Invoke-GitText -GitArgs @("rev-parse", "origin/main")
+        $failedUpdateFile = Join-Path $script:baseDir "failed-update-commit.txt"
+        if (Test-Path $failedUpdateFile) {
+            $previouslyFailed = [System.IO.File]::ReadAllText($failedUpdateFile).Trim()
+            if ($previouslyFailed -eq $remote) {
+                Write-Log "La versión $remote ya falló al iniciar y se mantiene en cuarentena; no se intentará repetidamente hasta que main cambie."
+                return
+            }
+        }
         if ($current -eq $remote) { return }
 
         & $script:gitExe -C $script:repoRoot merge-base --is-ancestor $current $remote *> $null
@@ -162,10 +170,13 @@ function Update-RepositoryIfNeeded {
             if ($LASTEXITCODE -ne 0) { throw "Falló la instalación de requirements.txt." }
 
             Start-AppProcesses
+            if (Test-Path $failedUpdateFile) { Remove-Item -LiteralPath $failedUpdateFile -Force -ErrorAction SilentlyContinue }
             $newHead = Invoke-GitText -GitArgs @("rev-parse", "HEAD")
             Write-Log "Actualización aplicada correctamente: $newHead"
         } catch {
             $updateError = $_.Exception.Message
+            $headAfterFailure = Invoke-GitText -GitArgs @("rev-parse", "HEAD")
+            $newCodeHadBeenApplied = ($headAfterFailure -ne $oldHead)
             Write-Log "La versión nueva no arrancó correctamente: $updateError. Intentando volver a $oldHead."
             Stop-AppProcesses
             & $script:gitExe -C $script:repoRoot reset --hard $oldHead 2>&1 | Out-Null
@@ -174,8 +185,15 @@ function Update-RepositoryIfNeeded {
             }
             & $script:venvPython -m pip install -r (Join-Path $script:repoRoot "requirements.txt")
             if ($LASTEXITCODE -ne 0) { throw "Se revirtió el código, pero falló reinstalar los requisitos de la versión anterior." }
+            if ($newCodeHadBeenApplied) {
+                [System.IO.File]::WriteAllText($failedUpdateFile, $remote, [System.Text.Encoding]::ASCII)
+            }
             Start-AppProcesses
-            Write-Log "Rollback completado. Se mantiene activa la versión anterior ($oldHead)."
+            if ($newCodeHadBeenApplied) {
+                Write-Log "Rollback completado. Se mantiene activa la versión anterior ($oldHead). La revisión $remote queda en cuarentena para evitar reinicios repetidos."
+            } else {
+                Write-Log "No se llegó a aplicar el cambio de código. Se mantiene la versión anterior y se reintentará en la próxima comprobación."
+            }
         }
     } catch {
         Write-Log ("No pude comprobar/aplicar actualizaciones: {0}" -f $_.Exception.Message)
