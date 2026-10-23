@@ -17,6 +17,23 @@ Compartir una sola biblioteca entre los dos trabajadores sin pagar alojamiento. 
 5. Ejecuta `iniciar_servidor_gioval.bat`. La primera vez pedirá una clave de acceso compartida de al menos 12 caracteres. La clave se guarda cifrada con las herramientas de Windows para el mismo usuario; no se sube a GitHub. Comparte la clave solo con el equipo autorizado.
 6. Mantén abierta la ventana del servidor. La dirección en el propio computador es `http://localhost:8501`.
 
+
+## 1.1 Actualizaciones automáticas desde GitHub (Windows)
+
+Esta función mantiene actualizados el cotizador y Radar Comercial sin que tengas que descargar el repositorio cada vez. **Requiere que la carpeta del proyecto sea un clon de Git** (no una carpeta obtenida solo al descomprimir ZIP) y que Git for Windows esté instalado.
+
+1. En el computador central, ejecuta primero `instalar_servidor_gioval.bat`.
+2. Abre `iniciar_servidor_gioval.bat` una vez y crea la clave compartida, si aún no existe. Detén esa ventana con Ctrl+C.
+3. Si tienes abiertos el cotizador o Radar en ventanas de servidor anteriores, detén ambas con Ctrl+C.
+4. Haz doble clic en `instalar_actualizaciones_servidor_gioval.bat`. Registrará una tarea de Windows y arrancará el servidor automático. También se iniciará cuando vuelvas a iniciar sesión en Windows.
+
+El supervisor consulta la rama `main` cada cinco minutos. Cuando detecta una versión nueva, detiene brevemente las dos aplicaciones, descarga el código, instala los requisitos actualizados y comprueba que los puertos 8501 y 8502 respondan. Si la versión nueva no arranca, intenta restaurar la versión anterior. No reemplaza los datos de `%LOCALAPPDATA%\\Gioval\\Datos`.
+
+Por seguridad, si detecta cambios locales sin confirmar en el repositorio, omite esa actualización para no sobrescribir archivos editados. Revisa el registro en `%LOCALAPPDATA%\\Gioval\\logs\\actualizador-servidor.log`; los registros de inicio de cada aplicación se guardan en la misma carpeta.
+
+Para desactivar la tarea automática, ejecuta `desinstalar_actualizaciones_servidor_gioval.bat`. El cierre puede tardar hasta unos 30 segundos. Después puedes iniciar las aplicaciones manualmente con `iniciar_servidor_gioval.bat` y `iniciar_radar_gioval.bat`.
+
+
 ### Importar datos ya existentes
 
 1. En tu instalación actual, abre Ajustes → Copia de seguridad → Preparar respaldo y descarga el ZIP. Conserva la instalación original por si necesitas consultar documentos antiguos.
