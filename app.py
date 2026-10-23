@@ -23,6 +23,7 @@ import historial as hs
 import lector_ia as li
 import pdf_cotizacion as pc
 import revisor as rv
+from radar_comercial import gioval_ui as gi
 
 APP_DIR = Path(os.environ.get("GIOVAL_DATA_DIR") or Path(__file__).parent).expanduser().resolve()
 E = st.session_state
@@ -384,6 +385,16 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
     display:flex; align-items:center; gap:13px; min-height:60px;
     padding:0 0 12px; border-bottom:1px solid #272A35;
 }
+.gioval-topbar-brand { display:flex; align-items:center; gap:12px; min-height:58px; }
+.gioval-topbar-brand img { width:46px; height:46px; flex:0 0 46px; }
+.gioval-topbar-brand div { display:flex; flex-direction:column; gap:2px; }
+.gioval-topbar-brand strong { color:#fff; font-size:1.3rem; letter-spacing:-.035em; }
+.gioval-topbar-brand span { color:#A9ADBA; font-size:.82rem; }
+.gioval-welcome { margin:.4rem 0 1rem; padding:1.05rem 1.2rem; border:1px solid #30354B;
+    border-left:3px solid #010ED0; border-radius:8px; background:linear-gradient(110deg,#141724,#10121A); }
+.gioval-welcome-kicker { color:#AAB0FF; font-size:.7rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+.gioval-welcome h2 { margin:.25rem 0 .4rem; color:#fff; font-size:1.45rem !important; }
+.gioval-welcome p { margin:0; color:#B8BBC7; }
 .marca-simbolo {
     position:relative; display:inline-flex; align-items:center; justify-content:center;
     flex:0 0 43px; width:43px; height:43px; border-radius:7px;
@@ -1427,6 +1438,11 @@ def selector_borradores():
         float(r.get("total") or 0) for r in registros if r.get("estado") == "Aceptada"
     )
 
+    gi.profile_names(st.session_state)
+    gi.greeting_tip(
+        st.session_state[gi.PROFILE_KEY],
+        "Los precios sugeridos salen del costo y margen guardados en el catálogo; confirma siempre el precio antes de enviar.",
+    )
     st.markdown(
         '<section class="inicio-hero">'
         '<div class="inicio-kicker">GIOVAL / ESPACIO DE TRABAJO</div>'
@@ -3038,29 +3054,19 @@ def guardar_conflicto_como_nueva():
 
 
 # ============================================================== PANTALLA
-# Identidad visual alineada con Gioval.cl: marca, rubro y configuración secundaria.
+# Barra superior de marca y controles del espacio de trabajo.
+gi.render_header(st, "Cotizador comercial", GIOVAL_REQUIRE_ACCESS,
+                 auth_key="gioval_autenticado", before_switch=persistir_borrador)
 if GIOVAL_REQUIRE_ACCESS:
-    col_marca, col_salir, col_ajustes = st.columns([5.5, 1, 1])
-else:
-    col_marca, col_ajustes = st.columns([6, 1])
-with col_marca:
-    st.markdown(
-        '<div class="marca-app">'
-        '<span class="marca-simbolo" aria-hidden="true"></span>'
-        '<div class="marca-texto">'
-        '<div class="marca-nombre">Gioval</div>'
-        '<div class="marca-descripcion">Tintas, tóners y artículos de oficina</div>'
-        f'<div class="marca-pill">{"Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Cotizador comercial"}</div>'
-        '</div></div>',
-        unsafe_allow_html=True,
-    )
-with col_ajustes:
-    carpeta, bib, hist, api_key, usar_lo = configuracion_compacta()
-if GIOVAL_REQUIRE_ACCESS:
+    col_salir, col_ajustes = st.columns([1, 1])
     with col_salir:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
             E.pop("gioval_autenticado", None)
             st.rerun()
+else:
+    col_ajustes = st.container()
+with col_ajustes:
+    carpeta, bib, hist, api_key, usar_lo = configuracion_compacta()
 
 if E.get("_conflicto_guardado"):
     st.error(
