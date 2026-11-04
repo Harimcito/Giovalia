@@ -8,3 +8,10 @@ __pycache__/
 *.py[cod]
 *.tmp
 *.log
+
+# Local quote databases and Office lock files are user data, not source files.
+cotizador.db
+radar_comercial.db
+*.db-shm
+*.db-wal
+~$*.xlsx

@@ -904,7 +904,16 @@ def crear_cotizacion_xlsx(lineas: list[dict], cliente: dict, salida, plantilla=N
         ln = lineas[i] if i < len(lineas) else None
         ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=6)
         ws.cell(r, 2, ln.get("cantidad") if ln else None)
-        ws.cell(r, 3, ln.get("descripcion") if ln else None)
+        descripcion_excel = str(ln.get("descripcion", "")) if ln else ""
+        if ln and ln.get("unidad"):
+            unidad = str(ln["unidad"]).strip()
+            if unidad and unidad.casefold() not in descripcion_excel.casefold():
+                descripcion_excel += f" · Unidad: {unidad}"
+        if ln and ln.get("codigo"):
+            codigo = str(ln["codigo"]).strip()
+            if codigo and codigo.casefold() not in descripcion_excel.casefold():
+                descripcion_excel += f" · Código: {codigo}"
+        ws.cell(r, 3, descripcion_excel or None)
         precio = ln.get("precio_neto", ln.get("unitario")) if ln else None
         ws.cell(r, 7, precio)
         ws.cell(r, 8, f'=IF(OR(B{r}="",G{r}=""),"",ROUND(B{r}*G{r},0))')
