@@ -41,455 +41,14 @@ if isinstance(_pendiente_importado, dict):
         }:
             E[_clave_widget] = _valor_widget
 
-# ------------------------------------------------------------- DISEÑO "GRAPHIFY x GIOVAL"
-ANIMAR_FONDO = False
-# La interfaz adopta el panel de trabajo oscuro de Graphify; el azul eléctrico y
-# los neutros de esta paleta siguen siendo los de Gioval.cl.
-TEMA_BASE = {
-    "base": "dark",
-    "primaryColor": "#010ED0",
-    "backgroundColor": "#0A0B10",
-    "secondaryBackgroundColor": "#151720",
-    "textColor": "#F3F4F8",
-    "font": "sans serif",
-}
-TEMA_EXTRA = {
-    "baseRadius": "small",
-    "buttonRadius": "small",
-    "borderColor": "#2A2D39",
-    "dataframeBorderColor": "#2A2D39",
-    "dataframeHeaderBackgroundColor": "#1B1E28",
-    "dataframeHeaderTextColor": "#F3F4F8",
-    "codeBackgroundColor": "#151720",
-    "codeTextColor": "#F3F4F8",
-    "linkColor": "#7781FF",
-}
-
-
-def preparar_tema() -> None:
-    """Aplica el tema oscuro y actualiza un bloque [theme] previo si ya existía."""
-    cfg = APP_DIR / ".streamlit" / "config.toml"
-    try:
-        cfg.parent.mkdir(parents=True, exist_ok=True)
-        texto_original = cfg.read_text("utf-8") if cfg.exists() else ""
-        lineas = texto_original.splitlines()
-        inicio = next((i for i, linea in enumerate(lineas) if linea.strip() == "[theme]"), None)
-        if inicio is None:
-            if lineas and lineas[-1].strip():
-                lineas.append("")
-            lineas.append("[theme]")
-            inicio = len(lineas) - 1
-        fin = next(
-            (i for i in range(inicio + 1, len(lineas))
-             if re.match(r"^\s*\[[^]]+\]\s*(?:#.*)?$", lineas[i])),
-            len(lineas),
-        )
-        bloque_tema = lineas[inicio + 1:fin]
-        for clave, valor in {**TEMA_BASE, **TEMA_EXTRA}.items():
-            patron = re.compile(rf"^\s*{re.escape(clave)}\s*=")
-            indice = next((i for i, linea in enumerate(bloque_tema) if patron.match(linea)), None)
-            nueva = f'{clave} = "{valor}"'
-            if indice is None:
-                bloque_tema.append(nueva)
-            else:
-                bloque_tema[indice] = nueva
-        lineas[inicio + 1:fin] = bloque_tema
-        texto_nuevo = "\n".join(lineas).rstrip() + "\n"
-        if texto_nuevo != texto_original:
-            cfg.write_text(texto_nuevo, "utf-8")
-    except OSError:
-        # En entornos de solo lectura, los valores de ejecución aún se aplican abajo.
-        pass
-    for clave, valor in {**TEMA_BASE, **TEMA_EXTRA}.items():
-        try:
-            st._config.set_option(f"theme.{clave}", valor)
-        except Exception:
-            pass
-
-
-preparar_tema()
-
-st.set_page_config(page_title="Gioval · Cotizador comercial", page_icon=":material/description:",
-                   layout="wide", initial_sidebar_state="collapsed")
-
-# El espacio compartido falla cerrado: nunca muestra cotizaciones si falta la clave del servidor.
-if GIOVAL_REQUIRE_ACCESS:
-    if not GIOVAL_ACCESS_PASSWORD:
-        st.error("El acceso al espacio compartido no está configurado. Contacta al administrador.")
-        st.stop()
-    if not E.get("gioval_autenticado"):
-        st.markdown("## Gioval · Biblioteca compartida")
-        st.caption("Ingresa la clave de acceso del equipo para consultar y actualizar la biblioteca central.")
-        with st.form("gioval_login_compartido"):
-            clave_ingresada = st.text_input("Clave de acceso", type="password", autocomplete="current-password")
-            entrar = st.form_submit_button("Entrar a Gioval", type="primary", width="stretch")
-        if entrar:
-            if hmac.compare_digest(clave_ingresada.encode("utf-8"), GIOVAL_ACCESS_PASSWORD.encode("utf-8")):
-                E["gioval_autenticado"] = True
-                st.rerun()
-            else:
-                st.error("La clave no es correcta.")
-        st.stop()
-
-CSS_BASE = """
-html, body, .stApp { font-size: 16px; line-height: 1.5; }
-.block-container { max-width: 1580px; padding: 4rem 1.65rem 3rem !important; }
-h1 { font-size: 2rem !important; line-height: 1.18; margin-bottom: .7rem; }
-h2 { font-size: 1.45rem !important; line-height: 1.3; }
-h3 { font-size: 1.15rem !important; line-height: 1.35; }
-p, li { line-height: 1.52; }
-[data-testid="stWidgetLabel"] p { font-size: .93rem !important; font-weight: 600; line-height: 1.4; }
-.stCaption, [data-testid="stCaptionContainer"] { font-size: .84rem; line-height: 1.48; }
-.stButton > button, .stDownloadButton > button, .stLinkButton > a {
-    font-size: .94rem; font-weight: 650; padding: .58rem .9rem; border-radius: 6px;
-    min-height: 2.65rem; transition: background-color .15s ease, border-color .15s ease, transform .15s ease;
-}
-.stAppDeployButton, [data-testid="stAppDeployButton"] { display: none; }
-[data-testid="stAlert"] { border-radius: 7px; font-size: .94rem; }
-[data-testid="stAlert"] p { line-height: 1.5; }
-[data-baseweb="input"] > div, [data-baseweb="textarea"], [data-baseweb="select"] > div { border-radius: 6px; }
-[data-baseweb="input"] input, [data-baseweb="textarea"] textarea, [data-baseweb="select"] { font-size: .96rem !important; }
-[data-baseweb="input"] input { min-height: 2.6rem; }
-[data-baseweb="textarea"] textarea { line-height: 1.5; }
-[data-testid="stDataFrame"], [data-testid="stDataEditor"] { border-radius: 7px; }
-[data-testid="stDataEditor"] { font-size: .94rem; }
-[data-testid="stExpander"] summary { min-height: 2.75rem; font-weight: 600; }
-button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
-    outline: 2px solid #010ED0 !important; outline-offset: 2px !important;
-}
-.pasos { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0 12px; }
-.paso { padding: 8px 12px; border-radius: 6px; font-size: .9rem; }
-.paso b { margin-right: 7px; }
-[data-testid="stRadio"] div[role="radiogroup"] { gap: .45rem; flex-wrap: wrap; }
-@media (max-width: 800px) {
-    .block-container { padding-left: .9rem; padding-right: .9rem; padding-top: .8rem; }
-    h1 { font-size: 1.72rem !important; }
-    .paso { padding: 7px 9px; font-size: .84rem; }
-    .st-key-app-navigation [data-testid="stRadio"] label { padding: .55rem .65rem !important; }
-}
-"""
-
-CSS_TINTA = """
-:root {
-    --gioval-blue: #010ED0;
-    --gioval-blue-soft: rgba(1,14,208,.14);
-    --ui-bg: #0A0B10;
-    --ui-panel: #11131B;
-    --ui-panel-2: #171923;
-    --ui-panel-3: #1C1F2A;
-    --ui-line: #292C38;
-    --ui-text: #F3F4F8;
-    --ui-muted: #9A9EAC;
-    --ui-dim: #717686;
-}
-.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
-    background: var(--ui-bg) !important;
-    color: var(--ui-text);
-}
-.stApp {
-    background-image:
-        radial-gradient(ellipse at 8% 0%, rgba(1,14,208,.10), transparent 34rem),
-        radial-gradient(ellipse at 96% 4%, rgba(1,14,208,.07), transparent 28rem);
-}
-[data-testid="stHeader"] { background: rgba(10,11,16,.96); }
-[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display:none !important; }
-.block-container { color:var(--ui-text); }
-h1,h2,h3,h4,h5 { color:var(--ui-text); letter-spacing:-.018em; }
-p, li, label, [data-testid="stMarkdownContainer"] { color:inherit; }
-a, [data-testid="stMarkdownContainer"] a { color:#7781FF; }
-.stCaption, [data-testid="stCaptionContainer"], [data-testid="stWidgetLabel"] p { color:var(--ui-muted) !important; }
-hr, [data-testid="stDivider"] { border-color:var(--ui-line) !important; }
-[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--ui-line); }
-[data-testid="stExpander"] {
-    background:var(--ui-panel); border:1px solid var(--ui-line); border-radius:7px;
-}
-[data-testid="stExpander"] summary { color:var(--ui-text); }
-[data-testid="stExpander"] summary:hover { color:#AEB4FF; }
-.stButton > button, .stDownloadButton > button, .stLinkButton > a {
-    border-radius:6px; font-weight:650;
-}
-button[kind="primary"], [data-testid="stBaseButton-primary"] {
-    background:var(--gioval-blue); border:1px solid var(--gioval-blue); color:#FFFFFF; box-shadow:none;
-}
-button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
-    background:#1724EA; border-color:#4650FF; color:#FFFFFF; transform:translateY(-1px);
-    box-shadow:0 0 0 3px rgba(1,14,208,.16);
-}
-button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled { opacity:.42; box-shadow:none; transform:none; }
-button[kind="secondary"], [data-testid="stBaseButton-secondary"] {
-    background:#171923; border:1px solid #323542; color:#E7E8EE; box-shadow:none;
-}
-button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
-    background:#202331; border-color:var(--gioval-blue); color:#FFFFFF;
-}
-[data-testid="stPopover"], .st-key-settings-popover button { border-radius:6px; }
-.st-key-settings-popover button { min-height:2.5rem; box-shadow:none; background:#151720; border-color:#343746; color:#F3F4F8; }
-[data-testid="stPopoverBody"] {
-    background:#11131B !important; color:#F3F4F8 !important;
-    border:1px solid #303341; box-shadow:0 18px 48px rgba(0,0,0,.44);
-}
-[data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"], [data-testid="stPopoverBody"] p { color:#D4D6DE; }
-[data-baseweb="input"] > div, [data-baseweb="textarea"], [data-baseweb="select"] > div {
-    background:#0D0F16 !important; border-color:#353847 !important; border-radius:6px;
-}
-[data-baseweb="input"] input, [data-baseweb="textarea"] textarea, [data-baseweb="select"] input {
-    color:#F3F4F8 !important; caret-color:#FFFFFF;
-}
-[data-baseweb="input"] > div:focus-within, [data-baseweb="textarea"]:focus-within, [data-baseweb="select"] > div:focus-within {
-    border-color:var(--gioval-blue) !important; box-shadow:0 0 0 1px var(--gioval-blue) !important;
-}
-[data-baseweb="select"] svg { color:#B4B7C4 !important; }
-[data-baseweb="popover"], [role="listbox"], [data-baseweb="menu"] {
-    background:#171923 !important; color:#F3F4F8 !important; border-color:#343746 !important;
-}
-[data-baseweb="menu"] li:hover, [role="option"]:hover { background:#22253A !important; }
-[data-testid="stFileUploader"] section {
-    background:#11131B; border:1px dashed #414557; border-radius:7px;
-}
-[data-testid="stFileUploader"] small, [data-testid="stFileUploader"] span { color:#A9ADBA; }
-[data-testid="stCheckbox"] label, [data-testid="stRadio"] label { color:#D9DBE4; }
-[data-testid="stRadio"] div[role="radiogroup"] label {
-    background:#141620; border:1px solid #303341; border-radius:6px; color:#D9DBE4;
-}
-[data-testid="stRadio"] div[role="radiogroup"] label:has([aria-checked="true"]) {
-    background:#11142A; border-color:var(--gioval-blue); color:#FFFFFF;
-}
-[data-testid="stTabs"] [data-baseweb="tab-list"] {
-    gap:.25rem; border-bottom:1px solid var(--ui-line); background:transparent;
-}
-[data-testid="stTabs"] button[role="tab"] {
-    font-size:.94rem; font-weight:600; padding:.65rem .95rem; border-radius:5px 5px 0 0; color:#979BAA;
-}
-[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-    color:#FFFFFF; border-bottom-color:var(--gioval-blue); background:rgba(1,14,208,.09);
-}
-/* Barras de progreso: mantener la paleta oscura sin alterar los botones primarios. */
-[data-testid="stProgress"] {
-    background:transparent !important;
-}
-[data-testid="stProgress"] > div:not([role="progressbar"]):not([data-baseweb="progress-bar"]):not([data-testid="stProgressBar"]) {
-    background:transparent !important;
-}
-[data-testid="stProgress"] [role="progressbar"],
-[data-testid="stProgress"] [data-baseweb="progress-bar"],
-[data-testid="stProgress"] [data-testid="stProgressBar"] {
-    background:#20232E !important;
-    border-radius:999px !important;
-}
-[data-testid="stProgress"] [role="progressbar"] > div,
-[data-testid="stProgress"] [data-baseweb="progress-bar"] > div,
-[data-testid="stProgress"] [data-testid="stProgressBar"] > div {
-    background:#3A3E49 !important;
-    border-radius:999px !important;
-}
-[data-testid="stProgress"] [data-testid="stMarkdownContainer"],
-[data-testid="stProgress"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stProgress"] p {
-    background:transparent !important;
-    color:#989DAC !important;
-}
-[data-testid="stMetric"] {
-    background:transparent; border:0 !important; border-top:1px solid #353946 !important;
-    border-radius:4px; padding:10px 11px; box-shadow:none;
-}
-.st-key-resumen-totales {
-    margin:.55rem 0 1rem; padding:.35rem .6rem .45rem;
-    background:#101219; border:1px solid #292C38; border-radius:8px;
-}
-.st-key-resumen-totales [data-testid="stMetric"] {
-    border-top:0 !important; padding:.35rem .55rem;
-}
-.st-key-resumen-totales [data-testid="stMetricLabel"] { font-size:.78rem !important; }
-.st-key-resumen-totales [data-testid="stMetricValue"] { font-size:1.32rem !important; }
-.progress-label {
-    display:inline-flex; align-items:center; margin:.35rem 0 .45rem;
-    color:#C4C7D1; background:#151720; border:1px solid #30333D;
-    border-radius:5px; padding:.32rem .65rem; font-size:.83rem; font-weight:650;
-}
-.quote-save-status {
-    color:#989DAC; font-size:.82rem; margin:.2rem 0 .6rem;
-}
-[data-testid="stMetricLabel"] { color:var(--ui-muted) !important; font-size:.82rem; }
-[data-testid="stMetricValue"] { color:#F5F6FA !important; font-weight:750; }
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-testid="stMetric"]) {
-    background:linear-gradient(145deg,#13151E,#101219); border:1px solid var(--ui-line);
-    border-radius:7px; box-shadow:0 5px 16px rgba(0,0,0,.12);
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has(.tarjeta-marca):not(:has([data-testid="stVerticalBlockBorderWrapper"] .tarjeta-marca)) {
-    background:#11131B; border:1px solid #292C38; border-radius:7px; box-shadow:0 4px 18px rgba(0,0,0,.16);
-}
-[data-testid="stDataFrame"], [data-testid="stDataEditor"], [data-testid="stTable"] {
-    background:var(--ui-panel) !important;
-    color:var(--ui-text) !important;
-    border:1px solid var(--ui-line) !important;
-    border-radius:6px;
-    overflow:hidden;
-}
-[data-testid="stDataEditor"] > div, [data-testid="stDataFrame"] > div {
-    background:var(--ui-panel) !important;
-}
-[data-testid="stDataEditor"] canvas, [data-testid="stDataFrame"] canvas {
-    background-color:var(--ui-panel) !important;
-    color-scheme:dark;
-}
-[data-testid="stDataEditor"] [role="grid"], [data-testid="stDataFrame"] [role="grid"] {
-    background:var(--ui-panel) !important;
-    color:var(--ui-text) !important;
-}
-[data-testid="stAlert"] { background:#131520; border:1px solid #303341; border-radius:6px; color:#E5E6ED; }
-[data-testid="stAlert"] p { color:inherit; }
-[data-testid="stAlert"] [data-testid="stMarkdownContainer"] { color:inherit; }
-.st-key-app-navigation {
-    margin:.65rem 0 1.35rem; padding:.22rem .35rem 0;
-    border:1px solid #242733; border-bottom:1px solid #2F3241;
-    border-radius:7px 7px 0 0; background:#0E1017;
-}
-.st-key-app-navigation [data-testid="stRadio"] label [data-baseweb="radio"] {
-    display:none !important;
-}
-.st-key-app-navigation [data-testid="stRadio"] label {
-    cursor:pointer;
-}
-.st-key-app-navigation [data-testid="stRadio"] label:has([aria-checked="true"]) {
-    box-shadow:inset 0 -1px 0 rgba(1,14,208,.14);
-}
-.st-key-app-navigation [data-testid="stRadio"] div[role="radiogroup"] {
-    gap:.18rem; border:0; background:transparent; align-items:stretch;
-}
-.st-key-app-navigation [data-testid="stRadio"] label {
-    border:0 !important; border-bottom:2px solid transparent !important;
-    border-radius:4px 4px 0 0 !important; background:transparent !important;
-    padding:.67rem 1rem .58rem !important; margin:0 !important;
-    color:#999EAE !important; font-weight:600; min-height:2.6rem;
-}
-.st-key-app-navigation [data-testid="stRadio"] label:hover {
-    background:#171923 !important; color:#F3F4F8 !important;
-}
-.st-key-app-navigation [data-testid="stRadio"] label:has([aria-checked="true"]) {
-    color:#FFFFFF !important; border-bottom-color:#646A79 !important;
-    background:rgba(255,255,255,.035) !important; font-weight:750;
-}
-.st-key-app-navigation [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child { display:none !important; }
-.pasos { display:flex; gap:7px; flex-wrap:wrap; margin:8px 0 12px; }
-.paso {
-    display:inline-flex; align-items:center; padding:8px 12px; border-radius:5px;
-    border:1px solid #2A2D39; background:#12141C; color:#989DAC; font-size:.89rem;
-}
-.paso b { margin-right:7px; }
-.paso.activo {
-    border:1px solid #414553; background:#191C25; color:#FFFFFF;
-    font-weight:750; box-shadow:inset 3px 0 0 #6A7080;
-}
-.paso.hecho { border-color:#262A36; background:#10121A; color:#C7C9D3; }
-.marca-app {
-    display:flex; align-items:center; gap:13px; min-height:60px;
-    padding:0 0 12px; border-bottom:1px solid #272A35;
-}
-.marca-simbolo {
-    position:relative; display:inline-flex; align-items:center; justify-content:center;
-    flex:0 0 43px; width:43px; height:43px; border-radius:7px;
-    background:#FFFFFF; border:1px solid #FFFFFF; box-shadow:none;
-}
-.marca-simbolo::before {
-    content:"Gv"; color:var(--gioval-blue); font-size:1.55rem; font-weight:900; letter-spacing:-.12em;
-    text-shadow:0 0 18px rgba(1,14,208,.55); transform:translateX(-1px);
-}
-.marca-simbolo::after {
-    content:""; position:absolute; width:5px; height:5px; border-radius:50%;
-    background:var(--gioval-blue); right:6px; top:6px; box-shadow:0 0 9px rgba(1,14,208,.7);
-}
-.marca-texto { display:flex; flex-direction:column; gap:3px; }
-.marca-nombre { color:#FFFFFF !important; font-size:1.35rem; font-weight:800; letter-spacing:-.04em; line-height:1.05; }
-.marca-descripcion { color:#A9ADBA !important; font-size:.83rem; font-weight:500; line-height:1.3; }
-.marca-pill {
-    display:inline-flex; width:fit-content; align-items:center; margin-top:4px;
-    padding:3px 8px; border:1px solid rgba(1,14,208,.58); border-radius:4px;
-    background:rgba(1,14,208,.13); color:#B9BEFF; font-size:.70rem; font-weight:700; letter-spacing:.035em;
-}
-.inicio-hero {
-    position:relative; overflow:hidden; background:#10121A;
-    border:1px solid #292C38; border-left:3px solid var(--gioval-blue);
-    border-radius:7px; padding:27px 29px; margin:6px 0 19px;
-    box-shadow:0 12px 30px rgba(0,0,0,.16);
-    background-image:
-        radial-gradient(ellipse at 83% 30%,rgba(1,14,208,.17),transparent 21rem),
-        linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),
-        linear-gradient(90deg,rgba(255,255,255,.026) 1px,transparent 1px);
-    background-size:auto,28px 28px,28px 28px;
-}
-.inicio-hero::before {
-    content:""; position:absolute; width:310px; height:225px; right:0; top:0; opacity:.9; pointer-events:none;
-    background-image:
-        linear-gradient(28deg,transparent 49.7%,rgba(1,14,208,.24) 49.9%,rgba(1,14,208,.24) 50.1%,transparent 50.3%),
-        linear-gradient(145deg,transparent 49.7%,rgba(125,135,255,.18) 49.9%,rgba(125,135,255,.18) 50.1%,transparent 50.3%),
-        radial-gradient(circle at 20% 35%,#010ED0 0 3px,transparent 4px),
-        radial-gradient(circle at 49% 57%,#6571FF 0 3px,transparent 4px),
-        radial-gradient(circle at 76% 25%,#010ED0 0 4px,transparent 5px),
-        radial-gradient(circle at 82% 80%,#414BFF 0 3px,transparent 4px),
-        radial-gradient(circle at 35% 83%,#5260FF 0 2px,transparent 3px);
-    mask-image:linear-gradient(to left,#000 10%,transparent 100%);
-}
-.inicio-hero::after {
-    content:""; position:absolute; width:165px; height:165px; right:-66px; bottom:-93px;
-    border:1px solid rgba(1,14,208,.45); border-radius:50%;
-    box-shadow:0 0 0 21px rgba(1,14,208,.06),0 0 0 43px rgba(1,14,208,.035); pointer-events:none;
-}
-.inicio-kicker { color:#AAB0FF; font-size:.72rem; font-weight:800; letter-spacing:.14em; }
-.inicio-hero h2 { margin:7px 0 9px; color:#FFFFFF; font-size:1.75rem !important; line-height:1.2; position:relative; z-index:1; }
-.inicio-hero p { margin:0; color:#A5A9B6; font-size:.96rem; line-height:1.6; max-width:750px; position:relative; z-index:1; }
-.inicio-badges { display:flex; flex-wrap:wrap; gap:7px; margin-top:16px; position:relative; z-index:1; }
-.inicio-badge {
-    display:inline-flex; align-items:center; border:1px solid #30334B;
-    background:rgba(1,14,208,.10); color:#C0C5FF; border-radius:4px;
-    padding:4px 9px; font-size:.77rem; font-weight:600;
-}
-.inicio-section-label { color:#868B9A; font-size:.7rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
-.st-key-settings-popover {
-    display:flex;
-    justify-content:flex-end;
-    position:relative;
-    z-index:5;
-    padding-top:2px;
-}
-.st-key-settings-popover button {
-    min-height:2.7rem;
-    padding:.62rem 1.05rem;
-    background:#151720 !important;
-    color:#F3F4F8 !important;
-    border:1px solid #41465A !important;
-    border-radius:6px;
-    box-shadow:0 2px 8px rgba(0,0,0,.18);
-}
-.st-key-settings-popover button:hover {
-    background:#1B1E2A !important;
-    border-color:var(--gioval-blue) !important;
-    color:#FFFFFF !important;
-}
-@media (max-width:800px) {
-    .block-container {
-        padding-left:.85rem !important;
-        padding-right:.85rem !important;
-        padding-top:4.25rem !important;
-    }
-    .marca-app { gap:10px; }
-    .marca-simbolo { flex-basis:39px; width:39px; height:39px; }
-    .marca-nombre { font-size:1.22rem; }
-    .marca-descripcion { font-size:.78rem; }
-    .inicio-hero { padding:21px 19px; }
-    .inicio-hero h2 { font-size:1.45rem !important; max-width:95%; }
-    .inicio-hero::before { opacity:.42; right:-110px; }
-    .st-key-app-navigation { padding:.15rem .15rem 0; }
-    .st-key-app-navigation [data-testid="stRadio"] label { padding:.55rem .6rem !important; }
-}
-"""
-CSS_ANIMACION = """
-@keyframes tinta { 0% { background-position: 0% 0%, 100% 0%, 60% 100%, 0% 100%, 0 0; }
-                   100% { background-position: 18% 12%, 82% 18%, 70% 82%, 12% 88%, 0 0; } }
-.stApp { animation: tinta 80s ease-in-out infinite alternate; }
-@media (prefers-reduced-motion: reduce) { .stApp { animation: none; } }
-"""
-st.markdown("<style>" + CSS_BASE + CSS_TINTA + (CSS_ANIMACION if ANIMAR_FONDO else "")
-            + "</style>", unsafe_allow_html=True)
+# ------------------------------------------------------------- IDENTIDAD VISUAL
+# La paleta común se define en .streamlit/config.toml para que local y despliegue coincidan.
+st.set_page_config(
+    page_title="Gioval · Cotizador comercial",
+    page_icon=":material/description:",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 
 def crear_respaldo_biblioteca(carpeta: Path) -> bytes:
@@ -650,10 +209,12 @@ ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
 
 
 # ============================================================== FUNCIONES COMUNES
-VISTAS = ["Nueva cotización", "Historial", "Catálogo"]
+VISTAS = ["Cotizar", "Historial", "Biblioteca"]
 OPCIONES_PRECIO = ["Incluyen IVA (lo que paga el cliente)", "Son netos (sin IVA)"]
-if E.get("vista") == "Mis productos":
-    E["vista"] = "Catálogo"
+if E.get("vista") in {"Mis productos", "Catálogo"}:
+    E["vista"] = VISTAS[2]
+elif E.get("vista") in {"Nueva cotización", "Inicio"}:
+    E["vista"] = VISTAS[0]
 E.setdefault("vista", VISTAS[0])
 
 
@@ -697,22 +258,18 @@ def ir_a(paso: int):
 
 def mostrar_pasos(actual: int):
     nombres = ["Pedido", "Productos", "Fotos y fichas", "PDF"]
-    piezas = []
-    for i, n in enumerate(nombres, 1):
-        clase = "hecho" if i < actual else "activo" if i == actual else ""
-        piezas.append(f'<div class="paso {clase}"><b>{"✓" if i < actual else i}</b>{n}</div>')
-    st.markdown('<div class="pasos">' + "".join(piezas) + "</div>", unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="progress-label">Etapa {actual} de 4 · {nombres[actual - 1]}</div>',
-        unsafe_allow_html=True,
-    )
-    st.progress((actual - 1) / 3)
+    with st.container(horizontal=True, vertical_alignment="center"):
+        for i, nombre in enumerate(nombres, 1):
+            if i < actual:
+                st.badge(f"{i}. {nombre}", icon=":material/check_circle:", color="green")
+            elif i == actual:
+                st.badge(f"{i}. {nombre}", icon=":material/edit_note:", color="blue")
+            else:
+                st.badge(f"{i}. {nombre}", icon=":material/radio_button_unchecked:", color="gray")
+    st.progress((actual - 1) / 3, text=f"Etapa {actual} de 4 · {nombres[actual - 1]}")
     if E.get("_ultima_guarda"):
         etiqueta = "biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "este computador"
-        st.markdown(
-            f'<div class="quote-save-status">✓ Guardado en {etiqueta} · {E["_ultima_guarda"]}</div>',
-            unsafe_allow_html=True,
-        )
+        st.caption(f"Guardado en {etiqueta} · {E['_ultima_guarda']}")
 
 
 def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
@@ -1114,7 +671,7 @@ def totales_actuales() -> dict:
 def mostrar_totales():
     """Muestra neto, IVA y total en un panel consistente en cada etapa."""
     tot = totales_actuales()
-    with st.container(key="resumen-totales"):
+    with st.container(border=True):
         a, b, c = st.columns(3)
         a.metric("Neto", rv.clp(tot["neto"]))
         b.metric("IVA (19 %)", rv.clp(tot["iva"]))
@@ -1669,92 +1226,76 @@ def selector_borradores():
         float(r.get("total") or 0) for r in registros if r.get("estado") == "Aceptada"
     )
 
-    st.markdown(
-        '<section class="inicio-hero">'
-        '<div class="inicio-kicker">GIOVAL / ESPACIO DE TRABAJO</div>'
-        '<h2>Tu jornada comercial empieza aquí.</h2>'
-        '<p>Prepara cotizaciones, consulta precios y completa la biblioteca de productos '
-        'desde un solo lugar.</p>'
-        '</section>',
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        titulo, accion = st.columns([3, 1], vertical_alignment="center")
+        with titulo:
+            st.caption("GIOVAL · COTIZADOR COMERCIAL")
+            st.title("Cotiza sin compromiso")
+            st.caption("Prepara una propuesta clara con tus productos, precios y fotos guardados en la biblioteca.")
+        with accion:
+            st.button(
+                "Nueva cotización", icon=":material/add:", type="primary",
+                width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
+            )
 
-    a, b, c_btn = st.columns([1.5, 1, 1])
-    a.button(
-        "Nueva cotización", icon=":material/add_circle:", type="primary",
-        width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
-    )
-    b.button(
-        "Historial", icon=":material/history:", width="stretch",
-        on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_abrir_historial",
-    )
-    c_btn.button(
-        "Catálogo", icon=":material/inventory_2:", width="stretch",
-        on_click=lambda: E.update(vista=VISTAS[2]), key="inicio_abrir_catalogo",
-    )
-
-    st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Cotizaciones", len(registros))
-    m2.metric("Borradores", len(borradores))
-    m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas))
-    m4.metric("Productos", len(bib.indice))
+    m1.metric("Cotizaciones", len(registros), border=True)
+    m2.metric("Borradores activos", len(borradores), border=True)
+    m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas), border=True)
+    m4.metric("Productos en biblioteca", len(bib.indice), border=True)
 
     izq, der = st.columns([1.15, 1])
     with izq:
-        st.subheader("Retomar trabajo")
-        if borradores:
-            opciones = {
-                (
-                    f"{r['numero']} · {fecha_corta(r.get('fecha') or '')}"
-                    if GIOVAL_REQUIRE_ACCESS
-                    else f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}"
-                ): r["id"]
-                for r in borradores
-            }
-            elegido = st.selectbox(
-                "Borradores pendientes", list(opciones),
-                key="borrador_a_retomar",
-                label_visibility="collapsed",
-            )
-            c1, c2 = st.columns(2)
-            c1.button(
-                "Continuar borrador", icon=":material/play_arrow:", type="primary",
-                width="stretch", on_click=restaurar_borrador, args=(opciones[elegido],),
-                key="inicio_retomar_borrador",
-            )
-            c2.button(
-                "Nuevo borrador", icon=":material/add:", width="stretch",
-                on_click=iniciar_borrador, key="inicio_otro_borrador",
-            )
-        else:
-            st.info("No hay borradores pendientes. Crea una cotización para comenzar.")
-            st.button(
-                "Crear cotización", icon=":material/add_circle:", type="primary",
-                width="stretch", on_click=iniciar_borrador, key="inicio_comenzar_ahora",
-            )
+        with st.container(border=True):
+            st.subheader("Retomar un borrador")
+            if borradores:
+                opciones = {
+                    (
+                        f"{r['numero']} · {fecha_corta(r.get('fecha') or '')}"
+                        if GIOVAL_REQUIRE_ACCESS
+                        else f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}"
+                    ): r["id"]
+                    for r in borradores
+                }
+                elegido = st.selectbox(
+                    "Borradores pendientes", list(opciones),
+                    key="borrador_a_retomar", label_visibility="collapsed",
+                )
+                st.button(
+                    "Continuar cotización", icon=":material/arrow_forward:", type="primary",
+                    width="stretch", on_click=restaurar_borrador, args=(opciones[elegido],),
+                    key="inicio_retomar_borrador",
+                )
+            else:
+                st.caption("No tienes borradores pendientes.")
+                st.button(
+                    "Crear una cotización", icon=":material/add:", type="primary",
+                    width="stretch", on_click=iniciar_borrador, key="inicio_comenzar_ahora",
+                )
     with der:
-        st.subheader("Cotizaciones recientes")
-        if registros:
-            recientes = registros[:5]
-            tabla = {
-                "N°": [r.get("numero", "") for r in recientes],
-                "Fecha": [fecha_corta(r.get("fecha") or "") for r in recientes],
-                "Total": [r.get("total") or 0 for r in recientes],
-                "Estado": [r.get("estado") or "Borrador" for r in recientes],
-            }
-            if not GIOVAL_REQUIRE_ACCESS:
-                tabla["Cliente"] = [r.get("cliente") or "Sin cliente" for r in recientes]
-            st.dataframe(
-                pd.DataFrame(tabla), hide_index=True, width="stretch",
-                column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
-            )
-            st.button(
-                "Ver todas las cotizaciones →", width="stretch",
-                on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_ver_todas",
-            )
-        else:
-            st.caption("Las cotizaciones que prepares aparecerán aquí.")
+        with st.container(border=True):
+            st.subheader("Actividad reciente")
+            if registros:
+                recientes = registros[:5]
+                tabla = {
+                    "N°": [r.get("numero", "") for r in recientes],
+                    "Fecha": [fecha_corta(r.get("fecha") or "") for r in recientes],
+                    "Total": [r.get("total") or 0 for r in recientes],
+                    "Estado": [r.get("estado") or "Borrador" for r in recientes],
+                }
+                if not GIOVAL_REQUIRE_ACCESS:
+                    tabla["Cliente"] = [r.get("cliente") or "Sin cliente" for r in recientes]
+                st.dataframe(
+                    pd.DataFrame(tabla), hide_index=True, width="stretch",
+                    column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
+                    alt="Cotizaciones recientes",
+                )
+                st.button(
+                    "Ver todas las cotizaciones", icon=":material/arrow_forward:",
+                    width="stretch", on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_ver_todas",
+                )
+            else:
+                st.caption("Las cotizaciones que prepares aparecerán aquí.")
 
 
 # ============================================================== PASO 1: PEDIDO
@@ -1815,11 +1356,35 @@ def _mostrar_detalle_mercado_publico(detalle: dict):
 
 
 def pedido_ui():
-    st.write("El pedido se conserva como borrador mientras trabajas. Puedes volver a abrirlo si la aplicación se interrumpe.")
-    con_iva = st.radio("Los precios que voy a escribir…", OPCIONES_PRECIO, horizontal=True,
-                       key="precios_modo") == OPCIONES_PRECIO[0]
+    st.caption("El borrador se guarda mientras trabajas. Puedes volver a él desde el inicio.")
+    E.setdefault("precios_modo", OPCIONES_PRECIO[0])
+    E.setdefault("fuente_pedido", "Lo escribo o pego aquí")
+    con_iva = st.segmented_control(
+        "Los precios que ingresarás",
+        OPCIONES_PRECIO,
+        key="precios_modo",
+        format_func=lambda valor: "Con IVA" if valor == OPCIONES_PRECIO[0] else "Valores netos",
+        required=True,
+        width="content",
+        persist_state="session",
+    ) == OPCIONES_PRECIO[0]
     FUENTES = ["Lo escribo o pego aquí", "Subir Excel o CSV", "Subir PDF o foto", "Mercado Público"]
-    fuente = st.radio("¿Cómo me das el pedido?", FUENTES, horizontal=True, key="fuente_pedido")
+    etiqueta_fuente = {
+        FUENTES[0]: ":material/edit_note: Texto",
+        FUENTES[1]: ":material/table_view: Excel o CSV",
+        FUENTES[2]: ":material/description: PDF o foto",
+        FUENTES[3]: ":material/account_balance: Mercado Público",
+    }
+    fuente = st.segmented_control(
+        "Origen del pedido",
+        FUENTES,
+        key="fuente_pedido",
+        format_func=lambda valor: etiqueta_fuente[valor],
+        required=True,
+        width="stretch",
+        wrap=True,
+        persist_state="session",
+    )
     E["fuente_orden"] = fuente
     texto = st.text_area(
         "Escribe un producto por línea, con su cantidad adelante",
@@ -2116,14 +1681,29 @@ def cotizacion_ui():
 
 
 def paso_1():
-    st.header("1. ¿Qué tienes?")
+    st.title("Prepara tu cotización", icon=":material/receipt_long:")
+    st.caption("Inicia con un pedido, una solicitud de Mercado Público o una cotización en Excel.")
     if not api_key:
-        st.info("Con la clave de OpenAI (en Ajustes, arriba a la derecha) entiendo mucho mejor los "
-                "productos y puedo leer pedidos en PDF o foto.")
-    tab_pedido, tab_cot = st.tabs(["Tengo un pedido", "Ya tengo la cotización hecha"])
-    with tab_pedido:
+        st.info(
+            "Configura la clave de OpenAI en Ajustes para leer pedidos en PDF o imagen y mejorar la identificación de productos.",
+            icon=":material/description:",
+        )
+    E.setdefault("tipo_entrada_cotizacion", "Pedido nuevo")
+    opcion_inicio = st.segmented_control(
+        "Punto de partida",
+        ["Pedido nuevo", "Cotización en Excel"],
+        key="tipo_entrada_cotizacion",
+        format_func=lambda valor: (
+            ":material/playlist_add: Pedido nuevo"
+            if valor == "Pedido nuevo" else ":material/description: Cotización en Excel"
+        ),
+        required=True,
+        width="stretch",
+        persist_state="session",
+    )
+    if opcion_inicio == "Pedido nuevo":
         pedido_ui()
-    with tab_cot:
+    else:
         cotizacion_ui()
 
 
@@ -2201,8 +1781,10 @@ def revisar_asociaciones_catalogo():
         return
 
     st.warning(
-        f"{len(pendientes)} producto(s) no tienen una asociación segura con el catálogo. "
-        "Vincúlalos para recuperar las fotos y los precios guardados."
+        f"{len(pendientes)} producto(s) aún no tienen un vínculo seguro. "
+        "Asócialos con la biblioteca para recuperar sus precios y archivos guardados.",
+        title="Revisar coincidencias de productos",
+        icon=":material/link_off:",
     )
     productos = {
         f"{clave} · {_texto_seguro(ficha.get('nombre') or clave)}": clave
@@ -2212,7 +1794,8 @@ def revisar_asociaciones_catalogo():
     if not productos:
         return
     opciones = ["Dejar pendiente"] + list(productos)
-    with st.expander("Asociar productos a la biblioteca", expanded=False):
+    with st.expander("Vincular con productos guardados", icon=":material/link:", expanded=True):
+        st.caption("Elige el producto que corresponde a cada descripción del pedido.")
         for indice, descripcion in enumerate(pendientes):
             normalizada = ct.normalizar(descripcion)
             c_desc, c_producto, c_accion = st.columns([2.2, 3, 1])
@@ -2261,11 +1844,28 @@ def revisar_asociaciones_catalogo():
 
 
 def paso_2():
-    st.header("2. Revisa tus productos y precios")
-    st.write("Puedes agregar, quitar o modificar cantidades, descripciones, códigos y precios aquí. "
-             "Lo que cambies se conserva al avanzar y se usa al crear el PDF.")
+    st.title("Productos y precios", icon=":material/inventory_2:")
+    st.caption("Revisa la descripción, vinculación con biblioteca, cantidades y precios antes de continuar.")
+    lineas = [ln for ln in E.get("lineas", []) if ln.get("es_producto", True)]
+    sin_vinculo = productos_pendientes_de_asociar(lineas)
+    vinculados = sum(bool(_texto_seguro(ln.get("clave_auto"))) for ln in lineas)
+    precio_pendiente = sum(
+        _esta_marcado(ln.get("incluir"), True)
+        and ln.get("unitario") is None and ln.get("precio_neto") is None
+        for ln in lineas
+    )
+    indicadores = st.columns(4)
+    indicadores[0].metric("Productos del pedido", len(lineas), border=True)
+    indicadores[1].metric("Vinculados a biblioteca", vinculados, border=True)
+    indicadores[2].metric("Sin vínculo", len(sin_vinculo), border=True)
+    indicadores[3].metric("Precio por completar", precio_pendiente, border=True)
+    if lineas and not sin_vinculo:
+        st.caption("Los vínculos guardados permiten recuperar los precios, fotos y fichas de cada producto.")
     if not api_key:
-        st.info("Con la clave de OpenAI puedo deducir mejor la marca, el modelo y el código.")
+        st.info(
+            "La clave de OpenAI mejora la identificación de marca, modelo y código.",
+            icon=":material/description:",
+        )
 
     agregar_desde_catalogo()
     editor_productos()
@@ -2363,7 +1963,6 @@ def tarjeta(clave: str, desc: str):
     else:
         estado_ficha = "No requerida" if ficha_no_requerida else "Falta"
     with st.container(border=True):
-        st.markdown('<span class="tarjeta-marca"></span>', unsafe_allow_html=True)
         c1, c2 = st.columns([1, 3])
         with c1:
             if foto:
@@ -2374,12 +1973,19 @@ def tarjeta(clave: str, desc: str):
             else:
                 st.markdown(" \n*Sin foto*")
         with c2:
-            st.markdown(f"**{desc}**")
+            st.subheader(desc)
             st.caption(f"Código: {clave}")
-            st.markdown(
-                f"**Foto:** {'Disponible' if foto else 'Falta'} &nbsp; · &nbsp; "
-                f"**Ficha técnica:** {estado_ficha}"
-            )
+            with st.container(horizontal=True):
+                st.badge(
+                    "Foto disponible" if foto else "Falta foto",
+                    icon=":material/image:" if foto else ":material/image_not_supported:",
+                    color="green" if foto else "orange",
+                )
+                st.badge(
+                    f"Ficha: {estado_ficha}",
+                    icon=":material/description:",
+                    color="green" if ficha or ficha_no_requerida else "orange",
+                )
             nueva_no_requerida = st.checkbox(
                 "Este producto no requiere ficha técnica",
                 value=ficha_no_requerida,
@@ -2465,7 +2071,7 @@ def tarjeta(clave: str, desc: str):
 
 
 def paso_3():
-    st.header("3. Fotos y fichas técnicas")
+    st.title("Fotos y fichas técnicas", icon=":material/photo_library:")
     st.caption("Puedes seguir corrigiendo cantidades y precios aquí. Los cambios se guardan en el borrador.")
     editor_productos()
     boton_actualizar_totales()
@@ -2490,12 +2096,10 @@ def paso_3():
         return bool(foto and (ficha or no_requerida))
 
     listos = sum(1 for clave in claves if archivos_necesarios(clave))
-    st.markdown(
-        f'<div class="progress-label">{listos} de {len(claves)} productos completos '
-        '(foto y ficha técnica, o ficha marcada como no requerida)</div>',
-        unsafe_allow_html=True,
+    st.progress(
+        listos / len(claves),
+        text=f"{listos} de {len(claves)} productos listos · foto y ficha, o ficha marcada como no requerida",
     )
-    st.progress(listos / len(claves))
     faltan = []
     for clave in claves:
         foto, ficha = bib.archivos(clave)
@@ -2688,7 +2292,7 @@ def generar_pdf():
 
 
 def paso_4():
-    st.header("4. Revisa y crea tu PDF")
+    st.title("Revisa y crea tu PDF", icon=":material/picture_as_pdf:")
 
     if "pdf_bytes" not in E:
         st.write("Esta es la última oportunidad para corregir los productos, cantidades, códigos, precios y datos del cliente antes de crear el PDF.")
@@ -2892,9 +2496,9 @@ def historial_cotizaciones():
         st.info("Todavía no hay cotizaciones. Cada vez que crees una, quedará guardada aquí con su número.")
         return
     m1, m2, m3 = st.columns(3)
-    m1.metric("Cotizaciones", len(todos))
-    m2.metric("Monto cotizado", rv.clp(sum(r["total"] or 0 for r in todos)))
-    m3.metric("Monto aceptado", rv.clp(sum(r["total"] or 0 for r in todos if r["estado"] == "Aceptada")))
+    m1.metric("Cotizaciones", len(todos), border=True)
+    m2.metric("Monto cotizado", rv.clp(sum(r["total"] or 0 for r in todos)), border=True)
+    m3.metric("Monto aceptado", rv.clp(sum(r["total"] or 0 for r in todos if r["estado"] == "Aceptada")), border=True)
     f1, f2, f3 = st.columns([2.5, 1, 1.4])
     texto = f1.text_input(
         "Buscar",
@@ -3028,7 +2632,7 @@ def clientes_ui():
 
 
 def vista_historial():
-    st.header("Historial")
+    st.title("Cotizaciones", icon=":material/receipt_long:")
     if GIOVAL_REQUIRE_ACCESS:
         st.caption(
             "Biblioteca compartida: se sincronizan los productos y el historial comercial "
@@ -3062,8 +2666,8 @@ def borrar_producto(clave: str):
 
 def vista_productos():
     E.setdefault("p_ver", 0)
-    st.header("Catálogo de productos")
-    st.caption("Precios, costos, márgenes y archivos de producto se comparten desde la biblioteca central.")
+    st.title("Biblioteca de productos", icon=":material/inventory_2:")
+    st.caption("Precios, fotos y fichas se recuperan cuando una cotización coincide con estos productos.")
     if "p_msg" in E:
         nivel, texto = E.pop("p_msg")
         (st.success if nivel == "ok" else st.error)(texto)
@@ -3090,10 +2694,10 @@ def vista_productos():
     total_sin_precio = sum(f.get("precio_neto") is None for f in todas)
     total_margen_pendiente = sum(f.get("costo_neto") is None or f.get("margen_pct") is None for f in todas)
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Productos", len(todas))
-    m2.metric("Sin foto", total_sin_foto)
-    m3.metric("Sin ficha pendiente", total_sin_ficha)
-    m4.metric("Sin precio reciente", total_sin_precio)
+    m1.metric("Productos", len(todas), border=True)
+    m2.metric("Sin foto", total_sin_foto, border=True)
+    m3.metric("Sin ficha pendiente", total_sin_ficha, border=True)
+    m4.metric("Sin precio reciente", total_sin_precio, border=True)
 
     f1, f2 = st.columns([1.5, 1])
     texto = f1.text_input("Buscar producto", placeholder="Código, modelo, marca o nombre", key="p_texto")
@@ -3537,21 +3141,21 @@ def guardar_conflicto_como_nueva():
 
 
 # ============================================================== PANTALLA
-# Identidad visual alineada con Gioval.cl: marca, rubro y configuración secundaria.
+# Marca y navegación compactas para priorizar el trabajo del cotizador.
 if GIOVAL_REQUIRE_ACCESS:
-    col_marca, col_salir, col_ajustes = st.columns([5.5, 1, 1])
+    col_marca, col_estado, col_salir, col_ajustes = st.columns(
+        [3.5, 2, 1, 1], vertical_alignment="center"
+    )
 else:
-    col_marca, col_ajustes = st.columns([6, 1])
+    col_marca, col_estado, col_ajustes = st.columns([4, 2, 1], vertical_alignment="center")
 with col_marca:
-    st.markdown(
-        '<div class="marca-app">'
-        '<span class="marca-simbolo" aria-hidden="true"></span>'
-        '<div class="marca-texto">'
-        '<div class="marca-nombre">Gioval</div>'
-        '<div class="marca-descripcion">Tintas, tóners y artículos de oficina</div>'
-        f'<div class="marca-pill">{"Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Cotizador comercial"}</div>'
-        '</div></div>',
-        unsafe_allow_html=True,
+    st.markdown("## Gioval")
+    st.caption("Tintas, tóners y artículos de oficina · Arica, Chile")
+with col_estado:
+    st.badge(
+        "Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Cotizador comercial",
+        icon=":material/verified_user:" if GIOVAL_REQUIRE_ACCESS else ":material/receipt_long:",
+        color="blue",
     )
 with col_ajustes:
     carpeta, bib, hist, api_key, usar_lo, mp_ticket = configuracion_compacta()
@@ -3590,8 +3194,20 @@ if E.get("_conflicto_guardado"):
 if E.get("_mensaje_guardado"):
     st.success(E.pop("_mensaje_guardado"))
 
-with st.container(key="app-navigation"):
-    vista = st.radio("Secciones", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
+etiquetas_vista = {
+    VISTAS[0]: ":material/edit_document: Cotizar",
+    VISTAS[1]: ":material/history: Historial",
+    VISTAS[2]: ":material/inventory_2: Biblioteca",
+}
+vista = st.segmented_control(
+    "Secciones",
+    VISTAS,
+    key="vista",
+    format_func=lambda valor: etiquetas_vista[valor],
+    required=True,
+    width="stretch",
+    label_visibility="collapsed",
+)
 if vista == VISTAS[1]:
     vista_historial()
 elif vista == VISTAS[2]:
