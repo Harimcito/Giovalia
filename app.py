@@ -642,7 +642,7 @@ COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_ORIGEN = (
     "Incluir", "Cantidad", "Producto", "Código", "¿Cómo lo identifiqué?")
 COL_PRECIO = "Precio unitario"
 ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
-          "descripcion": "Descripción", "": ""}
+          "similitud": "Coincidencia catálogo", "descripcion": "Descripción", "": ""}
 
 # ============================================================== CONFIGURACIÓN COMPACTA
 # La configuración se renderiza en un popover junto al título, para no ocupar la pantalla.
@@ -704,18 +704,49 @@ def mostrar_pasos(actual: int):
         )
 
 
+def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
+    """Resuelve descripciones contra productos guardados; recurre a IA ante ambigüedad."""
+    resultados = {}
+    pendientes = []
+    for descripcion in descripciones:
+        desc = _texto_seguro(descripcion)
+        normalizada = ct.normalizar(desc)
+        if not desc or normalizada in resultados:
+            continue
+        clave = bib.detectar(desc, solo_conocidos=True)
+        if clave:
+            resultados[normalizada] = {"clave": clave, "origen": "biblioteca", "certeza": "alta"}
+            continue
+        candidatos = bib.coincidencias_semanticas(desc, limite=2)
+        primero = candidatos[0] if candidatos else None
+        segundo = candidatos[1] if len(candidatos) > 1 else None
+        if primero and primero["score"] >= 0.78 and (not segundo or primero["score"] - segundo["score"] >= 0.10):
+            resultados[normalizada] = {"clave": primero["clave"], "origen": "similitud",
+                                       "certeza": "alta", "nombre": primero["nombre"]}
+        else:
+            pendientes.append(desc)
+    if pendientes and api_key:
+        try:
+            catalogo_ia = {clave: ficha for clave, ficha in bib.indice.items()
+                           if not ct.identidad_conflictiva(clave, ficha)}
+            con_ia = li.entender_productos(pendientes, api_key, catalogo_ia)
+            for descripcion, match in zip(pendientes, con_ia):
+                clave = str(match.get("clave", "")).strip().upper()
+                if clave in catalogo_ia and match.get("certeza") in ("alta", "media"):
+                    resultados[ct.normalizar(descripcion)] = {
+                        "clave": clave, "origen": "ia", "certeza": match["certeza"],
+                        "razon": match.get("razon", ""),
+                    }
+        except Exception as exc:
+            E["_error_match_ia"] = str(exc)
+    return resultados
+
+
 def cargar(ruta: Path, origen_pedido: str):
     """Lee una cotización y prepara líneas, datos del cliente y precios editables."""
     lineas = ct.leer_cotizacion(ruta)
     productos = [ln for ln in lineas if ln["es_producto"]]
-    ia = {}
-    if api_key and productos:
-        try:
-            with st.spinner("Estoy entendiendo cada producto…"):
-                resultados = li.entender_productos([ln["descripcion"] for ln in productos], api_key)
-            ia = {ln["descripcion"]: r for ln, r in zip(productos, resultados)}
-        except Exception:
-            st.warning("No pude usar la IA para entender los productos. Sigo con la búsqueda normal.")
+    matches = resolver_productos_catalogo([ln["descripcion"] for ln in productos])
 
     # Los valores del Excel se aplican al inicio de la siguiente ejecución de Streamlit,
     # no aquí: las pestañas del paso 1 ya pueden haber creado widgets con esas claves.
@@ -755,7 +786,9 @@ def cargar(ruta: Path, origen_pedido: str):
 
     for ln in lineas:
         if ln["es_producto"]:
-            ln["clave_auto"], ln["origen"] = ct.resolver_clave(bib, ln["descripcion"], ia.get(ln["descripcion"]))
+            match = matches.get(ct.normalizar(ln["descripcion"]), {})
+            ln["clave_auto"] = match.get("clave") or ct.resolver_clave(bib, ln["descripcion"])[0]
+            ln["origen"] = match.get("origen") or ("texto" if ln["clave_auto"] else "descripcion")
         else:
             ln["clave_auto"], ln["origen"] = "", ""
         ln["incluir"] = bool(ln.get("incluir", True))
@@ -763,7 +796,7 @@ def cargar(ruta: Path, origen_pedido: str):
     for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
         E.pop(k, None)
     E["editado_manual"] = False
-    E["info_desc"] = ia
+    E["info_desc"] = matches
     E["origen_pedido"] = origen_pedido
     E["lineas"] = lineas
     E["tabla"] = tabla_desde_lineas(
@@ -891,13 +924,17 @@ def lineas_desde_orden(orden: pd.DataFrame, con_iva: bool) -> list[dict]:
         except (TypeError, ValueError):
             precio_neto = None
         descripcion = ct.limpiar_descripcion(descripcion)
-        clave = bib.detectar(descripcion) or ""
         es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
+        match = E.get("_orden_coincidencias", {}).get(ct.normalizar(descripcion), {}) if es_producto else {}
+        clave = match.get("clave") or (bib.detectar(descripcion) if es_producto else "")
+        origen = match.get("origen") or (
+            "biblioteca" if clave and clave in bib.indice else "texto" if clave else "descripcion"
+        )
         salida.append({
             "cantidad": ct._cantidad(cantidad), "descripcion": descripcion, "unitario": precio_neto,
             "precio_neto": precio_neto, "es_producto": es_producto,
             "incluir": _esta_marcado(fila.get("Incluir"), True),
-            "clave_auto": clave, "origen": "biblioteca" if clave else "descripcion",
+            "clave_auto": clave, "origen": origen,
         })
     return salida
 
@@ -1011,7 +1048,7 @@ def guardar_precios_inventario(lineas: list[dict]):
 
         ficha = bib.indice.setdefault(clave, {"nombre": descripcion or clave, "aliases": []})
         nombre = descripcion or clave
-        if ficha.get("nombre") != nombre:
+        if not ficha.get("nombre"):
             ficha["nombre"] = nombre
             cambio_indice = True
         if ficha.get("precio_neto") != precio_neto:
@@ -1571,9 +1608,14 @@ def pedido_ui():
         if not filas:
             st.warning("No encontré productos. Revisa el pedido e inténtalo de nuevo.")
         else:
+            E.pop("_error_match_ia", None)
+            with st.spinner("Buscando tus productos en la biblioteca…"):
+                coincidencias = resolver_productos_catalogo([f["descripcion"] for f in filas])
+            E["_orden_coincidencias"] = coincidencias
             precios = []
             for fila in filas:
-                clave = bib.detectar(fila["descripcion"])
+                match = coincidencias.get(ct.normalizar(fila["descripcion"]), {})
+                clave = match.get("clave") or bib.detectar(fila["descripcion"], solo_conocidos=True)
                 neto = bib.precio_sugerido(clave) or bib.indice.get(clave, {}).get("precio_neto")
                 precios.append(ct.precio_para_mostrar(neto, con_iva) if neto else None)
             E["orden_df"] = pd.DataFrame({
@@ -1585,6 +1627,10 @@ def pedido_ui():
             E["orden_df_base"] = E["orden_df"].copy()
             E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
             E["editor_version"] = int(E.get("editor_version", 0)) + 1
+            if coincidencias:
+                st.success(f"Encontré {len(coincidencias)} producto(s) en tu biblioteca y usé sus precios guardados.")
+            if E.get("_error_match_ia"):
+                st.info("No pude consultar la IA esta vez; puedes continuar y revisar los productos sin coincidencia.")
 
     st.subheader("Datos de la cotización")
     widget_numero_cotizacion()
@@ -2368,6 +2414,43 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
     datos = rec["datos"]
     lineas, cli = datos.get("lineas", []), datos.get("cliente", {})
     con_iva = bool(rec["con_iva"])
+    faltantes = [
+        ln.get("descripcion", "") for ln in lineas
+        if ln.get("es_producto") and (
+            _texto_seguro(ln.get("clave_auto")).upper() not in bib.indice
+            or ct.identidad_conflictiva(
+                _texto_seguro(ln.get("clave_auto")).upper(),
+                bib.indice.get(_texto_seguro(ln.get("clave_auto")).upper(), {}),
+            )
+        )
+    ]
+    coincidencias = resolver_productos_catalogo(faltantes)
+    orden_coincidencias = {}
+    for ln in lineas:
+        if not ln.get("es_producto"):
+            continue
+        descripcion = _texto_seguro(ln.get("descripcion"))
+        match = coincidencias.get(ct.normalizar(descripcion), {})
+        clave_actual = _texto_seguro(ln.get("clave_auto")).upper()
+        if clave_actual not in bib.indice or ct.identidad_conflictiva(clave_actual, bib.indice.get(clave_actual, {})):
+            clave_actual = ""
+            ln["clave_auto"] = ""
+            ln["origen"] = "descripcion"
+        if not clave_actual and match.get("clave"):
+            clave_actual = match["clave"]
+            ln["clave_auto"] = clave_actual
+            ln["origen"] = match.get("origen", "similitud")
+        elif clave_actual in bib.indice and not ct.identidad_conflictiva(clave_actual, bib.indice[clave_actual]) and not ln.get("origen"):
+            ln["origen"] = "biblioteca"
+        orden_coincidencias[ct.normalizar(descripcion)] = {
+            "clave": clave_actual,
+            "origen": ln.get("origen") or ("biblioteca" if clave_actual in bib.indice else "texto"),
+        }
+        if clave_actual in bib.indice and not ct.identidad_conflictiva(clave_actual, bib.indice[clave_actual]) \
+                and ln.get("unitario") is None and ln.get("precio_neto") is None:
+            ficha = bib.indice[clave_actual]
+            ln["unitario"] = bib.precio_sugerido(clave_actual) or ficha.get("precio_neto")
+            ln["precio_neto"] = ln["unitario"]
     for k in ("lineas", "ruta", "tabla", "tabla_edit", "tabla_base", "info_desc", "pdf_bytes", "pdf_nombre", "informe",
               "orden_df_base", "orden_editor_version", "orden_editor", "ok_riesgo", "ok_sin_precio", "cli_sel", "origen_pedido"):
         E.pop(k, None)
@@ -2379,6 +2462,7 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         "Precio unitario": [ct.precio_para_mostrar(
             ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"), con_iva)
             if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None for ln in lineas]})
+    E["_orden_coincidencias"] = orden_coincidencias
     E["orden_df_base"] = E["orden_df"].copy()
     E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
     E.update(c_nombre=cli.get("nombre", ""), c_rut=cli.get("rut", ""), c_dir=cli.get("direccion", ""),

@@ -64,7 +64,8 @@ def leer_para_pdf(xlsx) -> dict:
     fila_cliente = next((c.row for fila in ws.iter_rows(max_row=fila_enc - 1) for c in fila
                          if isinstance(c.value, str) and c.value.strip().endswith(":")), fila_enc)
     empresa = [str(c.value).strip() for fila in ws.iter_rows(max_row=fila_cliente - 1)
-               for c in fila if isinstance(c.value, str) and c.value.strip()]
+               for c in fila if isinstance(c.value, str) and c.value.strip()
+               and _norm(c.value) != "DATOSDELCLIENTE"]
 
     pares = []  # (columna, etiqueta, valor)
     for fila in ws.iter_rows(min_row=fila_cliente, max_row=fila_enc - 1):
@@ -95,14 +96,14 @@ def leer_para_pdf(xlsx) -> dict:
     totales, ultima_fila_totales = [], ultima
     for r in range(fila_enc + 1, ws.max_row + 1):
         for c in ws[r]:
-            if isinstance(c.value, str) and _norm(c.value) in ("TOTALNETO", "IVA", "TOTAL"):
+            if isinstance(c.value, str) and _norm(c.value) in ("TOTALNETO", "IVA", "IVA19", "IVAPORCIENTO", "TOTAL"):
                 totales.append([c.value.strip(), _num(ws.cell(r, c.column + 1).value)])
                 ultima_fila_totales = max(ultima_fila_totales, r)
     if any(v is None for _, v in totales):  # archivo sin valores calculados: neto + IVA 19 %
         suma = sum(ln["total"] or 0 for ln in lineas)
         neto = round(suma)
         calculados = {"TOTALNETO": neto, "IVA": round(suma * IVA), "TOTAL": neto + round(suma * IVA)}
-        totales = [[e, calculados[_norm(e)]] for e, _ in totales]
+        totales = [[e, calculados["IVA" if _norm(e).startswith("IVA") else _norm(e)]] for e, _ in totales]
 
     pago = [str(ws.cell(r, c_cant).value).strip() for r in range(ultima_fila_totales + 1, ws.max_row + 1)
             if ws.cell(r, c_cant).value not in (None, "")]

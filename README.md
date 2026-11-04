@@ -36,6 +36,14 @@ Gioval incluye una segunda aplicación para detectar oportunidades de Compra Ág
 Doble clic en `iniciar_cotizador.bat`. En cada inicio verifica que estén los componentes
 (la primera vez o tras una actualización tarda un par de minutos).
 
+### Inicio automático en este computador (Windows)
+
+Ejecuta `abrir_gioval.bat` una vez. Preparará el servidor local, instalará las dependencias
+cuando sea necesario, reutilizará la biblioteca existente en `%LOCALAPPDATA%\Gioval\Datos\biblioteca`, con los mismos productos e historial en cada inicio, abrirá
+Gioval en el navegador y creará el acceso directo `Gioval` en el Escritorio. El servidor queda
+limitado a este computador (`127.0.0.1`); para compartir la biblioteca con otros equipos,
+usa el modo de servidor central descrito en [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md).
+
 ## Fotos y fichas desde internet
 En el paso 3 presiona «Buscar en internet lo que falta». Para cada producto verás las fotos
 y fichas encontradas con vista previa: elige con «Usar». Quedan guardadas en `biblioteca/`
