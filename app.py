@@ -21,6 +21,7 @@ import buscador as bs
 import cotizador as ct
 import historial as hs
 import lector_ia as li
+import mercado_publico as mp
 import pdf_cotizacion as pc
 import revisor as rv
 
@@ -642,7 +643,7 @@ COL_INCLUIR, COL_CANT, COL_PROD, COL_COD, COL_ORIGEN = (
     "Incluir", "Cantidad", "Producto", "Código", "¿Cómo lo identifiqué?")
 COL_PRECIO = "Precio unitario"
 ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
-          "descripcion": "Descripción", "": ""}
+          "similitud": "Coincidencia catálogo", "descripcion": "Descripción", "": ""}
 
 # ============================================================== CONFIGURACIÓN COMPACTA
 # La configuración se renderiza en un popover junto al título, para no ocupar la pantalla.
@@ -670,12 +671,22 @@ def limpiar_estado_trabajo():
         "gioval_autenticado",
         "config_usar_lo",
         "config_api_key",
+        "_mercado_publico_ticket",
         "_respaldo_zip",
         "_respaldo_nombre",
     )
     valores = {clave: E[clave] for clave in conservar if clave in E}
     E.clear()
     E.update(valores)
+
+
+def guardar_ticket_mp_sesion():
+    """Mantiene el ticket disponible al cerrar Ajustes, sin escribirlo en disco."""
+    ticket = str(E.get("config_ticket_mercado_publico", "")).strip()
+    if ticket:
+        E["_mercado_publico_ticket"] = ticket
+    else:
+        E.pop("_mercado_publico_ticket", None)
 
 
 def ir_a(paso: int):
@@ -704,18 +715,154 @@ def mostrar_pasos(actual: int):
         )
 
 
+def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
+    """Resuelve descripciones contra productos guardados; recurre a IA ante ambigüedad."""
+    resultados = {}
+    pendientes = []
+    for descripcion in descripciones:
+        desc = _texto_seguro(descripcion)
+        normalizada = ct.normalizar(desc)
+        if not desc or normalizada in resultados:
+            continue
+        clave = bib.detectar(desc, solo_conocidos=True)
+        if clave:
+            resultados[normalizada] = {"clave": clave, "origen": "biblioteca", "certeza": "alta"}
+            continue
+        candidatos = bib.coincidencias_semanticas(desc, limite=2)
+        primero = candidatos[0] if candidatos else None
+        segundo = candidatos[1] if len(candidatos) > 1 else None
+        if primero and primero["score"] >= 0.78 and (not segundo or primero["score"] - segundo["score"] >= 0.10):
+            resultados[normalizada] = {"clave": primero["clave"], "origen": "similitud",
+                                       "certeza": "alta", "nombre": primero["nombre"]}
+        else:
+            pendientes.append(desc)
+    if pendientes and api_key:
+        try:
+            catalogo_ia = {clave: ficha for clave, ficha in bib.indice.items()
+                           if not ct.identidad_conflictiva(clave, ficha)}
+            con_ia = li.entender_productos(pendientes, api_key, catalogo_ia)
+            for descripcion, match in zip(pendientes, con_ia):
+                clave = str(match.get("clave", "")).strip().upper()
+                if clave in catalogo_ia and match.get("certeza") in ("alta", "media"):
+                    resultados[ct.normalizar(descripcion)] = {
+                        "clave": clave, "origen": "ia", "certeza": match["certeza"],
+                        "razon": match.get("razon", ""),
+                    }
+        except Exception as exc:
+            E["_error_match_ia"] = str(exc)
+    return resultados
+
+
+def asociar_lineas_con_biblioteca(
+    lineas: list[dict], aplicar_precios_catalogo: bool = False
+) -> dict[str, dict]:
+    """Restaura vínculos guardados y agrega coincidencias altas o probables."""
+    pendientes = []
+    for linea in lineas:
+        descripcion = _texto_seguro(linea.get("descripcion"))
+        clave = _texto_seguro(linea.get("clave_auto")).upper()
+        ficha = bib.indice.get(clave, {})
+        valida = bool(clave in bib.indice and not ct.identidad_conflictiva(clave, ficha))
+        codigo_fuente = _texto_seguro(linea.get("codigo_fuente")).upper()
+        ficha_codigo = bib.indice.get(codigo_fuente, {})
+        codigo_catalogo = bool(codigo_fuente in bib.indice and not ct.identidad_conflictiva(codigo_fuente, ficha_codigo))
+        es_producto = bool(linea.get("es_producto", True))
+        if es_producto and descripcion and not valida and not codigo_catalogo:
+            pendientes.append(descripcion)
+
+    coincidencias = resolver_productos_catalogo(pendientes)
+    mapa_orden = {}
+    for linea in lineas:
+        descripcion = _texto_seguro(linea.get("descripcion"))
+        normalizada = ct.normalizar(descripcion)
+        if not descripcion or not linea.get("es_producto", True):
+            continue
+
+        clave = _texto_seguro(linea.get("clave_auto")).upper()
+        ficha = bib.indice.get(clave, {})
+        valida = bool(clave in bib.indice and not ct.identidad_conflictiva(clave, ficha))
+        match = coincidencias.get(normalizada, {})
+        if not valida:
+            clave = ""
+            codigo_fuente = _texto_seguro(linea.get("codigo_fuente")).upper()
+            ficha_codigo = bib.indice.get(codigo_fuente, {})
+            codigo_catalogo = bool(
+                codigo_fuente in bib.indice
+                and not ct.identidad_conflictiva(codigo_fuente, ficha_codigo)
+            )
+            if codigo_catalogo:
+                clave = codigo_fuente
+                linea["clave_auto"] = clave
+                linea["origen"] = "biblioteca"
+            # Coincidencias altas y probables se vinculan; las bajas quedan pendientes.
+            elif match.get("certeza") in {"alta", "media"}:
+                propuesta = _texto_seguro(match.get("clave")).upper()
+                ficha_propuesta = bib.indice.get(propuesta, {})
+                if propuesta in bib.indice and not ct.identidad_conflictiva(propuesta, ficha_propuesta):
+                    clave = propuesta
+                    linea["clave_auto"] = clave
+                    linea["origen"] = match.get("origen", "similitud")
+            if not clave:
+                linea["clave_auto"] = ""
+                linea["origen"] = "descripcion"
+        else:
+            linea["clave_auto"] = clave
+            linea["origen"] = linea.get("origen") or "biblioteca"
+
+        if clave and (aplicar_precios_catalogo or (linea.get("unitario") is None and linea.get("precio_neto") is None)):
+            precio = bib.precio_sugerido(clave)
+            if precio is None:
+                precio = bib.indice.get(clave, {}).get("precio_neto")
+            if precio is not None:
+                linea["unitario"] = precio
+                linea["precio_neto"] = precio
+
+        mapa_orden[normalizada] = {
+            "clave": clave,
+            "origen": linea.get("origen") or ("biblioteca" if clave else "descripcion"),
+            "certeza": match.get("certeza", "alta" if clave else "baja"),
+        }
+    return mapa_orden
+
+
+def productos_pendientes_de_asociar(lineas: list[dict]) -> list[str]:
+    pendientes = []
+    vistos = set()
+    for linea in lineas:
+        descripcion = _texto_seguro(linea.get("descripcion"))
+        clave = _texto_seguro(linea.get("clave_auto")).upper()
+        ficha = bib.indice.get(clave, {})
+        asociada = bool(clave in bib.indice and not ct.identidad_conflictiva(clave, ficha))
+        normalizada = ct.normalizar(descripcion)
+        if linea.get("es_producto", True) and descripcion and not asociada and normalizada not in vistos:
+            vistos.add(normalizada)
+            pendientes.append(descripcion)
+    return pendientes
+
+
+def referencia_mercado_publico_borrador(registro: dict, datos: dict) -> dict:
+    """Recupera el código guardado o reconoce uno usado como número de cotización."""
+    referencia = datos.get("mercado_publico")
+    referencia = dict(referencia) if isinstance(referencia, dict) else {}
+    if _texto_seguro(referencia.get("codigo")):
+        return referencia
+    candidato = _texto_seguro(registro.get("numero"))
+    try:
+        tipo = mp.clasificar_codigo(candidato)
+    except ValueError:
+        return referencia
+    referencia.update({
+        "codigo": candidato,
+        "tipo": "Compra Ágil" if tipo == "compra_agil" else "Orden de compra",
+    })
+    return referencia
+
+
 def cargar(ruta: Path, origen_pedido: str):
     """Lee una cotización y prepara líneas, datos del cliente y precios editables."""
     lineas = ct.leer_cotizacion(ruta)
     productos = [ln for ln in lineas if ln["es_producto"]]
-    ia = {}
-    if api_key and productos:
-        try:
-            with st.spinner("Estoy entendiendo cada producto…"):
-                resultados = li.entender_productos([ln["descripcion"] for ln in productos], api_key)
-            ia = {ln["descripcion"]: r for ln, r in zip(productos, resultados)}
-        except Exception:
-            st.warning("No pude usar la IA para entender los productos. Sigo con la búsqueda normal.")
+    matches = resolver_productos_catalogo([ln["descripcion"] for ln in productos])
 
     # Los valores del Excel se aplican al inicio de la siguiente ejecución de Streamlit,
     # no aquí: las pestañas del paso 1 ya pueden haber creado widgets con esas claves.
@@ -755,7 +902,9 @@ def cargar(ruta: Path, origen_pedido: str):
 
     for ln in lineas:
         if ln["es_producto"]:
-            ln["clave_auto"], ln["origen"] = ct.resolver_clave(bib, ln["descripcion"], ia.get(ln["descripcion"]))
+            match = matches.get(ct.normalizar(ln["descripcion"]), {})
+            ln["clave_auto"] = match.get("clave") or ct.resolver_clave(bib, ln["descripcion"])[0]
+            ln["origen"] = match.get("origen") or ("texto" if ln["clave_auto"] else "descripcion")
         else:
             ln["clave_auto"], ln["origen"] = "", ""
         ln["incluir"] = bool(ln.get("incluir", True))
@@ -763,7 +912,7 @@ def cargar(ruta: Path, origen_pedido: str):
     for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
         E.pop(k, None)
     E["editado_manual"] = False
-    E["info_desc"] = ia
+    E["info_desc"] = matches
     E["origen_pedido"] = origen_pedido
     E["lineas"] = lineas
     E["tabla"] = tabla_desde_lineas(
@@ -891,13 +1040,20 @@ def lineas_desde_orden(orden: pd.DataFrame, con_iva: bool) -> list[dict]:
         except (TypeError, ValueError):
             precio_neto = None
         descripcion = ct.limpiar_descripcion(descripcion)
-        clave = bib.detectar(descripcion) or ""
         es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
+        match = E.get("_orden_coincidencias", {}).get(ct.normalizar(descripcion), {}) if es_producto else {}
+        clave = match.get("clave") or (bib.detectar(descripcion) if es_producto else "")
+        origen = match.get("origen") or (
+            "biblioteca" if clave and clave in bib.indice else "texto" if clave else "descripcion"
+        )
         salida.append({
             "cantidad": ct._cantidad(cantidad), "descripcion": descripcion, "unitario": precio_neto,
             "precio_neto": precio_neto, "es_producto": es_producto,
             "incluir": _esta_marcado(fila.get("Incluir"), True),
-            "clave_auto": clave, "origen": "biblioteca" if clave else "descripcion",
+            "clave_auto": clave, "origen": origen,
+            "fuente_pedido": _texto_seguro(fila.get("Origen")),
+            "codigo_fuente": _texto_seguro(fila.get("Código")),
+            "unidad_fuente": _texto_seguro(fila.get("Unidad")),
         })
     return salida
 
@@ -912,6 +1068,38 @@ def cliente_actual() -> dict:
         "email": _texto_seguro(E.get("c_email")),
         "fecha": E.get("c_fecha", date.today()),
     }
+
+
+def datos_mercado_publico_guardables() -> dict | None:
+    """Guarda referencia y datos básicos, sin conservar adjuntos ni el ticket API."""
+    detalle = E.get("_mercado_publico_detalle")
+    detalle = detalle if isinstance(detalle, dict) else {}
+    codigo = _texto_seguro(
+        E.get("_mercado_publico_codigo") or E.get("mercado_publico_codigo") or detalle.get("codigo")
+    )
+    if not codigo:
+        return None
+    return {
+        "codigo": codigo,
+        "tipo": _texto_seguro(detalle.get("tipo")),
+        "institucion": _texto_seguro(detalle.get("institucion")),
+        "unidad_compra": _texto_seguro(detalle.get("unidad_compra")),
+        "rut_comprador": _texto_seguro(detalle.get("rut_comprador")),
+    }
+
+
+def completar_comprador_mercado_publico(detalle: dict) -> list[str]:
+    """Usa el organismo comprador y su RUT oficial en la cabecera de la cotización."""
+    valores = {
+        "c_nombre": _texto_seguro(detalle.get("institucion")),
+        "c_rut": _texto_seguro(detalle.get("rut_comprador")),
+    }
+    aplicados = []
+    for campo, valor in valores.items():
+        if valor and _texto_seguro(E.get(campo)) != valor:
+            E[campo] = valor
+            aplicados.append("nombre" if campo == "c_nombre" else "RUT")
+    return aplicados
 
 
 def totales_actuales() -> dict:
@@ -1011,7 +1199,7 @@ def guardar_precios_inventario(lineas: list[dict]):
 
         ficha = bib.indice.setdefault(clave, {"nombre": descripcion or clave, "aliases": []})
         nombre = descripcion or clave
-        if ficha.get("nombre") != nombre:
+        if not ficha.get("nombre"):
             ficha["nombre"] = nombre
             cambio_indice = True
         if ficha.get("precio_neto") != precio_neto:
@@ -1062,11 +1250,13 @@ def persistir_borrador():
         "lineas": lineas,
         "cliente": cliente,
         "origen_pedido": E.get("origen_pedido", "pedido"),
+        "fuente_pedido": E.get("fuente_pedido", E.get("fuente_orden", "")),
         "precios_modo": modo_precios,
         "paso": int(E.get("paso", 1)),
         "orden_df": orden,
         "orden_texto": E.get("orden_texto", ""),
         "fuente_orden": E.get("fuente_orden", ""),
+        "mercado_publico": datos_mercado_publico_guardables(),
         "editado_manual": bool(E.get("editado_manual", False)),
     }
     fecha = cliente.get("fecha") or date.today()
@@ -1350,14 +1540,21 @@ def restaurar_borrador(cot_id: int):
     datos = registro.get("datos", {})
     cliente = datos.get("cliente", {})
     lineas_restauradas = datos.get("lineas", [])
+    mercado_publico = referencia_mercado_publico_borrador(registro, datos)
+    mp_codigo = _texto_seguro(mercado_publico.get("codigo"))
+    fuente_guardada = datos.get("fuente_pedido", datos.get("fuente_orden", ""))
+    es_mercado_publico = bool(mp_codigo or fuente_guardada == "Mercado Público")
     for ln in lineas_restauradas:
         if ln.get("unitario") is None and ln.get("precio_neto") is not None:
             ln["unitario"] = ln["precio_neto"]
         descripcion = _texto_seguro(ln.get("descripcion"))
         ln.setdefault("es_producto", not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO))
         ln.setdefault("incluir", True)
-        ln.setdefault("clave_auto", bib.detectar(descripcion) or (ct.clave_descriptiva(descripcion) if ln.get("es_producto") and descripcion else ""))
-        ln.setdefault("origen", "biblioteca" if bib.detectar(descripcion) else "descripcion")
+        ln.setdefault("clave_auto", "")
+        ln.setdefault("origen", "descripcion")
+    orden_coincidencias = asociar_lineas_con_biblioteca(
+        lineas_restauradas, aplicar_precios_catalogo=es_mercado_publico
+    )
     limpiar_estado_trabajo()
     try:
         fecha = date.fromisoformat(str(registro.get("fecha") or "")[:10])
@@ -1374,21 +1571,63 @@ def restaurar_borrador(cot_id: int):
         origen_pedido=datos.get("origen_pedido", registro.get("origen", "pedido")),
         paso=int(datos.get("paso", 1)), lineas=lineas_restauradas,
         orden_texto=datos.get("orden_texto", ""), fuente_orden=datos.get("fuente_orden", ""),
+        fuente_pedido="Mercado Público" if es_mercado_publico else fuente_guardada,
+        mercado_publico_codigo=mp_codigo, _mercado_publico_codigo=mp_codigo,
+        _orden_coincidencias=orden_coincidencias,
+        _productos_catalogo_revision=productos_pendientes_de_asociar(lineas_restauradas),
         editado_manual=bool(datos.get("editado_manual", False)), editor_version=1,
         vista=VISTAS[0],
     )
+    if es_mercado_publico:
+        E["fuente_pedido"] = "Mercado Público"
+    if mp_codigo:
+        E["_mercado_publico_detalle"] = {
+            "codigo": mp_codigo,
+            "tipo": _texto_seguro(mercado_publico.get("tipo")),
+            "institucion": _texto_seguro(mercado_publico.get("institucion")),
+            "unidad_compra": _texto_seguro(mercado_publico.get("unidad_compra")),
+            "rut_comprador": _texto_seguro(mercado_publico.get("rut_comprador")),
+            "documentos": None,
+            "url_portal": "https://www.mercadopublico.cl/",
+        }
+        completar_comprador_mercado_publico(E["_mercado_publico_detalle"])
     if isinstance(datos.get("orden_df"), list):
         df = pd.DataFrame(datos["orden_df"])
         for columna, defecto in (("Incluir", True), ("Cantidad", None), ("Producto", ""), ("Precio unitario", None)):
             if columna not in df:
                 df[columna] = defecto
-        df = df[["Incluir", "Cantidad", "Producto", "Precio unitario"]]
+        for columna, defecto in (("Código", ""), ("Unidad", ""), ("Origen", "")):
+            if columna not in df:
+                df[columna] = defecto
+        df = df[["Incluir", "Cantidad", "Producto", "Código", "Unidad", "Origen", "Precio unitario"]]
         if not df.empty:
             df["Cantidad"] = pd.to_numeric(df["Cantidad"], errors="coerce")
             df["Precio unitario"] = pd.to_numeric(df["Precio unitario"], errors="coerce")
         E["orden_df"] = df
         E["orden_df_base"] = df.copy()
         E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
+        lineas_por_descripcion = {
+            ct.normalizar(ln.get("descripcion")): ln for ln in lineas_restauradas
+        }
+        con_iva_guardado = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+        for indice, fila in E["orden_df"].iterrows():
+            try:
+                precio_vacio = pd.isna(fila.get("Precio unitario"))
+            except (TypeError, ValueError):
+                precio_vacio = fila.get("Precio unitario") in (None, "")
+            ln = lineas_por_descripcion.get(ct.normalizar(fila.get("Producto")))
+            if ln:
+                neto = ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")
+                clave = _texto_seguro(ln.get("clave_auto")).upper()
+                precio_catalogo = bib.precio_sugerido(clave) if clave in bib.indice else None
+                if precio_catalogo is None and clave in bib.indice:
+                    precio_catalogo = bib.indice[clave].get("precio_neto")
+                usar_catalogo = bool(es_mercado_publico and precio_catalogo is not None)
+                if neto is not None and (precio_vacio or usar_catalogo):
+                    if usar_catalogo:
+                        neto = precio_catalogo
+                    E["orden_df"].at[indice, "Precio unitario"] = ct.precio_para_mostrar(neto, con_iva_guardado)
+        E["orden_df_base"] = E["orden_df"].copy()
     elif lineas_restauradas:
         # Reconstruye la tabla desde la lista comercial saneada, sin requerir
         # el pedido fuente ni un Excel que pudiera contener datos del cliente.
@@ -1396,6 +1635,9 @@ def restaurar_borrador(cot_id: int):
             "Incluir": [_esta_marcado(ln.get("incluir"), True) for ln in lineas_restauradas],
             "Cantidad": [ln.get("cantidad", 1) for ln in lineas_restauradas],
             "Producto": [ln.get("descripcion", "") for ln in lineas_restauradas],
+            "Código": [ln.get("codigo_fuente", "") for ln in lineas_restauradas],
+            "Unidad": [ln.get("unidad_fuente", "") for ln in lineas_restauradas],
+            "Origen": [ln.get("fuente_pedido", "") for ln in lineas_restauradas],
             "Precio unitario": [ct.precio_para_mostrar(
                 ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"),
                 bool(registro.get("con_iva", 1)))
@@ -1527,11 +1769,56 @@ def aplicar_cliente_guardado():
     E.update(c_nombre="", c_rut="", c_dir="", c_ciudad="", c_tel="", c_email="")
 
 
+def _mostrar_detalle_mercado_publico(detalle: dict):
+    st.markdown(f"**{detalle.get('codigo', '')} · {detalle.get('nombre', 'Solicitud de compra')}**")
+    datos = [
+        ("Tipo", detalle.get("tipo")),
+        ("Organismo", detalle.get("institucion")),
+        ("RUT comprador", detalle.get("rut_comprador")),
+        ("Unidad de compra", detalle.get("unidad_compra")),
+        ("Estado", detalle.get("estado")),
+        ("Cierre", detalle.get("fecha_cierre")),
+        ("Dirección de entrega", detalle.get("direccion_entrega")),
+        ("Plazo de entrega", f"{detalle['plazo_entrega']} días" if detalle.get("plazo_entrega") else ""),
+    ]
+    st.caption(" · ".join(f"{k}: {v}" for k, v in datos if v))
+    if detalle.get("descripcion"):
+        with st.expander("Descripción de la solicitud", expanded=False):
+            st.write(detalle["descripcion"])
+    documentos = detalle.get("documentos") or []
+    if detalle.get("documentos") is None:
+        st.caption("El código de Mercado Público quedó vinculado a este borrador. Consulta nuevamente para actualizar sus adjuntos.")
+        return
+    if not documentos:
+        st.caption("La API no informa adjuntos para este código.")
+        return
+    st.markdown("**Archivos adjuntos informados por Mercado Público**")
+    st.dataframe(
+        pd.DataFrame([{"Archivo": d.get("nombre", ""), "Identificador": d.get("id", "")} for d in documentos]),
+        hide_index=True,
+        width="stretch",
+        alt="Adjuntos publicados en Mercado Público",
+    )
+    con_enlace = [d for d in documentos if d.get("url")]
+    if con_enlace:
+        for i, documento in enumerate(con_enlace):
+            st.link_button(
+                f"Abrir {documento.get('nombre', 'adjunto')}", documento["url"],
+                key=f"mp-adjunto-{i}-{detalle.get('codigo', '')}",
+            )
+    else:
+        st.warning(
+            "La API entrega el nombre y el identificador de estos archivos, pero no el enlace de descarga. "
+            "Abre el portal para descargarlos y luego súbelos aquí; Giovalia los leerá y sumará sus productos al listado."
+        )
+        st.link_button("Abrir Mercado Público", detalle.get("url_portal") or "https://www.mercadopublico.cl/", icon=":material/open_in_new:")
+
+
 def pedido_ui():
     st.write("El pedido se conserva como borrador mientras trabajas. Puedes volver a abrirlo si la aplicación se interrumpe.")
     con_iva = st.radio("Los precios que voy a escribir…", OPCIONES_PRECIO, horizontal=True,
                        key="precios_modo") == OPCIONES_PRECIO[0]
-    FUENTES = ["Lo escribo o pego aquí", "Subir Excel o CSV", "Subir PDF o foto"]
+    FUENTES = ["Lo escribo o pego aquí", "Subir Excel o CSV", "Subir PDF o foto", "Mercado Público"]
     fuente = st.radio("¿Cómo me das el pedido?", FUENTES, horizontal=True, key="fuente_pedido")
     E["fuente_orden"] = fuente
     texto = st.text_area(
@@ -1540,6 +1827,8 @@ def pedido_ui():
         height=170, key="orden_texto",
     ) if fuente == FUENTES[0] else ""
     archivo_orden, archivos_ia = None, []
+    archivos_mp = []
+    codigo_mp = ""
     if fuente == FUENTES[1]:
         archivo_orden = st.file_uploader("Sube el Excel o CSV del pedido", type=["xlsx", "csv"], key="orden_archivo")
     elif fuente == FUENTES[2]:
@@ -1549,10 +1838,46 @@ def pedido_ui():
         st.caption("El pedido se envía a OpenAI para leerlo. Después revisa que haya quedado bien.")
         if not api_key:
             st.warning("Para leer PDF o fotos necesito la clave de OpenAI (Ajustes, arriba a la derecha).")
+    elif fuente == FUENTES[3]:
+        codigo_mp = st.text_input(
+            "Código de Compra Ágil u orden de compra",
+            placeholder="635-659-COT26 o 635-659-AG26",
+            key="mercado_publico_codigo",
+        ).strip()
+        archivos_mp = st.file_uploader(
+            "Adjuntos descargados desde Mercado Público (opcional)",
+            type=["pdf", "xlsx", "csv", "docx", "jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+            key="mercado_publico_adjuntos",
+            help="Los archivos se leen durante esta consulta y no se guardan en el historial.",
+        )
+        if api_key:
+            st.caption("PDF, Word e imágenes se enviarán a OpenAI para extraer productos. Excel y CSV se leen localmente.")
+        if not mp_ticket:
+            st.warning("Configura el ticket de Mercado Público en Ajustes para consultar por código.")
+        detalle_mostrado = E.get("_mercado_publico_detalle")
+        if isinstance(detalle_mostrado, dict) and detalle_mostrado.get("codigo", "").casefold() == codigo_mp.casefold():
+            _mostrar_detalle_mercado_publico(detalle_mostrado)
 
-    if st.button("Leer el pedido", icon=":material/description:", type="primary", width="stretch"):
+    etiqueta_leer = "Consultar y cargar productos" if fuente == FUENTES[3] else "Leer el pedido"
+    if st.button(etiqueta_leer, icon=":material/description:", type="primary", width="stretch"):
         try:
-            if fuente == FUENTES[2]:
+            if fuente == FUENTES[3]:
+                if not codigo_mp:
+                    raise ValueError("Ingresa el código de la Compra Ágil o de la orden de compra.")
+                with st.spinner("Consultando Mercado Público…"):
+                    detalle_mp = mp.consultar_codigo(codigo_mp, mp_ticket)
+                E["_mercado_publico_detalle"] = detalle_mp
+                E["_mercado_publico_codigo"] = codigo_mp
+                completar_comprador_mercado_publico(detalle_mp)
+                filas = list(detalle_mp.get("productos", []))
+                if archivos_mp:
+                    if any(Path(a.name).suffix.lower() in {".pdf", ".docx", ".jpg", ".jpeg", ".png", ".webp"}
+                           for a in archivos_mp) and not api_key:
+                        raise ValueError("Para leer PDF, Word o imágenes necesitas configurar OpenAI en Ajustes. Excel y CSV no requieren esa clave.")
+                    with st.spinner("Leyendo los adjuntos y contrastando productos…"):
+                        filas.extend(mp.leer_adjuntos(archivos_mp, api_key))
+            elif fuente == FUENTES[2]:
                 if not archivos_ia:
                     raise ValueError("Primero sube un PDF o una foto.")
                 with st.spinner("Leyendo el pedido…"):
@@ -1569,22 +1894,55 @@ def pedido_ui():
             st.error(f"No pude leer el pedido: {exc}")
             filas = []
         if not filas:
-            st.warning("No encontré productos. Revisa el pedido e inténtalo de nuevo.")
+            if fuente == FUENTES[3] and E.get("_mercado_publico_detalle"):
+                st.warning("La plataforma no entregó productos en el listado normal. Descarga un adjunto y súbelo arriba para extraer los productos.")
+            else:
+                st.warning("No encontré productos. Revisa el pedido e inténtalo de nuevo.")
         else:
+            E.pop("_error_match_ia", None)
+            with st.spinner("Buscando tus productos en la biblioteca…"):
+                coincidencias = resolver_productos_catalogo([f["descripcion"] for f in filas])
+            for fila in filas:
+                codigo_catalogo = _texto_seguro(fila.get("codigo")).upper()
+                ficha = bib.indice.get(codigo_catalogo, {})
+                if codigo_catalogo in bib.indice and not ct.identidad_conflictiva(codigo_catalogo, ficha):
+                    coincidencias[ct.normalizar(fila["descripcion"])] = {
+                        "clave": codigo_catalogo, "origen": "biblioteca", "certeza": "alta"
+                    }
+            E["_orden_coincidencias"] = coincidencias
+            E["_productos_catalogo_revision"] = list(dict.fromkeys(
+                _texto_seguro(fila.get("descripcion")) for fila in filas
+                if not coincidencias.get(ct.normalizar(fila.get("descripcion")), {}).get("clave")
+            ))
             precios = []
             for fila in filas:
-                clave = bib.detectar(fila["descripcion"])
+                match = coincidencias.get(ct.normalizar(fila["descripcion"]), {})
+                clave = match.get("clave") or bib.detectar(fila["descripcion"], solo_conocidos=True)
                 neto = bib.precio_sugerido(clave) or bib.indice.get(clave, {}).get("precio_neto")
                 precios.append(ct.precio_para_mostrar(neto, con_iva) if neto else None)
             E["orden_df"] = pd.DataFrame({
                 "Incluir": [True] * len(filas),
                 "Cantidad": [fila["cantidad"] for fila in filas],
                 "Producto": [fila["descripcion"] for fila in filas],
+                "Código": [fila.get("codigo", "") for fila in filas],
+                "Unidad": [fila.get("unidad", "") for fila in filas],
+                "Origen": [fila.get("origen", "Pedido ingresado") for fila in filas],
                 "Precio unitario": precios,
             })
             E["orden_df_base"] = E["orden_df"].copy()
             E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
             E["editor_version"] = int(E.get("editor_version", 0)) + 1
+            if coincidencias:
+                st.success(f"Encontré {len(coincidencias)} producto(s) en tu biblioteca y usé sus precios guardados.")
+            if E["_productos_catalogo_revision"]:
+                st.info(
+                    f"{len(E['_productos_catalogo_revision'])} producto(s) quedaron pendientes de asociación. "
+                    "Podrás vincularlos al catálogo en el paso de revisión para recuperar sus fotos y precios."
+                )
+            if E.get("_error_match_ia"):
+                st.info("No pude consultar la IA esta vez; puedes continuar y revisar los productos sin coincidencia.")
+            if fuente == FUENTES[3] and not E.get("_mercado_publico_detalle", {}).get("productos"):
+                st.warning("La plataforma no entregó productos en el listado normal. Revisa los adjuntos de arriba: puedes descargar los archivos del portal y cargarlos aquí para extraer y agregar sus productos.")
 
     st.subheader("Datos de la cotización")
     widget_numero_cotizacion()
@@ -1613,6 +1971,8 @@ def pedido_ui():
     st.divider()
     st.subheader("Productos y precios")
     st.caption("Puedes cambiar cantidades, nombres y precios, agregar filas y dejar precios pendientes. Los totales se actualizan antes de avanzar.")
+    if fuente == FUENTES[3] and E.get("_mercado_publico_detalle"):
+        st.info("Las líneas del listado y de cada adjunto se mantienen separadas y muestran su origen. Si describen el mismo producto con datos distintos, contrástalas y edita la versión que corresponda antes de continuar.")
     orden_base = E.get("orden_df_base")
     if not isinstance(orden_base, pd.DataFrame):
         orden_base = E["orden_df"].copy()
@@ -1625,8 +1985,12 @@ def pedido_ui():
             "Incluir": st.column_config.CheckboxColumn("Incluir", width="small"),
             "Cantidad": st.column_config.NumberColumn(min_value=0, step=1, width="small"),
             "Producto": st.column_config.TextColumn("Producto", width="large"),
+            "Código": st.column_config.TextColumn("Código", width="small"),
+            "Unidad": st.column_config.TextColumn("Unidad", width="small"),
+            "Origen": st.column_config.TextColumn("Origen", width="medium"),
             "Precio unitario": st.column_config.NumberColumn(min_value=0, format="$ %d"),
         },
+        disabled=["Origen"],
     )
     E["orden_df"] = orden
     lineas_orden = lineas_desde_orden(orden, con_iva)
@@ -1689,7 +2053,8 @@ def pedido_ui():
         )
         try:
             ct.crear_cotizacion_xlsx(
-                [{"cantidad": ln["cantidad"], "descripcion": ln["descripcion"], "precio_neto": ln.get("unitario")}
+                [{"cantidad": ln["cantidad"], "descripcion": ln["descripcion"], "precio_neto": ln.get("unitario"),
+                  "codigo": ln.get("codigo_fuente"), "unidad": ln.get("unidad_fuente")}
                  for ln in lineas_orden if _esta_marcado(ln.get("incluir"), True)],
                 {**cliente, "numero": registro["numero"]}, ruta,
             )
@@ -1701,6 +2066,10 @@ def pedido_ui():
             datos_cotizacion = {
                 "lineas": lineas_orden, "cliente": cliente, "precios_modo": E["precios_modo"],
                 "origen_pedido": "pedido", "paso": 2,
+                "fuente_pedido": E.get("fuente_pedido", E.get("fuente_orden", "")),
+                "fuente_orden": E.get("fuente_orden", ""),
+                "orden_texto": E.get("orden_texto", ""),
+                "mercado_publico": datos_mercado_publico_guardables(),
             }
             if GIOVAL_REQUIRE_ACCESS:
                 hist.actualizar_si_version(
@@ -1824,6 +2193,73 @@ def agregar_desde_catalogo():
 
 
 # ============================================================== PASO 2: PRODUCTOS
+def revisar_asociaciones_catalogo():
+    """Permite vincular manualmente las líneas que no tuvieron una coincidencia suficiente."""
+    pendientes = productos_pendientes_de_asociar(E.get("lineas", []))
+    E["_productos_catalogo_revision"] = pendientes
+    if not pendientes:
+        return
+
+    st.warning(
+        f"{len(pendientes)} producto(s) no tienen una asociación segura con el catálogo. "
+        "Vincúlalos para recuperar las fotos y los precios guardados."
+    )
+    productos = {
+        f"{clave} · {_texto_seguro(ficha.get('nombre') or clave)}": clave
+        for clave, ficha in sorted(bib.indice.items())
+        if not ct.identidad_conflictiva(clave, ficha)
+    }
+    if not productos:
+        return
+    opciones = ["Dejar pendiente"] + list(productos)
+    with st.expander("Asociar productos a la biblioteca", expanded=False):
+        for indice, descripcion in enumerate(pendientes):
+            normalizada = ct.normalizar(descripcion)
+            c_desc, c_producto, c_accion = st.columns([2.2, 3, 1])
+            c_desc.caption(descripcion)
+            elegido = c_producto.selectbox(
+                "Producto guardado", opciones,
+                key=f"catalogo_vinculo_{E.get('cot_id', 'actual')}_{indice}_{normalizada[:20]}",
+                label_visibility="collapsed",
+            )
+            if c_accion.button(
+                "Vincular", key=f"catalogo_vincular_{E.get('cot_id', 'actual')}_{indice}_{normalizada[:20]}",
+                disabled=elegido == opciones[0], width="stretch",
+            ):
+                clave = productos[elegido]
+                ficha = bib.indice.get(clave, {})
+                precio = bib.precio_sugerido(clave)
+                if precio is None:
+                    precio = ficha.get("precio_neto")
+                for linea in E.get("lineas", []):
+                    if ct.normalizar(linea.get("descripcion")) != normalizada:
+                        continue
+                    linea["clave_auto"] = clave
+                    linea["origen"] = "biblioteca"
+                    if precio is not None:
+                        linea["unitario"] = precio
+                        linea["precio_neto"] = precio
+                E.setdefault("_orden_coincidencias", {})[normalizada] = {
+                    "clave": clave, "origen": "biblioteca", "certeza": "alta"
+                }
+                if isinstance(E.get("orden_df"), pd.DataFrame):
+                    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+                    for fila_idx, fila in E["orden_df"].iterrows():
+                        if ct.normalizar(fila.get("Producto")) == normalizada and precio is not None:
+                            E["orden_df"].at[fila_idx, "Precio unitario"] = ct.precio_para_mostrar(precio, con_iva)
+                    E["orden_df_base"] = E["orden_df"].copy()
+                    E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
+                E["tabla"] = tabla_desde_lineas(E.get("lineas", []))
+                E["tabla_edit"] = E["tabla"].copy()
+                E["tabla_base"] = E["tabla"].copy()
+                E["editor_version"] = int(E.get("editor_version", 0)) + 1
+                E["editado_manual"] = True
+                for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
+                    E.pop(clave_estado, None)
+                persistir_borrador()
+                st.rerun()
+
+
 def paso_2():
     st.header("2. Revisa tus productos y precios")
     st.write("Puedes agregar, quitar o modificar cantidades, descripciones, códigos y precios aquí. "
@@ -1833,6 +2269,7 @@ def paso_2():
 
     agregar_desde_catalogo()
     editor_productos()
+    revisar_asociaciones_catalogo()
     boton_actualizar_totales()
     mostrar_totales()
     mostrar_resumen_lineas()
@@ -2368,21 +2805,48 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
     datos = rec["datos"]
     lineas, cli = datos.get("lineas", []), datos.get("cliente", {})
     con_iva = bool(rec["con_iva"])
+    mercado_publico = referencia_mercado_publico_borrador(rec, datos)
+    mp_codigo = _texto_seguro(mercado_publico.get("codigo"))
+    fuente_guardada = datos.get("fuente_pedido", datos.get("fuente_orden", ""))
+    es_mercado_publico = bool(mp_codigo or fuente_guardada == "Mercado Público")
+    orden_coincidencias = asociar_lineas_con_biblioteca(
+        lineas, aplicar_precios_catalogo=es_mercado_publico
+    )
     for k in ("lineas", "ruta", "tabla", "tabla_edit", "tabla_base", "info_desc", "pdf_bytes", "pdf_nombre", "informe",
-              "orden_df_base", "orden_editor_version", "orden_editor", "ok_riesgo", "ok_sin_precio", "cli_sel", "origen_pedido"):
+              "orden_df_base", "orden_editor_version", "orden_editor", "ok_riesgo", "ok_sin_precio", "cli_sel", "origen_pedido",
+              "fuente_pedido", "mercado_publico_codigo", "_mercado_publico_codigo", "_mercado_publico_detalle"):
         E.pop(k, None)
     E["precios_modo"] = OPCIONES_PRECIO[0 if con_iva else 1]
     E["orden_df"] = pd.DataFrame({
         "Incluir": [_esta_marcado(ln.get("incluir"), True) for ln in lineas],
         "Cantidad": [ln["cantidad"] for ln in lineas],
         "Producto": [ln["descripcion"] for ln in lineas],
+        "Código": [ln.get("codigo_fuente", "") for ln in lineas],
+        "Unidad": [ln.get("unidad_fuente", "") for ln in lineas],
+        "Origen": [ln.get("fuente_pedido", "") for ln in lineas],
         "Precio unitario": [ct.precio_para_mostrar(
             ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"), con_iva)
             if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None for ln in lineas]})
+    E["_orden_coincidencias"] = orden_coincidencias
+    E["_productos_catalogo_revision"] = productos_pendientes_de_asociar(lineas)
     E["orden_df_base"] = E["orden_df"].copy()
     E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
     E.update(c_nombre=cli.get("nombre", ""), c_rut=cli.get("rut", ""), c_dir=cli.get("direccion", ""),
              c_ciudad=cli.get("ciudad", ""), c_tel=cli.get("telefono", ""), c_email=cli.get("email", ""))
+    E["fuente_pedido"] = "Mercado Público" if es_mercado_publico else fuente_guardada
+    if mp_codigo:
+        E["mercado_publico_codigo"] = mp_codigo
+        E["_mercado_publico_codigo"] = mp_codigo
+        E["_mercado_publico_detalle"] = {
+            "codigo": mp_codigo,
+            "tipo": _texto_seguro(mercado_publico.get("tipo")),
+            "institucion": _texto_seguro(mercado_publico.get("institucion")),
+            "unidad_compra": _texto_seguro(mercado_publico.get("unidad_compra")),
+            "rut_comprador": _texto_seguro(mercado_publico.get("rut_comprador")),
+            "documentos": None,
+            "url_portal": "https://www.mercadopublico.cl/",
+        }
+        completar_comprador_mercado_publico(E["_mercado_publico_detalle"])
     try:
         E["c_fecha"] = date.fromisoformat(rec["fecha"][:10]) if mantener else date.today()
     except ValueError:
@@ -2786,6 +3250,14 @@ def configuracion_compacta():
     if not GIOVAL_REQUIRE_ACCESS:
         E.setdefault("config_carpeta", carpeta_compartida)
     api_key, origen_key = li.buscar_api_key(APP_DIR)
+    ticket_mp, origen_ticket_mp = mp.buscar_ticket(APP_DIR)
+    if not ticket_mp:
+        ticket_mp = str(
+            E.get("_mercado_publico_ticket")
+            or E.get("config_ticket_mercado_publico", "")
+        ).strip()
+        if ticket_mp:
+            origen_ticket_mp = "esta sesión"
 
     with st.popover(
         "Ajustes",
@@ -2895,6 +3367,27 @@ def configuracion_compacta():
                     st.success("Clave guardada en este computador.")
                 except (OSError, ValueError) as exc:
                     st.error(f"No pude guardar la clave en el archivo .env. Comprueba los permisos de esta carpeta. Detalle: {exc}")
+
+        st.divider()
+        st.markdown("**Conexión a Mercado Público**")
+        if ticket_mp:
+            st.caption(f"Conectada · Ticket encontrado en {origen_ticket_mp}")
+        elif GIOVAL_REQUIRE_ACCESS:
+            st.caption(
+                "El administrador debe definir MERCADO_PUBLICO_TICKET en los secretos de Streamlit "
+                "o como variable privada del servidor."
+            )
+        else:
+            if "_mercado_publico_ticket" in E and "config_ticket_mercado_publico" not in E:
+                E["config_ticket_mercado_publico"] = E["_mercado_publico_ticket"]
+            ticket_mp = st.text_input(
+                "Ticket API de Mercado Público",
+                type="password",
+                key="config_ticket_mercado_publico",
+                on_change=guardar_ticket_mp_sesion,
+                help="Se usa para consultar solicitudes Compra Ágil y órdenes por código. No se incluye en las cotizaciones.",
+            )
+            st.caption("Se conserva solo en la sesión actual. También puedes definir MERCADO_PUBLICO_TICKET en los secretos privados del servidor.")
 
         with st.expander("Opciones para crear el PDF", expanded=False):
             st.checkbox(
@@ -3009,7 +3502,13 @@ def configuracion_compacta():
     if not api_key_actual:
         api_key_actual = E.get("config_api_key", "")
     usar_lo = bool(E.get("config_usar_lo", False))
-    return carpeta, bib_panel, hist_panel, api_key_actual, usar_lo
+    ticket_mp_actual, _ = mp.buscar_ticket(APP_DIR)
+    if not ticket_mp_actual:
+        ticket_mp_actual = str(
+            E.get("_mercado_publico_ticket")
+            or E.get("config_ticket_mercado_publico", "")
+        ).strip()
+    return carpeta, bib_panel, hist_panel, api_key_actual, usar_lo, ticket_mp_actual
 
 
 def guardar_conflicto_como_nueva():
@@ -3055,7 +3554,7 @@ with col_marca:
         unsafe_allow_html=True,
     )
 with col_ajustes:
-    carpeta, bib, hist, api_key, usar_lo = configuracion_compacta()
+    carpeta, bib, hist, api_key, usar_lo, mp_ticket = configuracion_compacta()
 if GIOVAL_REQUIRE_ACCESS:
     with col_salir:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):

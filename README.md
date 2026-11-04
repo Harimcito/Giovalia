@@ -36,6 +36,14 @@ Gioval incluye una segunda aplicación para detectar oportunidades de Compra Ág
 Doble clic en `iniciar_cotizador.bat`. En cada inicio verifica que estén los componentes
 (la primera vez o tras una actualización tarda un par de minutos).
 
+### Inicio automático en este computador (Windows)
+
+Ejecuta `abrir_gioval.bat` una vez. Preparará el servidor local, instalará las dependencias
+cuando sea necesario, reutilizará la biblioteca existente en `%LOCALAPPDATA%\Gioval\Datos\biblioteca`, con los mismos productos e historial en cada inicio, abrirá
+Gioval en el navegador y creará el acceso directo `Gioval` en el Escritorio. El servidor queda
+limitado a este computador (`127.0.0.1`); para compartir la biblioteca con otros equipos,
+usa el modo de servidor central descrito en [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md).
+
 ## Fotos y fichas desde internet
 En el paso 3 presiona «Buscar en internet lo que falta». Para cada producto verás las fotos
 y fichas encontradas con vista previa: elige con «Usar». Quedan guardadas en `biblioteca/`
@@ -83,10 +91,23 @@ búsqueda, pega el enlace directo de una imagen o PDF, o usa los botones de Goog
 - Excel/CSV: con encabezados (Cantidad, Descripción/Producto) o sin ellos.
 - PDF o foto (puedes subir varias): se leen con IA (OpenAI, modelo gpt-4o). Necesita tu API key.
   El documento se envía a OpenAI. Revisa siempre lo leído en la tabla antes de crear la cotización.
+- Mercado Público: pega el código de una Compra Ágil (`...-COT26`) o de una orden (`...-AG26`).
+  Giovalia trae el listado y sus datos desde las APIs oficiales de ChileCompra. Los adjuntos aparecen
+  con su nombre e identificador; como la API no publica una URL de descarga, bájalos desde el portal
+  y súbelos en esa misma pantalla. Excel/CSV se leen localmente; PDF, Word `.docx` e imágenes usan
+  OpenAI. Los archivos cargados se procesan en memoria o en carpetas temporales y no se añaden al
+  historial. Cada línea conserva su fuente y las versiones de listado/adjunto quedan separadas para
+  que puedas contrastarlas y editarlas.
 - Elige si los precios que ingresas llevan IVA o son netos. El Neto es la suma de las líneas,
   el IVA es 19 % y el Total es Neto + IVA.
 - Los precios se recuerdan por producto y se autocompletan la próxima vez.
 - Para cambiar el encabezado, logo o forma de pago, edita `plantilla_cotizacion.xlsx`.
+
+## Ticket de Mercado Público
+En una instalación local, ingresa el ticket API en Ajustes. Se conserva solo en la sesión actual.
+También puede definirse como `MERCADO_PUBLICO_TICKET` en una variable privada del servidor o en los
+secretos de Streamlit. No lo incluyas en cotizaciones ni en mensajes. La integración es de consulta:
+Giovalia no publica ofertas ni realiza acciones de compra.
 
 ## Dónde poner la API key de OpenAI (una sola vez)
 La app la busca, en este orden: variable de entorno `OPENAI_API_KEY`, el archivo

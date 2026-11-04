@@ -25,10 +25,12 @@ import unicodedata
 from copy import copy, deepcopy
 from datetime import date
 from pathlib import Path
+from zipfile import ZipFile
 from xml.sax.saxutils import escape
 
-from openpyxl import load_workbook
-from openpyxl.styles import Alignment
+from openpyxl import Workbook, load_workbook
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.properties import PageSetupProperties
 from PIL import Image as PILImage
 from pypdf import PdfReader, PdfWriter
@@ -54,6 +56,59 @@ def normalizar(texto) -> str:
     """Mayúsculas, sin tildes ni símbolos: 'TK-3182' -> 'TK3182'."""
     t = unicodedata.normalize("NFKD", str(texto)).encode("ascii", "ignore").decode()
     return re.sub(r"[^A-Z0-9]", "", t.upper())
+
+
+_PALABRAS_BUSQUEDA = {"DE", "DEL", "LA", "EL", "LOS", "LAS", "PARA", "CON", "Y", "A",
+                      "TIPO", "SIMILAR", "PARECIDO", "EQUIVALENTE", "UN", "UNA", "HOJAS",
+                      "HOJA", "UNIDAD", "UNIDADES", "TAMANO", "MARCA", "PRODUCTO"}
+_TAMANO_PRODUCTO = {"CARTA": "CARTA", "LETTER": "CARTA", "OFICIO": "OFICIO", "LEGAL": "OFICIO",
+                    "A4": "A4", "A3": "A3", "A5": "A5", "TABLOIDE": "TABLOIDE"}
+_MARCAS_PRODUCTO = {"EQUALIT", "DURACELL", "FULTON", "COLON", "HP", "CANON", "EPSON", "KYOCERA",
+                    "BROTHER", "SAMSUNG", "XEROX", "LEXMARK", "TOSHIBA", "LAVORO", "RHEIN", "TORRE"}
+
+
+def _tokens_producto(texto: str, ignorar_similares: bool = True) -> set[str]:
+    t = unicodedata.normalize("NFKD", str(texto or "")).encode("ascii", "ignore").decode().upper()
+    tokens = re.findall(r"[A-Z]+\d+[A-Z]*|\d+[A-Z]+|[A-Z]+|\d+(?:\.\d+)?", t)
+    salida = set()
+    for token in tokens:
+        if token.endswith("S") and len(token) > 4 and token[:-1] in {"RESMA", "TONER", "TINTA", "CARTUCHO"}:
+            token = token[:-1]
+        if token == "SIMILARES":
+            token = "SIMILAR"
+        if token not in _PALABRAS_BUSQUEDA or (token == "SIMILAR" and not ignorar_similares):
+            salida.add(token)
+    return salida
+
+
+def _conflicto_producto(a: set[str], b: set[str]) -> bool:
+    tamanos_a = {_TAMANO_PRODUCTO[t] for t in a if t in _TAMANO_PRODUCTO}
+    tamanos_b = {_TAMANO_PRODUCTO[t] for t in b if t in _TAMANO_PRODUCTO}
+    if tamanos_a and tamanos_b and tamanos_a.isdisjoint(tamanos_b):
+        return True
+    pilas_a, pilas_b = a & {"AA", "AAA"}, b & {"AA", "AAA"}
+    if pilas_a and pilas_b and pilas_a.isdisjoint(pilas_b):
+        return True
+    marcas_a, marcas_b = a & _MARCAS_PRODUCTO, b & _MARCAS_PRODUCTO
+    if marcas_a and marcas_b and marcas_a.isdisjoint(marcas_b):
+        return True
+    # No unir presentaciones distintas cuando ambas describen explícitamente una cantidad.
+    nums_a = {t for t in a if t.isdigit() and len(t) <= 5}
+    nums_b = {t for t in b if t.isdigit() and len(t) <= 5}
+    return bool(nums_a and nums_b and nums_a.isdisjoint(nums_b))
+
+
+def identidad_conflictiva(clave: str, ficha: dict) -> bool:
+    """Marca fichas que mezclan tamaños, presentaciones o marcas incompatibles entre clave y alias."""
+    alias = ficha.get("aliases", []) or []
+    if not isinstance(alias, list):
+        alias = [alias]
+    variantes = [clave, ficha.get("nombre", ""), *alias]
+    tokens = [_tokens_producto(v, ignorar_similares=False) for v in variantes if v]
+    tamanos = {_TAMANO_PRODUCTO[t] for grupo in tokens for t in grupo if t in _TAMANO_PRODUCTO}
+    pilas = {t for grupo in tokens for t in grupo if t in {"AA", "AAA"}}
+    marcas = {t for grupo in tokens for t in grupo if t in _MARCAS_PRODUCTO}
+    return len(tamanos) > 1 or len(pilas) > 1 or len(marcas) > 1
 
 
 # ----------------------------------------------------------------------------
@@ -107,6 +162,7 @@ class Biblioteca:
         if not isinstance(self.indice, dict):
             raise ValueError(f"El índice de productos no es válido: {self._idx}")
         self._snapshot_indice = deepcopy(self.indice)
+        self.asociar_carpetas_anteriores()
 
     def _guardar_indice(self):
         """Guarda solo los cambios de esta instancia sin borrar productos añadidos por otra sesión."""
@@ -175,6 +231,44 @@ class Biblioteca:
             self.indice = combinado
             self._snapshot_indice = deepcopy(combinado)
 
+    def asociar_carpetas_anteriores(self, score_minimo: float = 0.65, margen_minimo: float = 0.12) -> int:
+        """Vincula archivos bajo claves antiguas cuando una sola ficha coincide con alta confianza."""
+        aliases_vistos = {}
+        for clave, ficha in self.indice.items():
+            valores = ficha.get("aliases", []) or []
+            if not isinstance(valores, list):
+                valores = [valores]
+            for valor in [clave, *valores]:
+                aliases_vistos.setdefault(normalizar(valor), set()).add(clave)
+
+        cantidad = 0
+        for carpeta in sorted(self.dir.iterdir(), key=lambda p: p.name.casefold()):
+            if not carpeta.is_dir() or carpeta.name.strip().upper() in self.indice:
+                continue
+            tiene_archivo = any((carpeta / f"foto{ext}").exists() for ext in EXT_FOTO) or (carpeta / "ficha.pdf").exists()
+            if not tiene_archivo:
+                continue
+            identidad = normalizar(carpeta.name)
+            if identidad in aliases_vistos:
+                continue
+            candidatos = self.coincidencias_semanticas(carpeta.name, limite=2)
+            primero = candidatos[0] if candidatos else None
+            segundo = candidatos[1] if len(candidatos) > 1 else None
+            if not primero or primero["score"] < score_minimo:
+                continue
+            if segundo and primero["score"] - segundo["score"] < margen_minimo:
+                continue
+            ficha = self.indice.get(primero["clave"], {})
+            aliases = ficha.setdefault("aliases", [])
+            if not isinstance(aliases, list):
+                aliases = ficha["aliases"] = [aliases]
+            aliases.append(carpeta.name)
+            aliases_vistos.setdefault(identidad, set()).add(primero["clave"])
+            cantidad += 1
+        if cantidad:
+            self._guardar_indice()
+        return cantidad
+
     @staticmethod
     def _slug(clave: str) -> str:
         return re.sub(r"[^A-Za-z0-9._-]", "_", clave.strip().upper())
@@ -183,12 +277,31 @@ class Biblioteca:
         return self.dir / self._slug(clave)
 
     def archivos(self, clave: str):
-        """(foto, ficha): ruta o None si falta."""
+        """(foto, ficha), usando también las carpetas de códigos antiguos vinculados por alias."""
         if not clave:
             return None, None
         c = self.carpeta(clave)
         foto = next((p for e in EXT_FOTO if (p := c / f"foto{e}").exists()), None)
         ficha = c / "ficha.pdf"
+        if foto and ficha.exists():
+            return foto, ficha
+
+        ficha_producto = self.indice.get(clave.strip().upper(), {})
+        alias_norm = {normalizar(clave)}
+        alias_norm.update(normalizar(a) for a in ficha_producto.get("aliases", []) if a)
+        carpetas_anteriores = sorted(
+            (p for p in self.dir.iterdir() if p.is_dir() and p != c and normalizar(p.name) in alias_norm),
+            key=lambda p: p.name,
+        )
+        for anterior in carpetas_anteriores:
+            if not foto:
+                foto = next((p for e in EXT_FOTO if (p := anterior / f"foto{e}").exists()), None)
+            if not ficha.exists():
+                ficha_antigua = anterior / "ficha.pdf"
+                if ficha_antigua.exists():
+                    ficha = ficha_antigua
+            if foto and ficha.exists():
+                break
         return foto, (ficha if ficha.exists() else None)
 
     def guardar_archivo(self, clave: str, tipo: str, nombre_origen: str, datos: bytes):
@@ -304,7 +417,12 @@ class Biblioteca:
         dn = normalizar(descripcion)
         mejor, largo = "", 0
         for clave, datos in self.indice.items():
-            for token in [clave] + datos.get("aliases", []):
+            if identidad_conflictiva(clave, datos):
+                continue
+            aliases = datos.get("aliases", []) or []
+            if not isinstance(aliases, list):
+                aliases = [aliases]
+            for token in [clave, datos.get("nombre", "")] + aliases:
                 n = normalizar(token)
                 if len(n) >= 3 and n in dn and len(n) > largo:
                     mejor, largo = clave, len(n)
@@ -315,6 +433,37 @@ class Biblioteca:
                     and not _MEDIDA.match(tok):
                 return tok
         return ""
+
+    def coincidencias_semanticas(self, descripcion: str, limite: int = 5) -> list[dict]:
+        """Productos del catálogo más cercanos por nombre y alias, sin mezclar medidas incompatibles."""
+        consulta = _tokens_producto(descripcion, ignorar_similares=True)
+        if not consulta:
+            return []
+        resultados = []
+        for clave, ficha in self.indice.items():
+            if identidad_conflictiva(clave, ficha):
+                continue
+            variantes = [ficha.get("nombre", clave), clave, *(ficha.get("aliases", []) or [])]
+            mejor = 0.0
+            for variante in variantes:
+                tokens = _tokens_producto(variante, ignorar_similares=False)
+                if not tokens or _conflicto_producto(consulta, tokens):
+                    continue
+                comunes = consulta & tokens
+                if not comunes:
+                    continue
+                # F1 sobre tokens: tolera palabras adicionales sin aceptar un solo término genérico.
+                score = 2 * len(comunes) / (len(consulta) + len(tokens))
+                marcas_consulta = consulta & _MARCAS_PRODUCTO
+                marcas_candidata = tokens & _MARCAS_PRODUCTO
+                if marcas_consulta and not marcas_candidata:
+                    score *= 0.75
+                if len(comunes) == 1 and len(consulta) > 1:
+                    score *= 0.65
+                mejor = max(mejor, score)
+            if mejor:
+                resultados.append({"clave": clave, "nombre": ficha.get("nombre", clave), "score": mejor})
+        return sorted(resultados, key=lambda x: (-x["score"], x["clave"]))[:max(1, limite)]
 
 
 
@@ -344,7 +493,13 @@ def resolver_clave(bib: "Biblioteca", descripcion: str, ia: dict | None = None) 
     if conocido := bib.detectar(descripcion, solo_conocidos=True):
         return conocido, "biblioteca"
     if ia and ia.get("clave") and ia.get("certeza") in ("alta", "media"):
-        return ia["clave"].strip().upper(), "ia"
+        clave = ia["clave"].strip().upper()
+        if clave in bib.indice:
+            return clave, "ia"
+    candidatos = bib.coincidencias_semanticas(descripcion, limite=2)
+    if candidatos and candidatos[0]["score"] >= 0.78 and (
+            len(candidatos) == 1 or candidatos[0]["score"] - candidatos[1]["score"] >= 0.10):
+        return candidatos[0]["clave"], "similitud"
     if texto := bib.detectar(descripcion):
         return texto, "texto"
     return clave_descriptiva(descripcion), "descripcion"
@@ -610,64 +765,218 @@ def precio_para_mostrar(precio_neto: float, con_iva: bool) -> int:
 
 
 def crear_cotizacion_xlsx(lineas: list[dict], cliente: dict, salida, plantilla=None) -> Path:
-    """Llena la plantilla con las líneas y los datos del cliente.
-
-    lineas : [{cantidad, descripcion, precio_neto (o None)}]
-    cliente: nombre, rut, direccion, ciudad, telefono, fecha (date)
-    La plantilla trae 19 filas; si hay más productos se agregan filas
-    desplazando los totales y la forma de pago hacia abajo.
-    Totales: Neto = suma de líneas, IVA = 19 %, Total = Neto + IVA.
-    """
-    wb = load_workbook(plantilla or PLANTILLA)
+    """Genera una cotización profesional, compacta y con filas acordes a los productos."""
+    origen = Path(plantilla or PLANTILLA)
+    wb = Workbook()
     ws = wb.active
-    PRIMERA, ULTIMA = 20, 38
-    extra = max(0, len(lineas) - (ULTIMA - PRIMERA + 1))
-    if extra:  # baja el pie (última fila de la tabla, totales y forma de pago)
-        ws.unmerge_cells(f"C{ULTIMA}:F{ULTIMA}")
-        ws.move_range(f"A{ULTIMA}:L{ws.max_row}", rows=extra)
-        for r in range(ULTIMA, ULTIMA + extra):
-            for col in range(2, 9):
-                ws.cell(r, col)._style = copy(ws.cell(ULTIMA - 1, col)._style)
-        for r in range(ULTIMA, ULTIMA + extra + 1):
-            ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=6)
-    ultima = ULTIMA + extra
+    ws.title = "Cotización"
+    ws.sheet_view.showGridLines = False
+    ws.sheet_view.zoomScale = 90
 
-    # datos del cliente (etiquetas B11:B14 y F11:F12 de la plantilla)
-    ws["C11"], ws["C12"], ws["C13"], ws["C14"] = (cliente.get(k, "") or None for k in
-                                                  ("nombre", "direccion", "ciudad", "telefono"))
-    ws["G11"] = cliente.get("rut") or None
-    ws["G12"] = cliente.get("fecha") or date.today()
-    if cliente.get("numero"):  # N° correlativo, bajo el RUT y la fecha
-        ws["F13"].value = "N° Cotización:"
-        ws["F13"]._style = copy(ws["F12"]._style)
-        ws["G13"].value = cliente["numero"]
-        ws["G13"]._style = copy(ws["G12"]._style)
-        ws["G13"].number_format = "@"
+    # Recupera el logo y los datos comerciales que ya trae la plantilla instalada.
+    empresa_default = [
+        "Giovanna Valenzuela Heresi", "Galería Sangra Colón Local N° 16",
+        "Fono: +569 98498758", "Art. Nac. e Importados, insumos de Computación",
+        "Librería · RUT 9.705.675-7", "giovanna@gioval.cl",
+    ]
+    empresa = empresa_default
+    try:
+        fuente = load_workbook(origen, data_only=True, read_only=True)
+        hoja_fuente = fuente.active
+        extraidos = [str(hoja_fuente.cell(r, 4).value).strip() for r in range(2, 8)
+                     if hoja_fuente.cell(r, 4).value not in (None, "")]
+        if extraidos:
+            empresa = extraidos[:6]
+        fuente.close()
+    except Exception:
+        pass
 
-    ancho_chars = sum((ws.column_dimensions[c].width or 8.43) for c in "CDEF")
-    for i, r in enumerate(range(PRIMERA, ultima + 1)):
+    azul = "183B63"
+    azul_medio = "2C5D86"
+    azul_claro = "EAF1F7"
+    gris = "526274"
+    gris_claro = "F6F8FB"
+    linea = "D8E0E8"
+    blanco = "FFFFFF"
+    texto = "243447"
+    fuente_base = "Arial"
+    borde_inferior = Border(bottom=Side(style="thin", color=linea))
+    borde_fuerte = Border(top=Side(style="medium", color=azul))
+    relleno_cabecera = PatternFill("solid", fgColor=azul)
+    relleno_seccion = PatternFill("solid", fgColor=azul_claro)
+
+    for columna, ancho in {"A": 2.5, "B": 12, "C": 14, "D": 14, "E": 14, "F": 14,
+                           "G": 17, "H": 18}.items():
+        ws.column_dimensions[columna].width = ancho
+    ws.row_dimensions[1].height = 8
+    ws.row_dimensions[2].height = 22
+    for r in range(3, 8):
+        ws.row_dimensions[r].height = 15
+    ws.row_dimensions[8].height = 8
+
+    for r in range(2, 8):
+        ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=6)
+        celda = ws.cell(r, 4, empresa[r - 2] if r - 2 < len(empresa) else "")
+        celda.font = Font(name=fuente_base, size=10 if r == 2 else 9,
+                          bold=(r == 2), color=azul if r == 2 else gris)
+        celda.alignment = Alignment(vertical="center", wrap_text=False)
+
+    ws.merge_cells("G2:H2")
+    ws["G2"] = "COTIZACIÓN"
+    ws["G2"].font = Font(name=fuente_base, size=16, bold=True, color=azul)
+    ws["G2"].alignment = Alignment(horizontal="right", vertical="center")
+    ws.merge_cells("G3:H3")
+    ws["G3"] = "Propuesta comercial"
+    ws["G3"].font = Font(name=fuente_base, size=9, color=gris)
+    ws["G3"].alignment = Alignment(horizontal="right", vertical="center")
+
+    try:
+        with ZipFile(origen) as archivo:
+            medios = sorted(n for n in archivo.namelist() if n.startswith("xl/media/") and not n.endswith("/"))
+            if medios:
+                logo = XLImage(io.BytesIO(archivo.read(medios[0])))
+                escala = min(1.0, 180 / logo.width, 78 / logo.height)
+                logo.width, logo.height = int(logo.width * escala), int(logo.height * escala)
+                ws.add_image(logo, "B2")
+    except Exception:
+        pass
+
+    # Datos del cliente y de la cotización.
+    ws.merge_cells("B9:H9")
+    ws["B9"] = "DATOS DEL CLIENTE"
+    ws["B9"].fill = relleno_seccion
+    ws["B9"].font = Font(name=fuente_base, size=10, bold=True, color=azul)
+    ws["B9"].alignment = Alignment(vertical="center")
+    for col in range(2, 9):
+        ws.cell(9, col).fill = relleno_seccion
+    ws.row_dimensions[9].height = 20
+
+    pares = [
+        (10, "Nombre:", cliente.get("nombre"), "RUT:", cliente.get("rut")),
+        (11, "Dirección:", cliente.get("direccion"), "Fecha:", cliente.get("fecha")),
+        (12, "Ciudad:", cliente.get("ciudad"), "N° Cotización:", str(cliente.get("numero") or "")),
+        (13, "Teléfono:", cliente.get("telefono"), "Correo:", cliente.get("email")),
+    ]
+    for r, etiqueta_izq, valor_izq, etiqueta_der, valor_der in pares:
+        ws.cell(r, 2, etiqueta_izq)
+        ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=5)
+        ws.cell(r, 3, valor_izq or None)
+        ws.cell(r, 6, etiqueta_der)
+        ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=8)
+        ws.cell(r, 7, valor_der or None)
+        for col in (2, 6):
+            ws.cell(r, col).font = Font(name=fuente_base, size=9, bold=True, color=gris)
+            ws.cell(r, col).alignment = Alignment(vertical="center")
+        for col in (3, 7):
+            celda = ws.cell(r, col)
+            celda.font = Font(name=fuente_base, size=9, color=texto)
+            celda.fill = PatternFill("solid", fgColor=gris_claro)
+            celda.alignment = Alignment(vertical="center", wrap_text=True)
+            celda.border = borde_inferior
+        ws.row_dimensions[r].height = 22
+    ws["G11"].number_format = "dd/mm/yyyy"
+    ws["G12"].number_format = "@"
+
+    ws.merge_cells("B15:H15")
+    ws["B15"] = "Detalle de productos · montos netos expresados en pesos chilenos (CLP)"
+    ws["B15"].font = Font(name=fuente_base, size=9, italic=True, color=gris)
+    ws["B15"].alignment = Alignment(vertical="center")
+    ws.row_dimensions[14].height = 6
+    ws.row_dimensions[15].height = 18
+
+    encabezado = 16
+    ws.merge_cells(start_row=encabezado, start_column=3, end_row=encabezado, end_column=6)
+    for celda, valor in ((2, "Cantidad"), (3, "Descripción"), (7, "P. Unitario"), (8, "Total")):
+        ws.cell(encabezado, celda, valor)
+    for col in range(2, 9):
+        celda = ws.cell(encabezado, col)
+        celda.fill = relleno_cabecera
+        celda.font = Font(name=fuente_base, size=9, bold=True, color=blanco)
+        celda.alignment = Alignment(horizontal="center", vertical="center")
+        celda.border = Border(bottom=Side(style="thin", color=blanco))
+    ws.row_dimensions[encabezado].height = 25
+
+    primera = encabezado + 1
+    cantidad_filas = max(1, len(lineas))
+    ultima = primera + cantidad_filas - 1
+    ancho_descripcion = sum(ws.column_dimensions[c].width or 12 for c in "CDEF")
+    for i, r in enumerate(range(primera, ultima + 1)):
         ln = lineas[i] if i < len(lineas) else None
-        ws.cell(r, 2).value = ln["cantidad"] if ln else None
-        ws.cell(r, 3).value = ln["descripcion"] if ln else None
-        ws.cell(r, 3).alignment = Alignment(wrap_text=True, vertical="center")
-        for col in (2, 3, 7, 8):  # misma letra en todas las filas (la plantilla mezclaba negritas)
-            ws.cell(r, col).font = copy(ws.cell(PRIMERA + 1, col).font)
-        ws.cell(r, 7).value = ln.get("precio_neto") if ln else None
-        ws.cell(r, 8).value = f"=G{r}*B{r}"
-        if ln:  # las celdas combinadas no se autoajustan: calcula el alto
-            lineas_texto = max(1, math.ceil(len(ln["descripcion"]) / (ancho_chars * 0.95)))
-            ws.row_dimensions[r].height = 15 * lineas_texto + 2
-        else:
-            ws.row_dimensions[r].height = None
+        ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=6)
+        ws.cell(r, 2, ln.get("cantidad") if ln else None)
+        descripcion_excel = str(ln.get("descripcion", "")) if ln else ""
+        if ln and ln.get("unidad"):
+            unidad = str(ln["unidad"]).strip()
+            if unidad and unidad.casefold() not in descripcion_excel.casefold():
+                descripcion_excel += f" · Unidad: {unidad}"
+        if ln and ln.get("codigo"):
+            codigo = str(ln["codigo"]).strip()
+            if codigo and codigo.casefold() not in descripcion_excel.casefold():
+                descripcion_excel += f" · Código: {codigo}"
+        ws.cell(r, 3, descripcion_excel or None)
+        precio = ln.get("precio_neto", ln.get("unitario")) if ln else None
+        ws.cell(r, 7, precio)
+        ws.cell(r, 8, f'=IF(OR(B{r}="",G{r}=""),"",ROUND(B{r}*G{r},0))')
+        filas_alt = i % 2 == 1
+        for col in range(2, 9):
+            celda = ws.cell(r, col)
+            celda.font = Font(name=fuente_base, size=10, color=texto)
+            celda.fill = PatternFill("solid", fgColor=gris_claro if filas_alt else blanco)
+            celda.border = borde_inferior
+            celda.alignment = Alignment(vertical="center")
+        ws.cell(r, 2).alignment = Alignment(horizontal="center", vertical="center")
+        ws.cell(r, 3).alignment = Alignment(vertical="center", wrap_text=True)
+        for col in (7, 8):
+            ws.cell(r, col).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(r, col).number_format = '"$"#,##0;[Red]-"$"#,##0'
+        if precio is not None:
+            ws.cell(r, 7).number_format = '"$"#,##0;[Red]-"$"#,##0'
+        descripcion = str(ln.get("descripcion", "")) if ln else ""
+        renglones = max(1, math.ceil(len(descripcion) / max(1, ancho_descripcion * 1.15)))
+        ws.row_dimensions[r].height = min(54, max(25, 15 * renglones + 8))
+        if ln and isinstance(ln.get("cantidad"), (int, float)):
+            ws.cell(r, 2).number_format = "#,##0.##"
 
-    t_neto, t_iva, t_total = ultima + 1, ultima + 2, ultima + 3
-    ws[f"H{t_neto}"] = f"=ROUND(SUM(H{PRIMERA}:H{ultima}),0)"
-    ws[f"H{t_iva}"] = f"=ROUND(SUM(H{PRIMERA}:H{ultima})*{IVA},0)"
-    ws[f"H{t_total}"] = f"=H{t_neto}+H{t_iva}"
-    for celda in ("K22", "K24", "K26"):  # auxiliares de la plantilla original
-        ws[celda] = None
+    t_neto, t_iva, t_total = ultima + 2, ultima + 3, ultima + 4
+    ws[f"G{t_neto}"] = "Total Neto"
+    ws[f"H{t_neto}"] = f'=IF(COUNT(B{primera}:B{ultima})=0,"",ROUND(SUM(H{primera}:H{ultima}),0))'
+    ws[f"G{t_iva}"] = "IVA (19%)"
+    ws[f"H{t_iva}"] = f'=IF(H{t_neto}="","",ROUND(H{t_neto}*{IVA},0))'
+    ws[f"G{t_total}"] = "Total"
+    ws[f"H{t_total}"] = f'=IF(H{t_neto}="","",H{t_neto}+H{t_iva})'
+    for r in range(t_neto, t_total + 1):
+        for col in (7, 8):
+            celda = ws.cell(r, col)
+            celda.font = Font(name=fuente_base, size=10, bold=(r == t_total), color=azul if r == t_total else texto)
+            celda.alignment = Alignment(horizontal="right", vertical="center")
+            celda.number_format = '"$"#,##0;[Red]-"$"#,##0'
+        ws.row_dimensions[r].height = 21
+    for col in (7, 8):
+        ws.cell(t_neto, col).border = borde_fuerte
+    for col in (7, 8):
+        ws.cell(t_total, col).fill = relleno_seccion
+        ws.cell(t_total, col).border = Border(top=Side(style="thin", color=azul))
+
+    pie = t_total + 2
+    ws.merge_cells(start_row=pie, start_column=3, end_row=pie, end_column=8)
+    ws.cell(pie, 3, "Gracias por preferir Gioval.")
+    ws.cell(pie, 3).font = Font(name=fuente_base, size=9, italic=True, color=gris)
+    ws.cell(pie, 3).alignment = Alignment(horizontal="right", vertical="center")
+    ws.row_dimensions[pie].height = 20
 
     ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
     ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+    ws.page_margins.left, ws.page_margins.right = 0.45, 0.45
+    ws.page_margins.top, ws.page_margins.bottom = 0.5, 0.5
+    ws.print_options.horizontalCentered = True
+    ws.print_area = f"B1:H{pie}"
+    ws.print_title_rows = f"{encabezado}:{encabezado}"
+    ws.oddFooter.center.text = "Gioval · Cotización"
+    ws.oddFooter.right.text = "Página &[Page] de &[Pages]"
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
+    wb.calculation.calcMode = "auto"
     wb.save(salida)
     return Path(salida)
