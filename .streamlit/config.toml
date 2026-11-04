@@ -1,0 +1,18 @@
+[theme]
+base = "light"
+primaryColor = "#010ED0"
+backgroundColor = "#F5F7FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1F2937"
+linkColor = "#123EB8"
+borderColor = "#DCE3ED"
+dataframeBorderColor = "#DCE3ED"
+dataframeHeaderBackgroundColor = "#EDF1F7"
+dataframeHeaderTextColor = "#26354A"
+font = "sans serif"
+headingFont = "sans serif"
+baseRadius = "small"
+buttonRadius = "small"
+showWidgetBorder = true
+paddingTop = "2rem"
+paddingBottom = "2rem"
