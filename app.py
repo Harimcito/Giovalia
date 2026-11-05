@@ -1355,6 +1355,20 @@ def _mostrar_detalle_mercado_publico(detalle: dict):
         st.link_button("Abrir Mercado Público", detalle.get("url_portal") or "https://www.mercadopublico.cl/", icon=":material/open_in_new:")
 
 
+def _firma_lineas_borrador(lineas):
+    """Firma estable de productos para reenlazar una sesión a su borrador guardado."""
+    firma = []
+    for linea in lineas or []:
+        descripcion = ct.normalizar(_texto_seguro(linea.get("descripcion")))
+        try:
+            cantidad = round(float(linea.get("cantidad") or 0), 8)
+        except (TypeError, ValueError):
+            cantidad = _texto_seguro(linea.get("cantidad"))
+        incluir = _esta_marcado(linea.get("incluir"), True)
+        firma.append((descripcion, cantidad, incluir))
+    return tuple(firma)
+
+
 def pedido_ui():
     st.caption("El borrador se guarda mientras trabajas. Puedes volver a él desde el inicio.")
     E.setdefault("precios_modo", OPCIONES_PRECIO[0])
@@ -1610,7 +1624,40 @@ def pedido_ui():
                     return
         registro = hist.obtener(E["cot_id"])
         if not registro:
-            st.error("No pude recuperar el borrador. No se avanzó para evitar perder los datos.")
+            numero_actual = _texto_seguro(E.get("cot_numero")).casefold()
+            firma_actual = _firma_lineas_borrador(lineas_orden)
+            if numero_actual and firma_actual:
+                for candidato_resumen in hist.listar():
+                    if _texto_seguro(candidato_resumen.get("numero")).casefold() != numero_actual:
+                        continue
+                    candidato = hist.obtener(candidato_resumen.get("id"))
+                    if not candidato:
+                        continue
+                    firma_guardada = _firma_lineas_borrador(
+                        candidato.get("datos", {}).get("lineas", [])
+                    )
+                    version_actual = E.get("_cotizacion_version")
+                    version_coincide = (
+                        not GIOVAL_REQUIRE_ACCESS
+                        or (version_actual and version_actual == candidato.get("actualizado"))
+                    )
+                    if firma_actual == firma_guardada and version_coincide:
+                        E["cot_id"] = int(candidato["id"])
+                        E["_cotizacion_version"] = candidato.get("actualizado")
+                        registro = candidato
+                        st.info("Reconecté esta sesión con el borrador guardado porque coinciden su número y sus productos.")
+                    break
+        if not registro:
+            st.error("No encontré el borrador asociado a esta sesión. Tus datos siguen en esta pantalla.")
+            st.info("Puedes guardarlos como una cotización nueva; el borrador anterior no se modificará.")
+            st.button(
+                "Guardar mis cambios como una cotización nueva",
+                icon=":material/content_copy:",
+                type="primary",
+                width="stretch",
+                on_click=guardar_conflicto_como_nueva,
+                key="pedido_recuperar_borrador_como_nuevo",
+            )
             return
         ruta = Path(tempfile.mkdtemp()) / (
             f"Cotizacion_{re.sub(r'[^A-Za-z0-9._-]', '_', registro['numero'])}_"
