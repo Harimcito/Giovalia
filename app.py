@@ -1633,6 +1633,8 @@ def pedido_ui():
                     candidato = hist.obtener(candidato_resumen.get("id"))
                     if not candidato:
                         continue
+                    if candidato.get("estado") != "Borrador":
+                        break
                     firma_guardada = _firma_lineas_borrador(
                         candidato.get("datos", {}).get("lineas", [])
                     )
