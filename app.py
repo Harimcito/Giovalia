@@ -780,9 +780,6 @@ def persistir_borrador():
     cot_id = E.get("cot_id")
     if not cot_id or E.get("_conflicto_guardado"):
         return
-    registro = hist.obtener(cot_id)
-    if not registro:
-        return
     pendiente = E.get("_pending_import_header")
     cliente = cliente_actual()
     if isinstance(pendiente, dict):
@@ -822,6 +819,17 @@ def persistir_borrador():
         "neto": tot["neto"], "iva": tot["iva"], "total": tot["total"],
         "con_iva": int(modo_precios == OPCIONES_PRECIO[0]),
     }
+    # Streamlit vuelve a ejecutar esta función en muchos reruns sin cambios.
+    # Evita abrir/actualizar SQLite y recorrer el catálogo en cada interacción.
+    huella = json.dumps(
+        {"datos": datos, "campos": campos_guardado},
+        sort_keys=True, ensure_ascii=False, default=str,
+    )
+    if E.get("_snapshot_guardado_id") == cot_id and E.get("_snapshot_guardado") == huella:
+        return
+    registro = hist.obtener(cot_id)
+    if not registro:
+        return
     try:
         if GIOVAL_REQUIRE_ACCESS:
             version_esperada = E.get("_cotizacion_version")
@@ -846,6 +854,8 @@ def persistir_borrador():
     if registro_actual:
         E["_cotizacion_version"] = registro_actual.get("actualizado")
     guardar_precios_inventario(lineas)
+    E["_snapshot_guardado_id"] = cot_id
+    E["_snapshot_guardado"] = huella
     E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
 
@@ -1596,7 +1606,9 @@ def pedido_ui():
         cot_id = E.get("cot_id")
         if not cot_id:
             cot_id, numero = hist.crear(cliente, lineas_orden, totales, con_iva, cliente["fecha"], origen="pedido")
-            E["cot_id"], E["cot_numero"] = cot_id, numero
+            codigo_mp = _texto_seguro(E.get("_mercado_publico_codigo") or E.get("mercado_publico_codigo"))
+            E["cot_id"] = cot_id
+            E["cot_numero"] = codigo_mp or numero
             registro_nuevo = hist.obtener(cot_id)
             E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
         else:
@@ -1979,15 +1991,30 @@ def detalle_busqueda(d: dict, tipo: str) -> str:
     return f"Revisé {d['crudos']} resultados, pero ninguno era una ficha en PDF utilizable."
 
 
+@st.cache_data(ttl=900, max_entries=128, show_spinner=False)
+def _buscar_fotos_cacheado(consulta: str, clave: str):
+    diag = {}
+    return bs.buscar_fotos(consulta, clave=clave, diag=diag), diag
+
+
+@st.cache_data(ttl=900, max_entries=128, show_spinner=False)
+def _buscar_fichas_cacheado(consulta: str, clave: str):
+    diag = {}
+    return bs.buscar_fichas(consulta, clave=clave, diag=diag), diag
+
+
 def buscar_para(clave: str, q_foto: str, q_ficha: str, fotos=True, fichas=True) -> list[str]:
     avisos = []
-    for activo, tipo, funcion, consulta in ((fotos, "foto", bs.buscar_fotos, q_foto),
-                                            (fichas, "ficha", bs.buscar_fichas, q_ficha)):
+    for activo, tipo, funcion, consulta in (
+        (fotos, "foto", _buscar_fotos_cacheado, q_foto),
+        (fichas, "ficha", _buscar_fichas_cacheado, q_ficha),
+    ):
         if activo:
-            diag = {}
             try:
-                E[f"cand_{tipo}_{clave}"] = funcion(consulta, clave=clave, diag=diag)
+                resultados, diag = funcion(consulta, clave)
+                E[f"cand_{tipo}_{clave}"] = resultados
             except bs.ErrorBusqueda:
+                diag = {}
                 avisos.append("El buscador no respondió. Intenta de nuevo en un minuto.")
             E[f"diag_{tipo}_{clave}"] = diag
     return avisos
@@ -2047,9 +2074,9 @@ def tarjeta(clave: str, desc: str):
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
-            if b1.button("Buscar en internet", key=f"b_{clave}", width="stretch"):
+            if b1.button("Buscar archivos faltantes", key=f"b_{clave}", width="stretch"):
                 with st.spinner("Buscando…"):
-                    for aviso in buscar_para(clave, q_foto, q_ficha):
+                    for aviso in buscar_para(clave, q_foto, q_ficha, fotos=not bool(foto), fichas=not bool(ficha)):
                         st.warning(aviso)
             with b2.popover("Más opciones", width="stretch"):
                 st.text_input("Buscar la foto como", value=sug_foto, key=f"qf_{clave}")
