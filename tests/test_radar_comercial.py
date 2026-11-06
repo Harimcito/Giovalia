@@ -221,10 +221,13 @@ class RadarComercialTests(unittest.TestCase):
                 db.write(backup.read("radar_comercial.db"))
                 db.close()
                 import sqlite3
-                with sqlite3.connect(db.name) as con:
+                con = sqlite3.connect(db.name)
+                try:
                     row = con.execute(
                         "SELECT nombre FROM oportunidades WHERE codigo='BACKUP-1'"
                     ).fetchone()
+                finally:
+                    con.close()
                 self.assertEqual(row[0], "Oportunidad para respaldo")
             finally:
                 Path(db.name).unlink(missing_ok=True)

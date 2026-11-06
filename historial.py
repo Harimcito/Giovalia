@@ -9,6 +9,7 @@ import re
 import shutil
 import sqlite3
 import unicodedata
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
@@ -138,12 +139,20 @@ class Historial:
             con.execute("VACUUM")
             con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
+    @contextmanager
     def _con(self):
         con = sqlite3.connect(self.db, timeout=30)
         con.execute("PRAGMA busy_timeout=30000")
         con.execute("PRAGMA secure_delete=ON")
         con.row_factory = sqlite3.Row
-        return con
+        try:
+            yield con
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
 
     # ------------------------------------------------------------ configuración
     def config(self, clave: str, defecto=None):

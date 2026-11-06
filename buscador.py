@@ -148,8 +148,16 @@ def buscar_fotos(
                 "fuente": fuente, "titulo": r.get("title", ""),
                 "verificada": verificada, "baja_resolucion": False}
 
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        validos = [c for c in pool.map(bajar, candidatos[:max_resultados * 3]) if c]
+    # Descarga en lotes priorizados. Si el primer lote ya tiene suficientes fotos,
+    # no esperes a imágenes de menor prioridad que no se van a mostrar.
+    validos = []
+    candidatos = candidatos[:max_resultados * 3]
+    for inicio in range(0, len(candidatos), max_resultados):
+        lote = candidatos[inicio:inicio + max_resultados]
+        with ThreadPoolExecutor(max_workers=min(6, len(lote))) as pool:
+            validos.extend(c for c in pool.map(bajar, lote) if c)
+        if len(validos) >= max_resultados:
+            break
     return validos[:max_resultados]
 
 

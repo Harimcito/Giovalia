@@ -145,7 +145,6 @@ def normalizar_detalle(detalle: dict | None) -> dict:
         },
         "institucion": {
             "organismo_comprador": str(institucion.get("organismo_comprador") or ""),
-            "rut": str(institucion.get("rut") or ""),
             "unidad_compra": str(institucion.get("unidad_compra") or ""),
             "region": numero_seguro(institucion.get("region")),
             "nombre_region": str(institucion.get("nombre_region") or ""),
@@ -848,9 +847,13 @@ class RadarStore:
         """Crea una copia consistente de la base propia del Radar sin detenerlo."""
         with tempfile.TemporaryDirectory(prefix="gioval-radar-backup-") as tmp:
             copia_db = Path(tmp) / "radar_comercial.db"
-            with sqlite3.connect(self.path, timeout=30) as origen:
-                with sqlite3.connect(copia_db) as destino:
-                    origen.backup(destino)
+            origen = sqlite3.connect(self.path, timeout=30)
+            destino = sqlite3.connect(copia_db)
+            try:
+                origen.backup(destino)
+            finally:
+                destino.close()
+                origen.close()
             salida = io.BytesIO()
             with zipfile.ZipFile(salida, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
                 archivo_zip.write(copia_db, arcname="radar_comercial.db")
