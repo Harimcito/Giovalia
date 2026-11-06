@@ -184,6 +184,9 @@ class Biblioteca:
             raise ValueError(f"El índice de productos no es válido: {self._idx}")
         self._snapshot_indice = deepcopy(self.indice)
         self._indice_mtime_ns = self._mtime_indice()
+        self._semantic_mtime_ns = None
+        self._semantic_postings: dict[str, set[str]] = {}
+        self._semantic_variantes: dict[str, tuple[frozenset[str], ...]] = {}
         self.asociar_carpetas_anteriores()
 
     def _mtime_indice(self) -> int:
@@ -203,6 +206,7 @@ class Biblioteca:
         self.indice = indice
         self._snapshot_indice = deepcopy(indice)
         self._indice_mtime_ns = mtime_ns
+        self._semantic_mtime_ns = None
         return True
 
     def _guardar_indice(self):
@@ -272,6 +276,29 @@ class Biblioteca:
             self.indice = combinado
             self._snapshot_indice = deepcopy(combinado)
             self._indice_mtime_ns = self._mtime_indice()
+            self._semantic_mtime_ns = None
+
+    def _asegurar_indice_semantico(self):
+        """Precalcula tokens y un índice invertido una vez por versión del catálogo."""
+        if self._semantic_mtime_ns == self._indice_mtime_ns:
+            return
+        postings: dict[str, set[str]] = {}
+        variantes_por_clave = {}
+        for clave, ficha in self.indice.items():
+            if identidad_conflictiva(clave, ficha):
+                continue
+            variantes = [ficha.get("nombre", clave), clave, *(ficha.get("aliases", []) or [])]
+            grupos = tuple(
+                _tokens_producto(str(variante), ignorar_similares=False)
+                for variante in variantes if variante
+            )
+            variantes_por_clave[clave] = grupos
+            for grupo in grupos:
+                for token in grupo:
+                    postings.setdefault(token, set()).add(clave)
+        self._semantic_postings = postings
+        self._semantic_variantes = variantes_por_clave
+        self._semantic_mtime_ns = self._indice_mtime_ns
 
     def asociar_carpetas_anteriores(self, score_minimo: float = 0.65, margen_minimo: float = 0.12) -> int:
         """Vincula archivos bajo claves antiguas cuando una sola ficha coincide con alta confianza."""
@@ -486,14 +513,13 @@ class Biblioteca:
         consulta = _tokens_producto(descripcion, ignorar_similares=True)
         if not consulta:
             return []
+        self._asegurar_indice_semantico()
+        candidatos = set().union(*(self._semantic_postings.get(token, set()) for token in consulta))
         resultados = []
-        for clave, ficha in self.indice.items():
-            if identidad_conflictiva(clave, ficha):
-                continue
-            variantes = [ficha.get("nombre", clave), clave, *(ficha.get("aliases", []) or [])]
+        for clave in candidatos:
+            ficha = self.indice.get(clave, {})
             mejor = 0.0
-            for variante in variantes:
-                tokens = _tokens_producto(variante, ignorar_similares=False)
+            for tokens in self._semantic_variantes.get(clave, ()):
                 if not tokens or _conflicto_producto(consulta, tokens):
                     continue
                 comunes = consulta & tokens
