@@ -235,6 +235,7 @@ def limpiar_estado_trabajo():
         "_mercado_publico_ticket",
         "_respaldo_zip",
         "_respaldo_nombre",
+        "_servicios_sesion",
     )
     valores = {clave: E[clave] for clave in conservar if clave in E}
     E.clear()
@@ -2966,14 +2967,25 @@ def configuracion_compacta():
                 key="config_carpeta",
                 help="Normalmente puedes dejar la biblioteca de este computador como está.",
             )
-        bib_panel = ct.Biblioteca(carpeta)
-        hist_panel = hs.Historial(carpeta)
+        servicios = E.get("_servicios_sesion")
+        if not isinstance(servicios, dict) or servicios.get("carpeta") != str(Path(carpeta).resolve()):
+            bib_panel = ct.Biblioteca(carpeta)
+            hist_panel = hs.Historial(carpeta)
+            E["_servicios_sesion"] = {
+                "carpeta": str(Path(carpeta).resolve()), "biblioteca": bib_panel, "historial": hist_panel,
+            }
+        else:
+            bib_panel = servicios["biblioteca"]
+            hist_panel = servicios["historial"]
+            bib_panel.refrescar_si_cambio()
         st.caption(f"{len(bib_panel.indice)} productos en el catálogo")
 
         with st.expander("Resumen comercial", expanded=False):
             registros = hist_panel.listar()
             borradores_resumen = []
-            for registro in hist_panel.listar("", "Borrador"):
+            for registro in registros:
+                if registro.get("estado") != "Borrador":
+                    continue
                 pdf_registro = Path(registro["pdf"]) if registro.get("pdf") else None
                 if not pdf_registro or not pdf_registro.exists():
                     borradores_resumen.append(registro)
@@ -3178,16 +3190,10 @@ def configuracion_compacta():
 
     # El contenido del popover se calcula también cuando está cerrado; reutilizamos sus servicios
     # para evitar abrir dos instancias del catálogo y del historial en cada ejecución.
-    api_key_actual, _ = li.buscar_api_key(APP_DIR)
-    if not api_key_actual:
-        api_key_actual = E.get("config_api_key", "")
+    api_key_actual = str(api_key or E.get("config_api_key", "")).strip()
     usar_lo = bool(E.get("config_usar_lo", False))
-    ticket_mp_actual, _ = mp.buscar_ticket(APP_DIR)
-    if not ticket_mp_actual:
-        ticket_mp_actual = str(
-            E.get("_mercado_publico_ticket")
-            or E.get("config_ticket_mercado_publico", "")
-        ).strip()
+    ticket_mp_actual = str(ticket_mp or E.get("_mercado_publico_ticket")
+                           or E.get("config_ticket_mercado_publico", "")).strip()
     return carpeta, bib_panel, hist_panel, api_key_actual, usar_lo, ticket_mp_actual
 
 

@@ -11,6 +11,7 @@ Estructura de la biblioteca (carpeta "biblioteca" por defecto):
       ...
 """
 import csv
+from functools import lru_cache
 import io
 import json
 import math
@@ -67,7 +68,8 @@ _MARCAS_PRODUCTO = {"EQUALIT", "DURACELL", "FULTON", "COLON", "HP", "CANON", "EP
                     "BROTHER", "SAMSUNG", "XEROX", "LEXMARK", "TOSHIBA", "LAVORO", "RHEIN", "TORRE"}
 
 
-def _tokens_producto(texto: str, ignorar_similares: bool = True) -> set[str]:
+@lru_cache(maxsize=8192)
+def _tokens_producto(texto: str, ignorar_similares: bool = True) -> frozenset[str]:
     t = unicodedata.normalize("NFKD", str(texto or "")).encode("ascii", "ignore").decode().upper()
     tokens = re.findall(r"[A-Z]+\d+[A-Z]*|\d+[A-Z]+|[A-Z]+|\d+(?:\.\d+)?", t)
     salida = set()
@@ -78,7 +80,26 @@ def _tokens_producto(texto: str, ignorar_similares: bool = True) -> set[str]:
             token = "SIMILAR"
         if token not in _PALABRAS_BUSQUEDA or (token == "SIMILAR" and not ignorar_similares):
             salida.add(token)
-    return salida
+    return frozenset(salida)
+
+
+@lru_cache(maxsize=32)
+def _carpetas_por_alias(ruta: str, mtime_ns: int) -> dict[str, tuple[Path, ...]]:
+    """Indexa una vez las carpetas antiguas; evita recorrer toda la biblioteca por producto."""
+    raiz = Path(ruta)
+    mapa: dict[str, list[Path]] = {}
+    for carpeta in raiz.iterdir():
+        if carpeta.is_dir():
+            mapa.setdefault(normalizar(carpeta.name), []).append(carpeta)
+    return {alias: tuple(candidatas) for alias, candidatas in mapa.items()}
+
+
+def _mapa_carpetas(raiz: Path) -> dict[str, tuple[Path, ...]]:
+    try:
+        mtime_ns = raiz.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    return _carpetas_por_alias(str(raiz.resolve()), mtime_ns)
 
 
 def _conflicto_producto(a: set[str], b: set[str]) -> bool:
@@ -162,7 +183,27 @@ class Biblioteca:
         if not isinstance(self.indice, dict):
             raise ValueError(f"El índice de productos no es válido: {self._idx}")
         self._snapshot_indice = deepcopy(self.indice)
+        self._indice_mtime_ns = self._mtime_indice()
         self.asociar_carpetas_anteriores()
+
+    def _mtime_indice(self) -> int:
+        try:
+            return self._idx.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    def refrescar_si_cambio(self) -> bool:
+        """Recarga el índice solo si otra sesión modificó la biblioteca."""
+        mtime_ns = self._mtime_indice()
+        if mtime_ns == self._indice_mtime_ns:
+            return False
+        indice = json.loads(self._idx.read_text("utf-8")) if self._idx.exists() else {}
+        if not isinstance(indice, dict):
+            raise ValueError(f"El índice de productos no es válido: {self._idx}")
+        self.indice = indice
+        self._snapshot_indice = deepcopy(indice)
+        self._indice_mtime_ns = mtime_ns
+        return True
 
     def _guardar_indice(self):
         """Guarda solo los cambios de esta instancia sin borrar productos añadidos por otra sesión."""
@@ -230,6 +271,7 @@ class Biblioteca:
             os.replace(temporal, self._idx)
             self.indice = combinado
             self._snapshot_indice = deepcopy(combinado)
+            self._indice_mtime_ns = self._mtime_indice()
 
     def asociar_carpetas_anteriores(self, score_minimo: float = 0.65, margen_minimo: float = 0.12) -> int:
         """Vincula archivos bajo claves antiguas cuando una sola ficha coincide con alta confianza."""
@@ -242,7 +284,11 @@ class Biblioteca:
                 aliases_vistos.setdefault(normalizar(valor), set()).add(clave)
 
         cantidad = 0
-        for carpeta in sorted(self.dir.iterdir(), key=lambda p: p.name.casefold()):
+        carpetas = sorted(
+            (carpeta for grupo in _mapa_carpetas(self.dir).values() for carpeta in grupo),
+            key=lambda p: p.name.casefold(),
+        )
+        for carpeta in carpetas:
             if not carpeta.is_dir() or carpeta.name.strip().upper() in self.indice:
                 continue
             tiene_archivo = any((carpeta / f"foto{ext}").exists() for ext in EXT_FOTO) or (carpeta / "ficha.pdf").exists()
@@ -289,8 +335,9 @@ class Biblioteca:
         ficha_producto = self.indice.get(clave.strip().upper(), {})
         alias_norm = {normalizar(clave)}
         alias_norm.update(normalizar(a) for a in ficha_producto.get("aliases", []) if a)
+        mapa_carpetas = _mapa_carpetas(self.dir)
         carpetas_anteriores = sorted(
-            (p for p in self.dir.iterdir() if p.is_dir() and p != c and normalizar(p.name) in alias_norm),
+            (p for alias in alias_norm for p in mapa_carpetas.get(alias, ()) if p != c),
             key=lambda p: p.name,
         )
         for anterior in carpetas_anteriores:
