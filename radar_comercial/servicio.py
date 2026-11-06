@@ -145,7 +145,6 @@ def normalizar_detalle(detalle: dict | None) -> dict:
         },
         "institucion": {
             "organismo_comprador": str(institucion.get("organismo_comprador") or ""),
-            "rut": str(institucion.get("rut") or ""),
             "unidad_compra": str(institucion.get("unidad_compra") or ""),
             "region": numero_seguro(institucion.get("region")),
             "nombre_region": str(institucion.get("nombre_region") or ""),

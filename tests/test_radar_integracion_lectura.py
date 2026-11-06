@@ -43,7 +43,8 @@ class IntegracionSoloLecturaTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             db_path = root / "cotizador.db"
-            with sqlite3.connect(db_path) as con:
+            con = sqlite3.connect(db_path)
+            try:
                 con.execute(
                     "CREATE TABLE cotizaciones (id INTEGER PRIMARY KEY, estado TEXT, total REAL, datos TEXT, cliente TEXT, rut TEXT)"
                 )
@@ -51,6 +52,9 @@ class IntegracionSoloLecturaTests(unittest.TestCase):
                     "INSERT INTO cotizaciones (estado,total,datos,cliente,rut) VALUES (?,?,?,?,?)",
                     ("Aceptada", 23800, json.dumps({"cliente":{"nombre":"CLIENTE PRIVADO","rut":"RUT-PRIVADO"},"lineas":[{"descripcion":"Tóner TN1060","cantidad":2}]}), "CLIENTE PRIVADO", "RUT-PRIVADO"),
                 )
+                con.commit()
+            finally:
+                con.close()
             rows = HistorialLectura(root).listar()
             self.assertEqual(len(rows), 1)
             self.assertEqual(set(rows[0]), {"estado", "total", "datos"})
