@@ -44,6 +44,14 @@ Gioval en el navegador y creará el acceso directo `Gioval` en el Escritorio. El
 limitado a este computador (`127.0.0.1`); para compartir la biblioteca con otros equipos,
 usa el modo de servidor central descrito en [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md).
 
+Al abrir desde ese acceso directo, Giovalia consulta la rama `main` de GitHub (como máximo una vez
+cada cinco minutos) y aplica la versión nueva antes de iniciar el servidor. Si el servidor ya está
+abierto, deja la actualización pendiente para no interrumpir una cotización; se aplicará al próximo
+inicio limpio. Si no hay conexión, abre la última versión instalada. La biblioteca, las
+cotizaciones y otros datos se mantienen en `%LOCALAPPDATA%\Gioval\Datos`; no se descargan ni
+reemplazan como parte de la actualización.
+El registro del actualizador queda en `%LOCALAPPDATA%\Gioval\logs\actualizador-escritorio.log`.
+
 ## Fotos y fichas desde internet
 En el paso 3 presiona «Buscar en internet lo que falta». Para cada producto verás las fotos
 y fichas encontradas con vista previa: elige con «Usar». Quedan guardadas en `biblioteca/`
@@ -119,3 +127,4 @@ computador» la guarda en `.env` para siempre. No compartas esta carpeta con la 
     biblioteca/CF283A/foto.jpg
     biblioteca/CF283A/ficha.pdf
     biblioteca/indice.json   (claves, alias aprendidos y últimos precios)
+
