@@ -224,6 +224,10 @@ def _request_json(ticket: str, url: str, params: dict | None = None) -> dict:
                 url, headers={"ticket": ticket.strip()},
                 params=params or {}, timeout=(8, 40),
             )
+            if intento == 0 and response.status_code in (502, 503, 504):
+                response.close()
+                time.sleep(1)
+                continue
             break
         except requests.RequestException as exc:
             if intento == 0:
@@ -250,7 +254,8 @@ def _request_json(ticket: str, url: str, params: dict | None = None) -> dict:
         )
     if response.status_code >= 500:
         raise APICompraAgilError(
-            f"La API de ChileCompra respondió HTTP {response.status_code}. Intenta más tarde.",
+            f"El servicio de ChileCompra no pudo entregar el detalle (HTTP {response.status_code}). "
+            "Intenta más tarde o descarga los adjuntos desde Mercado Público y súbelos aquí para cargar sus productos.",
             response.status_code,
         )
     if not response.ok:
