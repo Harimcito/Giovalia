@@ -12,6 +12,7 @@ import json
 import math
 import re
 import sqlite3
+import time
 import tempfile
 import unicodedata
 import zipfile
@@ -216,15 +217,23 @@ def _request_json(ticket: str, url: str, params: dict | None = None) -> dict:
         raise APICompraAgilError(
             "Ingresa tu ticket personal de la API de ChileCompra. La aplicación no lo guarda."
         )
-    try:
-        response = requests.get(
-            url, headers={"ticket": ticket.strip()},
-            params=params or {}, timeout=(5, 25),
-        )
-    except requests.RequestException as exc:
-        raise APICompraAgilError(
-            f"No pude conectar con ChileCompra: {exc.__class__.__name__}. Revisa internet e inténtalo de nuevo."
-        ) from exc
+    response = None
+    for intento in range(2):
+        try:
+            response = requests.get(
+                url, headers={"ticket": ticket.strip()},
+                params=params or {}, timeout=(8, 40),
+            )
+            break
+        except requests.RequestException as exc:
+            if intento == 0:
+                time.sleep(1)
+                continue
+            if isinstance(exc, requests.Timeout):
+                mensaje = "ChileCompra tardó demasiado en responder después de dos intentos. Espera un momento y vuelve a consultar; tu ticket no se ha cambiado."
+            else:
+                mensaje = "No pude conectar con ChileCompra. Revisa internet e inténtalo nuevamente."
+            raise APICompraAgilError(mensaje) from exc
 
     if response.status_code == 401:
         raise APICompraAgilError(
@@ -899,3 +908,4 @@ def resumen_historial_cotizador(registros: list[dict]) -> dict:
         "monto_aceptado": round(monto_aceptado, 2),
         "productos_frecuentes": sorted(productos.items(), key=lambda x: x[1], reverse=True)[:8],
     }
+
