@@ -1455,8 +1455,15 @@ def pedido_ui():
             if fuente == FUENTES[3]:
                 if not codigo_mp:
                     raise ValueError("Ingresa el código de la Compra Ágil o de la orden de compra.")
-                with st.spinner("Consultando Mercado Público…"):
-                    detalle_mp = mp.consultar_codigo(codigo_mp, mp_ticket)
+                mp.clasificar_codigo(codigo_mp)
+                try:
+                    with st.spinner("Consultando Mercado Público…"):
+                        detalle_mp = mp.consultar_codigo(codigo_mp, mp_ticket)
+                except mp.ErrorMercadoPublico as exc:
+                    if not archivos_mp:
+                        raise
+                    st.warning(f"{exc} Continuaré con los adjuntos que subiste. Revisa e ingresa el nombre y RUT del comprador; no se pudieron verificar en Mercado Público.")
+                    detalle_mp = {"codigo": codigo_mp, "productos": [], "documentos": []}
                 E["_mercado_publico_detalle"] = detalle_mp
                 E["_mercado_publico_codigo"] = codigo_mp
                 completar_comprador_mercado_publico(detalle_mp)
