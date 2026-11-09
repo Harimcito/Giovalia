@@ -239,6 +239,17 @@ def _request_json(ticket: str, url: str, params: dict | None = None) -> dict:
                 mensaje = "No pude conectar con ChileCompra. Revisa internet e inténtalo nuevamente."
             raise APICompraAgilError(mensaje) from exc
 
+    if response.status_code == 400:
+        try:
+            errores = response.json().get("errors") or []
+            detalle = "; ".join(str(e.get("detalle") or e.get("mensaje") or "")
+                                for e in errores if isinstance(e, dict))
+        except (ValueError, TypeError, AttributeError):
+            detalle = ""
+        detalle = detalle.replace(ticket.strip(), "[ticket omitido]")[:500]
+        raise APICompraAgilError(
+            "ChileCompra rechazó los parámetros de la consulta (HTTP 400). " + detalle, 400
+        )
     if response.status_code == 401:
         raise APICompraAgilError(
             "ChileCompra rechazó el ticket (HTTP 401). Revísalo en el portal oficial.", 401
@@ -314,7 +325,7 @@ def buscar_compras_agiles(
     region_ids = [int(n) for n in regiones if numero_seguro(n) is not None and 1 <= int(n) <= 16]
     estado_ids = [str(e).strip() for e in estados if str(e).strip() in ESTADOS_API]
     params_base = {
-        "tamano_pagina": max(1, min(int(tamano_pagina), 50)),
+        "tamano_pagina": max(10, min(int(tamano_pagina), 50)),
         "numero_pagina": 1,
         "ordenar_por": "FechaPublicacion",
     }
