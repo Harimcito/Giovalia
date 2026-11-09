@@ -242,13 +242,13 @@ def consultar_codigo(codigo: str, ticket: str) -> dict:
             if not transitorio:
                 raise ErrorMercadoPublico(str(exc)) from exc
             try:
-                listado = _request_json(ticket, API_LIST_URL, params={"id": codigo, "tamano_pagina": 1})
+                listado = _request_json(ticket, API_LIST_URL, params={"id": codigo, "tamano_pagina": 10})
                 items = (listado.get("payload") or {}).get("items") or []
                 encontrado = next((item for item in items if isinstance(item, dict)
                                    and str(item.get("codigo", "")).casefold() == codigo.casefold()), None)
             except (APICompraAgilError, TypeError, AttributeError) as alternativa:
                 raise ErrorMercadoPublico(
-                    f"{exc} La búsqueda alternativa por código tampoco pudo completarse."
+                    f"{exc} La búsqueda alternativa por código tampoco pudo completarse: {alternativa}"
                 ) from alternativa
             if not encontrado:
                 raise ErrorMercadoPublico(str(exc)) from exc
