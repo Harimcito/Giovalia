@@ -15,3 +15,11 @@ radar_comercial.db
 *.db-shm
 *.db-wal
 ~$*.xlsx
+
+# Datos privados del servidor
+Acceso/
+Backups/
+Datos/
+biblioteca/
+.streamlit/secrets.toml
+servidor-principal.json
