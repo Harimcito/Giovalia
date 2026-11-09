@@ -232,11 +232,34 @@ def consultar_codigo(codigo: str, ticket: str) -> dict:
     if not ticket:
         raise ErrorMercadoPublico("Configura tu ticket en Ajustes antes de consultar Mercado Público.")
     if tipo == "compra_agil":
-        from radar_comercial.servicio import APICompraAgilError, obtener_detalle_compra_agil
+        from radar_comercial.servicio import APICompraAgilError, obtener_detalle_compra_agil, _request_json, API_LIST_URL
         try:
             respuesta = obtener_detalle_compra_agil(ticket, codigo)
         except APICompraAgilError as exc:
-            raise ErrorMercadoPublico(str(exc)) from exc
+            transitorio = exc.status_code in (502, 503, 504) or isinstance(
+                exc.__cause__, (requests.Timeout, requests.ConnectionError)
+            )
+            if not transitorio:
+                raise ErrorMercadoPublico(str(exc)) from exc
+            try:
+                listado = _request_json(ticket, API_LIST_URL, params={"id": codigo, "tamano_pagina": 1})
+                items = (listado.get("payload") or {}).get("items") or []
+                encontrado = next((item for item in items if isinstance(item, dict)
+                                   and str(item.get("codigo", "")).casefold() == codigo.casefold()), None)
+            except (APICompraAgilError, TypeError, AttributeError) as alternativa:
+                raise ErrorMercadoPublico(
+                    f"{exc} La búsqueda alternativa por código tampoco pudo completarse."
+                ) from alternativa
+            if not encontrado:
+                raise ErrorMercadoPublico(str(exc)) from exc
+            resultado = _normalizar_compra_agil({**encontrado, "presupuesto": encontrado.get("montos") or {}})
+            resultado["detalle_incompleto"] = True
+            resultado["aviso"] = (
+                "El detalle de ChileCompra no respondió. Recuperé los datos disponibles por la búsqueda "
+                "oficial del código. Los productos no pudieron verificarse: carga los adjuntos para "
+                "extraerlos o vuelve a consultar más tarde."
+            )
+            return resultado
         return _normalizar_compra_agil(respuesta)
 
     respuesta = _peticion(API_ORDEN_COMPRA, ticket, params={"codigo": codigo, "ticket": ticket})

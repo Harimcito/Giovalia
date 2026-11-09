@@ -22,6 +22,7 @@ import cotizador as ct
 import historial as hs
 import lector_ia as li
 import mercado_publico as mp
+from radar_comercial import ui_montos as montos
 import pdf_cotizacion as pc
 import revisor as rv
 
@@ -221,10 +222,10 @@ E.setdefault("vista", VISTAS[0])
 def editor(df, **kw):
     """Tabla editable que se estira para mostrar todas sus filas, sin barra de desplazamiento interna."""
     try:
-        return st.data_editor(df, height="content", **kw)
+        return montos.editor(df, height="content", **kw)
     except Exception:  # versiones antiguas de Streamlit: calcula el alto a mano
         extra = 1 if kw.get("num_rows") == "dynamic" else 0
-        return st.data_editor(df, height=min(35 * (len(df) + 1 + extra) + 8, 2400), **kw)
+        return montos.editor(df, height=min(35 * (len(df) + 1 + extra) + 8, 2400), **kw)
 
 def limpiar_estado_trabajo():
     """Reinicia la cotización actual sin cerrar el login ni borrar preferencias útiles."""
@@ -724,7 +725,7 @@ def mostrar_resumen_lineas():
     if not filas:
         return
     with st.expander("Resumen por producto y subtotales", expanded=True):
-        st.dataframe(
+        montos.tabla(
             pd.DataFrame(filas), hide_index=True, width="stretch",
             column_config={
                 "Cantidad": st.column_config.NumberColumn(format="%.2f"),
@@ -1296,7 +1297,7 @@ def selector_borradores():
                 }
                 if not GIOVAL_REQUIRE_ACCESS:
                     tabla["Cliente"] = [r.get("cliente") or "Sin cliente" for r in recientes]
-                st.dataframe(
+                montos.tabla(
                     pd.DataFrame(tabla), hide_index=True, width="stretch",
                     column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
                     alt="Cotizaciones recientes",
@@ -1322,6 +1323,8 @@ def aplicar_cliente_guardado():
 
 
 def _mostrar_detalle_mercado_publico(detalle: dict):
+    if detalle.get("aviso"):
+        st.warning(detalle["aviso"])
     st.markdown(f"**{detalle.get('codigo', '')} · {detalle.get('nombre', 'Solicitud de compra')}**")
     datos = [
         ("Tipo", detalle.get("tipo")),
@@ -1345,7 +1348,7 @@ def _mostrar_detalle_mercado_publico(detalle: dict):
         st.caption("La API no informa adjuntos para este código.")
         return
     st.markdown("**Archivos adjuntos informados por Mercado Público**")
-    st.dataframe(
+    montos.tabla(
         pd.DataFrame([{"Archivo": d.get("nombre", ""), "Identificador": d.get("id", "")} for d in documentos]),
         hide_index=True,
         width="stretch",
@@ -1466,6 +1469,8 @@ def pedido_ui():
                     detalle_mp = {"codigo": codigo_mp, "productos": [], "documentos": []}
                 E["_mercado_publico_detalle"] = detalle_mp
                 E["_mercado_publico_codigo"] = codigo_mp
+                if detalle_mp.get("aviso"):
+                    st.warning(detalle_mp["aviso"])
                 completar_comprador_mercado_publico(detalle_mp)
                 filas = list(detalle_mp.get("productos", []))
                 if archivos_mp:
@@ -1804,8 +1809,8 @@ def agregar_desde_catalogo():
         c1, c2 = st.columns([1, 2])
         cantidad = c1.number_input("Cantidad", min_value=1, value=1, step=1,
                                    key=f"catalogo_cantidad_{producto['clave']}")
-        precio_ui = c2.number_input(
-            "Precio unitario", min_value=0.0, step=100.0,
+        precio_ui = montos.entrada(
+            "Precio unitario", _container=c2, min_value=0.0, step=100.0,
             value=float(precio_sugerido or 0), format="%.0f",
             key=f"catalogo_precio_{producto['clave']}",
         )
@@ -3028,7 +3033,7 @@ def configuracion_compacta():
                         registro.get("cliente") or "Sin cliente" for registro in recientes
                     ]
                 df_recientes = pd.DataFrame(datos_recientes)
-                st.dataframe(
+                montos.tabla(
                     df_recientes,
                     hide_index=True,
                     width="stretch",
