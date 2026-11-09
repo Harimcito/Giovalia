@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import acceso
 import shutil
 import sqlite3
 import stat
@@ -27,8 +28,11 @@ import revisor as rv
 
 APP_DIR = Path(os.environ.get("GIOVAL_DATA_DIR") or Path(__file__).parent).expanduser().resolve()
 E = st.session_state
-GIOVAL_REQUIRE_ACCESS = os.environ.get("GIOVAL_REQUIRE_ACCESS", "false").strip().lower() in {"1", "true", "yes", "on"}
-GIOVAL_ACCESS_PASSWORD = os.environ.get("GIOVAL_ACCESS_PASSWORD", "")
+GIOVAL_PRIVACIDAD_COMPARTIDA = os.environ.get("GIOVAL_REQUIRE_ACCESS", "false").strip().lower() in {"1", "true", "yes", "on"}
+GIOVAL_PROFILES = acceso.perfiles_activos()
+GIOVAL_SHARED_SERVER = GIOVAL_PROFILES or GIOVAL_PRIVACIDAD_COMPARTIDA
+if GIOVAL_PROFILES:
+    GIOVAL_PRIVACIDAD_COMPARTIDA = False
 GIOVAL_ALLOW_INITIAL_IMPORT = os.environ.get("GIOVAL_ALLOW_INITIAL_IMPORT", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 # Aplica datos de una cotización importada al inicio de la siguiente ejecución,
@@ -49,6 +53,17 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+if GIOVAL_PROFILES:
+    acceso.exigir_perfil()
+
+
+def guardar_archivos_compartidos(cot_id, **archivos):
+    version = E.get("_cotizacion_version") if GIOVAL_PROFILES else None
+    hist.guardar_archivos(cot_id, version_esperada=version, **archivos)
+    registro = hist.obtener(cot_id)
+    if registro:
+        E["_cotizacion_version"] = registro.get("actualizado")
 
 
 def crear_respaldo_biblioteca(carpeta: Path) -> bytes:
@@ -230,6 +245,8 @@ def limpiar_estado_trabajo():
     """Reinicia la cotización actual sin cerrar el login ni borrar preferencias útiles."""
     conservar = (
         "gioval_autenticado",
+        "_gioval_token",
+        "_gioval_identidad",
         "config_usar_lo",
         "config_api_key",
         "_mercado_publico_ticket",
@@ -269,7 +286,7 @@ def mostrar_pasos(actual: int):
                 st.badge(f"{i}. {nombre}", icon=":material/radio_button_unchecked:", color="gray")
     st.progress((actual - 1) / 3, text=f"Etapa {actual} de 4 · {nombres[actual - 1]}")
     if E.get("_ultima_guarda"):
-        etiqueta = "biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "este computador"
+        etiqueta = "biblioteca compartida" if GIOVAL_PRIVACIDAD_COMPARTIDA else "este computador"
         st.caption(f"Guardado en {etiqueta} · {E['_ultima_guarda']}")
 
 
@@ -496,12 +513,12 @@ def cargar(ruta: Path, origen_pedido: str):
         if registro_guardado and registro_guardado.get("xlsx") and Path(registro_guardado["xlsx"]).exists():
             E["ruta"] = Path(registro_guardado["xlsx"])
         elif Path(ruta).exists():
-            hist.guardar_archivos(E["cot_id"], xlsx=ruta)
+            guardar_archivos_compartidos(E["cot_id"], xlsx=ruta)
             registro_guardado = hist.obtener(E["cot_id"])
             if registro_guardado and registro_guardado.get("xlsx"):
                 E["ruta"] = Path(registro_guardado["xlsx"])
         try:
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_SHARED_SERVER:
                 hist.actualizar_si_version(
                     E["cot_id"], E.get("_cotizacion_version"), origen=origen_pedido
                 )
@@ -832,7 +849,7 @@ def persistir_borrador():
     if not registro:
         return
     try:
-        if GIOVAL_REQUIRE_ACCESS:
+        if GIOVAL_SHARED_SERVER:
             version_esperada = E.get("_cotizacion_version")
             if not version_esperada:
                 E["_conflicto_guardado"] = True
@@ -874,7 +891,7 @@ def widget_numero_cotizacion():
         E["error_numero"] = "El número de cotización no puede quedar vacío."
     elif numero != registro["numero"]:
         try:
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_SHARED_SERVER:
                 hist.renumerar(
                     cot_id, numero, version_esperada=E.get("_cotizacion_version")
                 )
@@ -1056,7 +1073,7 @@ def refrescar_excel_actual():
     cot_id = E.get("cot_id")
     if not cot_id or "lineas" not in E:
         return
-    if E.get("origen_pedido") == "cotizacion" and not E.get("editado_manual", False) and not GIOVAL_REQUIRE_ACCESS:
+    if E.get("origen_pedido") == "cotizacion" and not E.get("editado_manual", False) and not GIOVAL_PRIVACIDAD_COMPARTIDA:
         return  # En modo local se respeta el Excel subido; el espacio compartido lo regenera sin datos de cliente.
     registro = hist.obtener(cot_id)
     if not registro:
@@ -1074,11 +1091,11 @@ def refrescar_excel_actual():
     cliente["numero"] = registro["numero"]
     ruta_tmp = Path(tempfile.mkdtemp()) / "cotizacion_actualizada.xlsx"
     ct.crear_cotizacion_xlsx(lineas_excel, cliente, ruta_tmp)
-    if GIOVAL_REQUIRE_ACCESS:
+    if GIOVAL_PRIVACIDAD_COMPARTIDA:
         # El Excel contiene los datos del cliente de esta sesión: queda temporal y solo se descarga.
         E["ruta"] = ruta_tmp
     else:
-        hist.guardar_archivos(cot_id, xlsx=ruta_tmp)
+        guardar_archivos_compartidos(cot_id, xlsx=ruta_tmp)
         registro = hist.obtener(cot_id)
         if registro and registro.get("xlsx"):
             E["ruta"] = Path(registro["xlsx"])
@@ -1246,7 +1263,7 @@ def selector_borradores():
         with accion:
             st.button(
                 "Nueva cotización", icon=":material/add:", type="primary",
-                width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
+                width="stretch", on_click=acceso.proteger(iniciar_borrador), key="inicio_nueva_cotizacion",
             )
 
     m1, m2, m3, m4 = st.columns(4)
@@ -1263,7 +1280,7 @@ def selector_borradores():
                 opciones = {
                     (
                         f"{r['numero']} · {fecha_corta(r.get('fecha') or '')}"
-                        if GIOVAL_REQUIRE_ACCESS
+                        if GIOVAL_PRIVACIDAD_COMPARTIDA
                         else f"{r['numero']} · {r.get('cliente') or 'Sin cliente'} · {fecha_corta(r.get('fecha') or '')}"
                     ): r["id"]
                     for r in borradores
@@ -1274,14 +1291,14 @@ def selector_borradores():
                 )
                 st.button(
                     "Continuar cotización", icon=":material/arrow_forward:", type="primary",
-                    width="stretch", on_click=restaurar_borrador, args=(opciones[elegido],),
+                    width="stretch", on_click=acceso.proteger(restaurar_borrador), args=(opciones[elegido],),
                     key="inicio_retomar_borrador",
                 )
             else:
                 st.caption("No tienes borradores pendientes.")
                 st.button(
                     "Crear una cotización", icon=":material/add:", type="primary",
-                    width="stretch", on_click=iniciar_borrador, key="inicio_comenzar_ahora",
+                    width="stretch", on_click=acceso.proteger(iniciar_borrador), key="inicio_comenzar_ahora",
                 )
     with der:
         with st.container(border=True):
@@ -1294,7 +1311,7 @@ def selector_borradores():
                     "Total": [r.get("total") or 0 for r in recientes],
                     "Estado": [r.get("estado") or "Borrador" for r in recientes],
                 }
-                if not GIOVAL_REQUIRE_ACCESS:
+                if not GIOVAL_PRIVACIDAD_COMPARTIDA:
                     tabla["Cliente"] = [r.get("cliente") or "Sin cliente" for r in recientes]
                 st.dataframe(
                     pd.DataFrame(tabla), hide_index=True, width="stretch",
@@ -1623,7 +1640,7 @@ def pedido_ui():
             registro = hist.obtener(cot_id)
             if registro and _texto_seguro(E.get("cot_numero")) != registro["numero"]:
                 try:
-                    if GIOVAL_REQUIRE_ACCESS:
+                    if GIOVAL_SHARED_SERVER:
                         hist.renumerar(
                             cot_id,
                             _texto_seguro(E.get("cot_numero")),
@@ -1660,7 +1677,7 @@ def pedido_ui():
                     )
                     version_actual = E.get("_cotizacion_version")
                     version_coincide = (
-                        not GIOVAL_REQUIRE_ACCESS
+                        not GIOVAL_PRIVACIDAD_COMPARTIDA
                         or (version_actual and version_actual == candidato.get("actualizado"))
                     )
                     if firma_actual == firma_guardada and version_coincide:
@@ -1677,7 +1694,7 @@ def pedido_ui():
                 icon=":material/content_copy:",
                 type="primary",
                 width="stretch",
-                on_click=guardar_conflicto_como_nueva,
+                on_click=acceso.proteger(guardar_conflicto_como_nueva),
                 key="pedido_recuperar_borrador_como_nuevo",
             )
             return
@@ -1705,7 +1722,7 @@ def pedido_ui():
                 "orden_texto": E.get("orden_texto", ""),
                 "mercado_publico": datos_mercado_publico_guardables(),
             }
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_SHARED_SERVER:
                 hist.actualizar_si_version(
                     E["cot_id"], E.get("_cotizacion_version"),
                     datos=datos_cotizacion, **campos_cotizacion
@@ -1715,7 +1732,7 @@ def pedido_ui():
             registro_nuevo = hist.obtener(E["cot_id"])
             if registro_nuevo:
                 E["_cotizacion_version"] = registro_nuevo.get("actualizado")
-            hist.guardar_archivos(E["cot_id"], xlsx=ruta)
+            guardar_archivos_compartidos(E["cot_id"], xlsx=ruta)
             hist.guardar_cliente(cliente)
         except hs.ConflictoActualizacion as exc:
             E["_conflicto_guardado"] = True
@@ -2305,7 +2322,7 @@ def panel_revision(en_paso_4: bool = False) -> int:
                 "Volver a productos y precios",
                 icon=":material/edit:",
                 width="stretch",
-                on_click=ir_a,
+                on_click=acceso.proteger(ir_a),
                 args=(2,),
                 key="revision_volver_productos",
             )
@@ -2324,7 +2341,7 @@ def registrar_en_historial(pdf_bytes: bytes):
     """Guarda el PDF en el historial (y registra la cotización si venía de un Excel ya hecho)."""
     cot_id = E.get("cot_id")
     if cot_id and hist.obtener(cot_id):
-        hist.guardar_archivos(cot_id, pdf=pdf_bytes)
+        guardar_archivos_compartidos(cot_id, pdf=pdf_bytes)
         return
     if E.get("origen_pedido") == "cotizacion":
         d = pc.leer_para_pdf(E["ruta"])
@@ -2337,7 +2354,8 @@ def registrar_en_historial(pdf_bytes: bytes):
                                {"neto": tot.get("TOTALNETO") or 0, "iva": tot.get("IVA") or 0,
                                 "total": tot.get("TOTAL") or 0},
                                con_iva=False, origen="cotizacion", numero=numero)
-        hist.guardar_archivos(cot_id, xlsx=E["ruta"], pdf=pdf_bytes)
+        E["_cotizacion_version"] = hist.obtener(cot_id)["actualizado"]
+        guardar_archivos_compartidos(cot_id, xlsx=E["ruta"], pdf=pdf_bytes)
         E["cot_id"] = cot_id
         registro_nuevo = hist.obtener(cot_id)
         E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
@@ -2425,9 +2443,9 @@ def paso_4():
                 E.pop(clave_estado, None)
             try:
                 if E.get("cot_id") and hist.obtener(E["cot_id"]):
-                    if GIOVAL_REQUIRE_ACCESS:
+                    if GIOVAL_SHARED_SERVER:
                         hist.actualizar_si_version(
-                            E["cot_id"], E.get("_cotizacion_version"), estado="Borrador"
+                            E["cot_id"], E.get("_cotizacion_version"), pdf=None, estado="Borrador"
                         )
                     else:
                         hist.actualizar(E["cot_id"], pdf=None, estado="Borrador")
@@ -2442,7 +2460,7 @@ def paso_4():
             st.rerun()
 
     if "pdf_bytes" in E:
-        if GIOVAL_REQUIRE_ACCESS:
+        if GIOVAL_PRIVACIDAD_COMPARTIDA:
             st.success(
                 f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas. La cotización comercial quedó en el historial compartido; "
                 "el PDF conserva los datos de cliente ingresados en esta sesión y no se almacena en la biblioteca común."
@@ -2472,9 +2490,9 @@ def paso_4():
         atras, nueva = st.columns(2)
         if atras.button("← Volver a fotos y fichas", width="stretch"):
             ir_a(3)
-        nueva.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
+        nueva.button("Hacer otra cotización", width="stretch", on_click=acceso.proteger(limpiar_estado_trabajo))
     else:
-        nueva = st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
+        nueva = st.button("Hacer otra cotización", width="stretch", on_click=acceso.proteger(limpiar_estado_trabajo))
 
 
 # ============================================================== HISTORIAL
@@ -2586,7 +2604,7 @@ def historial_cotizaciones():
     f1, f2, f3 = st.columns([2.5, 1, 1.4])
     texto = f1.text_input(
         "Buscar",
-        placeholder="Número de cotización" if GIOVAL_REQUIRE_ACCESS else "Número, cliente, RUT o notas",
+        placeholder="Número de cotización" if GIOVAL_PRIVACIDAD_COMPARTIDA else "Número, cliente, RUT o notas",
         key="h_texto",
     )
     estado = f2.selectbox("Estado", ["Todos"] + hs.ESTADOS, key="h_estado")
@@ -2613,23 +2631,27 @@ def historial_cotizaciones():
         "Fecha": [fecha_corta(r["fecha"]) for r in regs],
         "Total": [r["total"] for r in regs], "Estado": [r["estado"] for r in regs],
     }
-    if not GIOVAL_REQUIRE_ACCESS:
+    if not GIOVAL_PRIVACIDAD_COMPARTIDA:
         datos_tabla["Cliente"] = [r["cliente"] for r in regs]
         datos_tabla["Notas"] = [r["notas"] or "" for r in regs]
+    versiones_historial = E.setdefault(
+        f"_h_versiones_{E['h_ver']}_{texto}_{estado}",
+        {r["id"]: r.get("actualizado") for r in regs},
+    )
     df = pd.DataFrame(datos_tabla)
     editado = editor(
         df, hide_index=True, width="stretch", key=f"h_tabla_{E['h_ver']}_{texto}_{estado}",
         disabled=[c for c in ("N°", "Fecha", "Total", "Cliente") if c in df.columns],
         column_config={"id": None, "Total": st.column_config.NumberColumn(format="$ %d"),
                        "Estado": st.column_config.SelectboxColumn(options=hs.ESTADOS, required=True)})
-    if st.button("Guardar estados" if GIOVAL_REQUIRE_ACCESS else "Guardar estados y notas", icon=":material/save:"):
+    if st.button("Guardar estados" if GIOVAL_PRIVACIDAD_COMPARTIDA else "Guardar estados y notas", icon=":material/save:"):
         cambios, conflictos = 0, 0
         for (_, fila), reg in zip(editado.iterrows(), regs):
             nuevo_estado = fila["Estado"]
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_PRIVACIDAD_COMPARTIDA:
                 if nuevo_estado != reg["estado"]:
                     try:
-                        hist.actualizar_si_version(reg["id"], reg.get("actualizado"), estado=nuevo_estado)
+                        hist.actualizar_si_version(reg["id"], versiones_historial.get(reg["id"]), estado=nuevo_estado)
                         cambios += 1
                         if E.get("cot_id") == reg["id"]:
                             actual = hist.obtener(reg["id"])
@@ -2645,7 +2667,14 @@ def historial_cotizaciones():
             else:
                 nuevas_notas = str(fila["Notas"] or "")
                 if nuevo_estado != reg["estado"] or nuevas_notas != (reg["notas"] or ""):
-                    hist.actualizar(reg["id"], estado=nuevo_estado, notas=nuevas_notas)
+                    if GIOVAL_PROFILES:
+                        try:
+                            hist.actualizar_si_version(reg["id"], versiones_historial.get(reg["id"]), estado=nuevo_estado, notas=nuevas_notas)
+                        except hs.ConflictoActualizacion:
+                            conflictos += 1
+                            continue
+                    else:
+                        hist.actualizar(reg["id"], estado=nuevo_estado, notas=nuevas_notas)
                     cambios += 1
         E["h_ver"] += 1
         if conflictos:
@@ -2656,14 +2685,14 @@ def historial_cotizaciones():
 
     st.divider()
     opciones = {
-        (f"{r['numero']} · {rv.clp(r['total'] or 0)}" if GIOVAL_REQUIRE_ACCESS
+        (f"{r['numero']} · {rv.clp(r['total'] or 0)}" if GIOVAL_PRIVACIDAD_COMPARTIDA
          else f"{r['numero']} · {r['cliente'] or 'sin cliente'} · {rv.clp(r['total'] or 0)}"): r["id"]
         for r in regs
     }
     elegida = st.selectbox("Elige una cotización para ver qué puedes hacer con ella", list(opciones))
     rec = hist.obtener(opciones[elegida])
     with st.container(border=True):
-        if GIOVAL_REQUIRE_ACCESS:
+        if GIOVAL_PRIVACIDAD_COMPARTIDA:
             st.markdown(f"**{rec['numero']}** · Cotización comercial compartida · {rec['estado']} · "
                         f"{fecha_corta(rec['fecha'])}")
         else:
@@ -2677,18 +2706,18 @@ def historial_cotizaciones():
         else:
             d1.caption(
                 "El PDF no se archiva para proteger los datos del cliente. Abre la cotización y vuelve a generarlo."
-                if GIOVAL_REQUIRE_ACCESS else "Todavía no se ha creado el PDF de esta cotización."
+                if GIOVAL_PRIVACIDAD_COMPARTIDA else "Todavía no se ha creado el PDF de esta cotización."
             )
         if rec["xlsx"] and xlsx.exists():
             d2.download_button("Descargar el Excel", xlsx.read_bytes(), file_name=xlsx.name, icon=":material/download:",
                                width="stretch", key=f"dx_{rec['id']}")
-        if GIOVAL_REQUIRE_ACCESS:
+        if GIOVAL_PRIVACIDAD_COMPARTIDA:
             d2.caption("El Excel se genera en tu sesión y se descarga; no se guarda en la biblioteca común.")
         b1, b2 = st.columns(2)
         b1.button("Usar como base de una cotización nueva", width="stretch", key=f"dup_{rec['id']}",
-                  on_click=cargar_en_pedido, args=(rec["id"], False))
+                  on_click=acceso.proteger(cargar_en_pedido), args=(rec["id"], False))
         b2.button("Seguir editando esta cotización", width="stretch", key=f"edi_{rec['id']}",
-                  on_click=cargar_en_pedido, args=(rec["id"], True))
+                  on_click=acceso.proteger(cargar_en_pedido), args=(rec["id"], True))
         with st.expander("Eliminar esta cotización"):
             seguro = st.checkbox("Sí, quiero eliminarla para siempre", key=f"del_{rec['id']}")
             if st.button("Eliminar", disabled=not seguro, key=f"delb_{rec['id']}"):
@@ -2717,7 +2746,7 @@ def clientes_ui():
 
 def vista_historial():
     st.title("Cotizaciones", icon=":material/receipt_long:")
-    if GIOVAL_REQUIRE_ACCESS:
+    if GIOVAL_PRIVACIDAD_COMPARTIDA:
         st.caption(
             "Biblioteca compartida: se sincronizan los productos y el historial comercial "
             "(líneas, precios, totales y estado). Los datos de cliente se ingresan en cada "
@@ -2922,20 +2951,20 @@ def vista_productos():
         st.text_input("Nuevo código", key=f"ren_{elegido}")
         st.checkbox("Combinar si ese código ya existe", key=f"comb_{elegido}")
         st.button("Cambiar el código", key=f"renb_{elegido}",
-                  on_click=renombrar_producto, args=(elegido,))
+                  on_click=acceso.proteger(renombrar_producto), args=(elegido,))
         st.divider()
         seguro = st.checkbox(
             "Confirmo que quiero eliminar el producto y sus archivos",
             key=f"delp_{elegido}",
         )
         st.button("Eliminar producto", disabled=not seguro, key=f"delpb_{elegido}",
-                  on_click=borrar_producto, args=(elegido,))
+                  on_click=acceso.proteger(borrar_producto), args=(elegido,))
 
 
 def configuracion_compacta():
     """Muestra opciones secundarias bajo demanda y devuelve los servicios activos de la app."""
     carpeta_compartida = str((APP_DIR / "biblioteca").resolve())
-    if not GIOVAL_REQUIRE_ACCESS:
+    if not GIOVAL_SHARED_SERVER:
         E.setdefault("config_carpeta", carpeta_compartida)
     api_key, origen_key = li.buscar_api_key(APP_DIR)
     ticket_mp, origen_ticket_mp = mp.buscar_ticket(APP_DIR)
@@ -2955,10 +2984,12 @@ def configuracion_compacta():
         key="settings-popover",
         help="Preferencias, conexión de IA, numeración y copia de seguridad.",
     ):
+        if GIOVAL_PROFILES:
+            acceso.panel_cuenta()
         st.markdown("### Preferencias")
         st.caption("Las opciones avanzadas están aquí para mantener despejada la pantalla de trabajo.")
 
-        if GIOVAL_REQUIRE_ACCESS:
+        if GIOVAL_SHARED_SERVER:
             carpeta = carpeta_compartida
             st.text_input(
                 "Biblioteca compartida",
@@ -3023,7 +3054,7 @@ def configuracion_compacta():
                     "Total": [registro.get("total") or 0 for registro in recientes],
                     "Estado": [registro.get("estado") or "Borrador" for registro in recientes],
                 }
-                if not GIOVAL_REQUIRE_ACCESS:
+                if not GIOVAL_PRIVACIDAD_COMPARTIDA:
                     datos_recientes["Cliente"] = [
                         registro.get("cliente") or "Sin cliente" for registro in recientes
                     ]
@@ -3041,10 +3072,10 @@ def configuracion_compacta():
         st.markdown("**Conexión de inteligencia artificial**")
         if api_key:
             st.caption(f"Conectada · Clave encontrada en {origen_key}")
-        elif GIOVAL_REQUIRE_ACCESS:
+        elif GIOVAL_SHARED_SERVER:
             st.caption(
                 "La IA no está configurada en el servidor. El administrador puede definir "
-                "OPENAI_API_KEY en las variables del servicio Render; no se guardan claves "
+                "OPENAI_API_KEY en la configuración privada de este servidor; no se guardan claves "
                 "personales desde una sesión compartida."
             )
         else:
@@ -3071,7 +3102,7 @@ def configuracion_compacta():
         st.markdown("**Conexión a Mercado Público**")
         if ticket_mp:
             st.caption(f"Conectada · Ticket encontrado en {origen_ticket_mp}")
-        elif GIOVAL_REQUIRE_ACCESS:
+        elif GIOVAL_SHARED_SERVER:
             st.caption(
                 "El administrador debe definir MERCADO_PUBLICO_TICKET en los secretos de Streamlit "
                 "o como variable privada del servidor."
@@ -3083,7 +3114,7 @@ def configuracion_compacta():
                 "Ticket API de Mercado Público",
                 type="password",
                 key="config_ticket_mercado_publico",
-                on_change=guardar_ticket_mp_sesion,
+                on_change=acceso.proteger(guardar_ticket_mp_sesion),
                 help="Se usa para consultar solicitudes Compra Ágil y órdenes por código. No se incluye en las cotizaciones.",
             )
             st.caption("Se conserva solo en la sesión actual. También puedes definir MERCADO_PUBLICO_TICKET en los secretos privados del servidor.")
@@ -3118,7 +3149,7 @@ def configuracion_compacta():
                 st.success("Numeración guardada.")
 
         with st.expander("Copia de seguridad", expanded=False):
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_PRIVACIDAD_COMPARTIDA:
                 st.caption(
                     "El ZIP incluye productos, fotos, fichas y el historial comercial compartido; "
                     "no incluye la libreta de clientes ni PDF/Excel finales con datos personales."
@@ -3159,7 +3190,7 @@ def configuracion_compacta():
                     "Guárdalo también en otro disco o ubicación segura."
                 )
 
-            if GIOVAL_REQUIRE_ACCESS and GIOVAL_ALLOW_INITIAL_IMPORT:
+            if GIOVAL_SHARED_SERVER and GIOVAL_ALLOW_INITIAL_IMPORT:
                 st.divider()
                 st.markdown("**Importar respaldo inicial al espacio compartido**")
                 st.caption("Solo debe usarse cuando la biblioteca central está vacía, antes de que el equipo empiece a trabajar.")
@@ -3193,7 +3224,7 @@ def configuracion_compacta():
                         st.error(f"No pude importar el respaldo: {exc}")
 
         st.divider()
-        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=limpiar_estado_trabajo)
+        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=acceso.proteger(limpiar_estado_trabajo))
 
     # El contenido del popover se calcula también cuando está cerrado; reutilizamos sus servicios
     # para evitar abrir dos instancias del catálogo y del historial en cada ejecución.
@@ -3231,7 +3262,7 @@ def guardar_conflicto_como_nueva():
 
 # ============================================================== PANTALLA
 # Marca y navegación compactas para priorizar el trabajo del cotizador.
-if GIOVAL_REQUIRE_ACCESS:
+if GIOVAL_SHARED_SERVER:
     col_marca, col_estado, col_salir, col_ajustes = st.columns(
         [3.5, 2, 1, 1], vertical_alignment="center"
     )
@@ -3242,17 +3273,23 @@ with col_marca:
     st.caption("Tintas, tóners y artículos de oficina · Arica, Chile")
 with col_estado:
     st.badge(
-        "Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Cotizador comercial",
-        icon=":material/verified_user:" if GIOVAL_REQUIRE_ACCESS else ":material/receipt_long:",
+        (f"{E.get("_gioval_identidad", {}).get("nombre", "Equipo")} · Biblioteca compartida" if GIOVAL_PROFILES else "Biblioteca compartida") if GIOVAL_SHARED_SERVER else "Cotizador comercial",
+        icon=":material/verified_user:" if GIOVAL_SHARED_SERVER else ":material/receipt_long:",
         color="blue",
     )
 with col_ajustes:
     carpeta, bib, hist, api_key, usar_lo, mp_ticket = configuracion_compacta()
-if GIOVAL_REQUIRE_ACCESS:
+if GIOVAL_SHARED_SERVER:
     with col_salir:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
-            E.pop("gioval_autenticado", None)
+            if GIOVAL_PROFILES:
+                acceso.cerrar_sesion()
+            E.clear()
             st.rerun()
+
+if GIOVAL_PROFILES:
+    st.button("Actualizar datos compartidos", icon=":material/refresh:", key="refrescar_compartido",
+              help="Recarga catálogo e historial. Una cotización abierta conserva tu edición y comprueba su versión al guardar.")
 
 if E.get("_conflicto_guardado"):
     st.error(
@@ -3268,7 +3305,7 @@ if E.get("_conflicto_guardado"):
         "Recargar versión compartida",
         icon=":material/refresh:",
         width="stretch",
-        on_click=restaurar_borrador,
+        on_click=acceso.proteger(restaurar_borrador),
         args=(conflicto_id,),
         key="conflicto_recargar",
     )
@@ -3277,7 +3314,7 @@ if E.get("_conflicto_guardado"):
         icon=":material/content_copy:",
         type="primary",
         width="stretch",
-        on_click=guardar_conflicto_como_nueva,
+        on_click=acceso.proteger(guardar_conflicto_como_nueva),
         key="conflicto_guardar_copia",
     )
 if E.get("_mensaje_guardado"):

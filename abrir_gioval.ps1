@@ -1,5 +1,18 @@
 $ErrorActionPreference = "Stop"
 
+# Un PC ya convertido a servidor principal siempre reutiliza esa instancia.
+# Evita que un acceso directo antiguo abra otra biblioteca o descargue main encima.
+$principalConfig = Join-Path $env:LOCALAPPDATA 'Gioval\servidor-principal.json'
+if (Test-Path -LiteralPath $principalConfig) {
+    $principalCodigo = Join-Path $env:LOCALAPPDATA 'Programs\Giovalia-Servidor\abrir_compartido.py'
+    $principalPython = Join-Path $env:LOCALAPPDATA 'Gioval\servidor-venv\Scripts\pythonw.exe'
+    if (-not (Test-Path -LiteralPath $principalCodigo) -or -not (Test-Path -LiteralPath $principalPython)) {
+        throw 'La instalación del servidor principal está incompleta. Contacta a Harim antes de abrir otra biblioteca.'
+    }
+    Start-Process -FilePath $principalPython -ArgumentList ('"' + $principalCodigo + '"') -WindowStyle Hidden
+    exit 0
+}
+
 $repoRoot = (Resolve-Path $PSScriptRoot).Path
 $baseDir = Join-Path $env:LOCALAPPDATA "Gioval"
 $dataDir = Join-Path $baseDir "Datos"

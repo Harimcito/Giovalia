@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import unicodedata
 from contextlib import contextmanager
+from threading import RLock
 from datetime import date, datetime
 from pathlib import Path
 
@@ -24,6 +25,11 @@ _CAMPOS_CLI = ("nombre", "rut", "direccion", "ciudad", "telefono", "email")
 PRIVACIDAD_COMPARTIDA = os.environ.get("GIOVAL_REQUIRE_ACCESS", "").strip().lower() in {
     "1", "true", "yes", "on"
 }
+PERFILES = os.environ.get("GIOVAL_PROFILES", "").lower() in {"1", "true", "yes", "on"}
+COMPARTIDO = PERFILES or PRIVACIDAD_COMPARTIDA
+if PERFILES:
+    PRIVACIDAD_COMPARTIDA = False
+_ARCHIVOS_LOCK = RLock()
 _CAMPOS_LINEA_COMPARTIDA = {
     "fila", "cantidad", "descripcion", "unitario", "precio_neto", "es_producto",
     "clave_auto", "origen", "incluir",
@@ -201,7 +207,7 @@ class Historial:
         if nuevo_numero == anterior:
             return anterior
 
-        if PRIVACIDAD_COMPARTIDA:
+        if COMPARTIDO:
             if not version_esperada:
                 raise ConflictoActualizacion(
                     "No conozco la versión de la cotización que abriste. Recarga antes de cambiar el número."
@@ -434,28 +440,40 @@ class Historial:
     def _carpeta(self, numero: str) -> Path:
         return self.archivos / re.sub(r"[^A-Za-z0-9._-]", "_", numero)
 
-    def guardar_archivos(self, cot_id: int, xlsx: str | Path | None = None, pdf: bytes | None = None):
-        # En modo compartido los documentos llevan datos introducidos en cada sesión;
-        # se descargan desde la pantalla, pero nunca se archivan en el servidor común.
+    def guardar_archivos(self, cot_id: int, xlsx=None, pdf=None, version_esperada=None):
         if PRIVACIDAD_COMPARTIDA:
             return
-        reg = self.obtener(cot_id)
-        if not reg:
+        if not xlsx and pdf is None:
             return
-        carpeta = self._carpeta(reg["numero"])
-        carpeta.mkdir(parents=True, exist_ok=True)
-        base = re.sub(r"[^A-Za-z0-9._-]", "_", reg["numero"])
-        campos = {}
-        if xlsx:
-            destino = carpeta / f"{base}.xlsx"
-            shutil.copy(xlsx, destino)
-            campos["xlsx"] = str(destino)
-        if pdf:
-            destino = carpeta / f"{base}.pdf"
-            destino.write_bytes(pdf)
-            campos["pdf"] = str(destino)
-        if campos:
-            self.actualizar(cot_id, **campos)
+        # El mismo bloqueo de escritura protege la versión y la publicación de archivos.
+        with _ARCHIVOS_LOCK, self._con() as con:
+            con.execute("BEGIN IMMEDIATE")
+            reg = con.execute("SELECT * FROM cotizaciones WHERE id=?", (cot_id,)).fetchone()
+            if not reg:
+                raise ConflictoActualizacion("La cotización ya no existe.")
+            if PERFILES and (not version_esperada or reg["actualizado"] != version_esperada):
+                raise ConflictoActualizacion("Otra sesión modificó la cotización. Recarga antes de generar documentos.")
+            carpeta = self._carpeta(reg["numero"])
+            carpeta.mkdir(parents=True, exist_ok=True)
+            base = re.sub(r"[^A-Za-z0-9._-]", "_", reg["numero"])
+            campos = {}
+            for campo, extension, contenido in (
+                ("xlsx", ".xlsx", Path(xlsx).read_bytes() if xlsx else None),
+                ("pdf", ".pdf", pdf),
+            ):
+                if contenido is None:
+                    continue
+                # Versionar evita sustituir un archivo aún referenciado por otra sesión.
+                from uuid import uuid4
+                sufijo = f"-{uuid4().hex[:12]}" if PERFILES else ""
+                destino = carpeta / f"{base}{sufijo}{extension}"
+                temporal = destino.with_suffix(extension + ".tmp")
+                temporal.write_bytes(contenido)
+                os.replace(temporal, destino)
+                campos[campo] = str(destino)
+            columnas = [f"{campo}=?" for campo in campos] + ["actualizado=?"]
+            con.execute(f"UPDATE cotizaciones SET {', '.join(columnas)} WHERE id=?",
+                        [*campos.values(), _ahora(), cot_id])
 
     # ------------------------------------------------------------ clientes
     def clientes(self) -> list[dict]:

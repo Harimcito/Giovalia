@@ -127,7 +127,13 @@ button[kind="primary"] { font-weight:650 !important; }
 """
 st.markdown(ESTILO, unsafe_allow_html=True)
 
-if GIOVAL_REQUIRE_ACCESS:
+import acceso
+if acceso.perfiles_activos():
+    acceso.exigir_perfil()
+    if st.button("Cerrar sesión", key="cerrar_perfil_radar"):
+        acceso.cerrar_sesion()
+
+if GIOVAL_REQUIRE_ACCESS and not acceso.perfiles_activos():
     if not GIOVAL_ACCESS_PASSWORD:
         st.error("El acceso compartido no está configurado. Contacta a quien administra el servidor de Gioval.")
         st.stop()

@@ -1,4 +1,4 @@
-streamlit[pdf]>=1.50
+streamlit[pdf]==1.66.1
 openpyxl
 pypdf
 reportlab

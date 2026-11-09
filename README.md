@@ -1,5 +1,12 @@
 # Cotizador: cotización + fotos + fichas técnicas
 
+## Servidor principal con perfiles
+
+La fase de servidor propio con cuentas de Harim y Giovanna se describe en
+[SERVIDOR_PRINCIPAL.md](SERVIDOR_PRINCIPAL.md). Conserva inventario, clientes,
+cotizaciones y documentos en una biblioteca central, con acceso individual y
+respaldos automáticos. El acceso por `app.gioval.cl` requiere configurar el túnel y DNS.
+
 Dos formas de usarlo:
 
 1. **Tengo la cotización en Excel** → entrega un PDF único: cotización (con tu formato y logo)
