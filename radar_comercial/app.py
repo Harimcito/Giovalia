@@ -26,6 +26,7 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 try:
+    from radar_comercial import ui_montos as montos
     from radar_comercial.integracion import BibliotecaLectura, HistorialLectura
     from radar_comercial.servicio import (
         APICompraAgilError,
@@ -47,6 +48,7 @@ try:
     )
 except ModuleNotFoundError:
     # Estructura del nuevo repo después de extraer radar_comercial/ a su raíz.
+    import ui_montos as montos
     from integracion import BibliotecaLectura, HistorialLectura
     from servicio import (
         APICompraAgilError,
@@ -538,13 +540,13 @@ if vista_actual == "Panel comercial":
                     "Cierre": fecha_corta(r.get("fecha_cierre")),
                     "Seguimiento": r["decision"],
                 })
-            st.dataframe(pd.DataFrame(ver), hide_index=True, width="stretch")
+            montos.tabla(pd.DataFrame(ver), hide_index=True, width="stretch")
         else:
             st.info("No hay oportunidades pendientes. Busca nuevas o importa resultados oficiales.")
     with p2:
         st.markdown("#### Productos que más aparecen en tus cotizaciones")
         if resumen_cotizador["productos_frecuentes"]:
-            st.dataframe(
+            montos.tabla(
                 pd.DataFrame(resumen_cotizador["productos_frecuentes"], columns=["Producto", "Cantidad acumulada"]),
                 hide_index=True, width="stretch",
             )
@@ -695,7 +697,7 @@ elif vista_actual == "Radar de oportunidades":
             manual_region = c4.selectbox("Región", options=list(REGIONES.values()), index=14)
             c5, c6 = st.columns(2)
             manual_cierre = c5.date_input("Fecha de cierre (si está publicada)", value=None, format="DD/MM/YYYY")
-            manual_presupuesto = c6.number_input("Presupuesto de referencia en CLP", min_value=0, value=0, step=1000)
+            manual_presupuesto = montos.entrada("Presupuesto de referencia en CLP", _container=c6, min_value=0, value=0, step=1000)
             manual_descripcion = st.text_area("Descripción / requerimiento publicado")
             manual_lineas = st.text_area(
                 "Productos solicitados (opcional; cantidad | descripción | unidad)",
@@ -791,7 +793,7 @@ elif vista_actual == "Radar de oportunidades":
             key="radar_limite_tabla",
             help="Reduce la lista con los filtros de búsqueda, seguimiento o fecha de cierre.",
         )
-        st.dataframe(
+        montos.tabla(
             pd.DataFrame(tabla[:limite_tabla]),
             hide_index=True, width="stretch",
             column_config={"Presupuesto ref. CLP": st.column_config.NumberColumn(format="$ %d")},
@@ -821,7 +823,7 @@ elif vista_actual == "Radar de oportunidades":
             items = detalle.get("productos_solicitados") or []
             if items:
                 st.markdown("**Productos solicitados detectados**")
-                st.dataframe(
+                montos.tabla(
                     pd.DataFrame([{
                         "Cantidad": x.get("cantidad"),
                         "Producto requerido": x.get("descripcion") or x.get("nombre"),
@@ -1020,7 +1022,7 @@ elif vista_actual == "Evaluar rentabilidad":
                             precio_old = sugerido_neto
                         clave_precio = f"offer_{clave_linea}"
                         restaurar_campo_radar(clave_precio, max(0.0, float(precio_old or 0)))
-                        precio_oferta = st.number_input(
+                        precio_oferta = montos.entrada(
                             "Precio unitario de oferta neto (sin IVA)",
                             min_value=0.0,
                             step=100.0,
@@ -1063,7 +1065,7 @@ elif vista_actual == "Evaluar rentabilidad":
                 margen_default = float(store.config("margen_objetivo_pct", "0") or 0)
                 restaurar_campo_radar(clave_margen, margen_default)
                 with e1:
-                    despacho = st.number_input(
+                    despacho = montos.entrada(
                         "Despacho / logística neta estimada (CLP)",
                         min_value=0.0,
                         step=100.0,
@@ -1072,7 +1074,7 @@ elif vista_actual == "Evaluar rentabilidad":
                         args=(clave_despacho,),
                     )
                 with e2:
-                    otros_costos = st.number_input(
+                    otros_costos = montos.entrada(
                         "Otros costos netos (CLP)",
                         min_value=0.0,
                         step=100.0,
@@ -1179,7 +1181,7 @@ elif vista_actual == "Seguimiento":
         c1, c2 = st.columns([1, 1.2])
         with c1:
             st.markdown("#### Estado del embudo")
-            st.dataframe(
+            montos.tabla(
                 pd.DataFrame([{"Estado": k, "Oportunidades": decisiones.get(k, 0)} for k in ESTADOS_SEGUIMIENTO]),
                 hide_index=True, width="stretch",
             )
@@ -1199,7 +1201,7 @@ elif vista_actual == "Seguimiento":
                         "Actualizado": fecha_corta(r.get("actualizado")),
                     })
             if guardadas:
-                st.dataframe(
+                montos.tabla(
                     pd.DataFrame(guardadas), hide_index=True, width="stretch",
                     column_config={"Beneficio neto": st.column_config.NumberColumn(format="$ %d")},
                 )
