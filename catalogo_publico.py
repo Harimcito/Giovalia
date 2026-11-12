@@ -100,7 +100,6 @@ def _precio_publico(publicacion: dict, url: str, clave: str, errores: list[dict]
         "price": precio,
         "priceCurrency": moneda,
         "availability": disponibilidad,
-        "itemCondition": "https://schema.org/NewCondition",
         "priceValidUntil": vigencia.isoformat(),
     }
 
