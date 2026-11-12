@@ -1,7 +1,7 @@
 """Genera JSON-LD de productos aprobados sin exponer datos operacionales.
 
-El índice de Giovalia es privado. Este módulo solo lee campos bajo
-publicacion y nunca copia precios/costos/márgenes desde la ficha interna.
+El índice de Giovalia es privado. Este módulo solo lee id_global y los campos
+públicos aprobados bajo publicacion; nunca copia datos operacionales internos.
 """
 from __future__ import annotations
 
@@ -43,6 +43,20 @@ def _fecha(value: object) -> date | None:
 
 def _valor_texto(value: object, limite: int = 5000) -> str:
     return " ".join(str(value or "").split())[:limite]
+
+
+def _gtin_schema(value: object) -> tuple[str, str] | None:
+    """Valida el dígito de control y devuelve el campo Schema.org por longitud."""
+    gtin = str(value or "").strip()
+    campos = {8: "gtin8", 12: "gtin12", 13: "gtin13", 14: "gtin14"}
+    if not gtin.isdigit() or len(gtin) not in campos:
+        return None
+    suma = sum(int(digito) * (3 if (len(gtin) - indice) % 2 == 0 else 1)
+               for indice, digito in enumerate(gtin[:-1]))
+    digito_control = (10 - suma % 10) % 10
+    if digito_control != int(gtin[-1]):
+        return None
+    return campos[len(gtin)], gtin
 
 
 def _precio_publico(publicacion: dict, url: str, clave: str, errores: list[dict]) -> dict | None:
@@ -131,12 +145,17 @@ def crear_producto_jsonld(clave: str, ficha: dict, base_url: str, errores: list[
     for origen, destino in (
         ("codigo_publico", "sku"),
         ("codigo_fabricante", "mpn"),
-        ("gtin", "gtin"),
         ("categoria", "category"),
     ):
         valor = _valor_texto(publicacion.get(origen), 300)
         if valor:
             producto[destino] = valor
+
+    gtin = _gtin_schema(publicacion.get("gtin"))
+    if gtin:
+        producto[gtin[0]] = gtin[1]
+    elif publicacion.get("gtin"):
+        errores.append({"clave": clave, "campo": "publicacion.gtin", "motivo": "gtin_invalido"})
 
     marca = _valor_texto(publicacion.get("marca"), 160)
     if marca:
