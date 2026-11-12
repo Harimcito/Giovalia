@@ -1045,6 +1045,7 @@ elif vista_actual == "Evaluar rentabilidad":
                             "descripcion_solicitada": desc,
                             "cantidad": cantidad,
                             "codigo_catalogo": codigo_prod,
+                            "id_global": str(ficha.get("id_global") or "") if codigo_prod else "",
                             "precio_oferta_unitario_neto": precio_oferta or None,
                             "equivalencia_confirmada": confirmada,
                             "incluir": incluir,
