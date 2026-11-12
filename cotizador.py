@@ -472,7 +472,7 @@ class Biblioteca:
             {"url": str(item.get("url") or "").strip(),
              "alt": str(item.get("alt") or "").strip(),
              "derechos": str(item.get("derechos") or "").strip(),
-             "aprobada": item.get("aprobada") is True}
+             "aprobada": str(item.get("aprobada") or "").strip().lower() in {"true", "1"}}
             for item in imagenes if isinstance(item, dict)
             and str(item.get("url") or "").strip()
         ]
