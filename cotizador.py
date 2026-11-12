@@ -449,55 +449,63 @@ class Biblioteca:
         if estado not in estados:
             raise ValueError("Estado de publicación no reconocido.")
 
+        def texto(valor):
+            if valor is None:
+                return ""
+            if isinstance(valor, float) and math.isnan(valor):
+                return ""
+            return str(valor).strip()
+
         publicacion = {"estado": estado}
         for campo in ("slug", "nombre", "descripcion", "marca", "categoria",
                       "codigo_publico", "codigo_fabricante", "gtin"):
             valor = datos.get(campo)
             if valor is not None:
-                publicacion[campo] = str(valor).strip()
+                publicacion[campo] = texto(valor)
 
         fuentes = datos.get("fuentes", [])
         if not isinstance(fuentes, list):
             raise ValueError("Las fuentes deben ser una lista.")
         publicacion["fuentes"] = [
-            {"campo": str(item.get("campo") or "").strip(),
-             "referencia": str(item.get("referencia") or "").strip(),
-             "verificado_el": str(item.get("verificado_el") or "").strip(),
-             "responsable": str(item.get("responsable") or "").strip()}
+            {"campo": texto(item.get("campo")),
+             "referencia": texto(item.get("referencia")),
+             "verificado_el": texto(item.get("verificado_el")),
+             "responsable": texto(item.get("responsable"))}
             for item in fuentes if isinstance(item, dict)
-            and str(item.get("campo") or "").strip()
-            and str(item.get("referencia") or "").strip()
-            and str(item.get("verificado_el") or "").strip()
+            and texto(item.get("campo"))
+            and texto(item.get("referencia"))
+            and texto(item.get("verificado_el"))
         ]
 
         especificaciones = datos.get("especificaciones", [])
         if not isinstance(especificaciones, list):
             raise ValueError("Las especificaciones deben ser una lista.")
         publicacion["especificaciones"] = [
-            {"nombre": str(item.get("nombre") or "").strip(),
-             "valor": str(item.get("valor") or "").strip()}
+            {"nombre": texto(item.get("nombre")),
+             "valor": texto(item.get("valor"))}
             for item in especificaciones if isinstance(item, dict)
-            and str(item.get("nombre") or "").strip()
-            and str(item.get("valor") or "").strip()
+            and texto(item.get("nombre"))
+            and texto(item.get("valor"))
         ]
 
         imagenes = datos.get("imagenes", [])
         if not isinstance(imagenes, list):
             raise ValueError("Las imágenes deben ser una lista.")
         publicacion["imagenes"] = [
-            {"url": str(item.get("url") or "").strip(),
-             "alt": str(item.get("alt") or "").strip(),
-             "derechos": str(item.get("derechos") or "").strip(),
-             "aprobada": str(item.get("aprobada") or "").strip().lower() in {"true", "1"}}
+            {"url": texto(item.get("url")),
+             "alt": texto(item.get("alt")),
+             "derechos": texto(item.get("derechos")),
+             "aprobada": texto(item.get("aprobada")).lower() in {"true", "1"}}
             for item in imagenes if isinstance(item, dict)
-            and str(item.get("url") or "").strip()
+            and texto(item.get("url"))
         ]
 
         oferta = datos.get("oferta")
         if isinstance(oferta, dict):
             campos_oferta = ("estado", "precio", "moneda", "disponibilidad",
                              "verificado_el", "vigente_hasta", "fuente", "impuestos_incluidos")
-            publicacion["oferta"] = {campo: oferta.get(campo) for campo in campos_oferta if campo in oferta}
+            publicacion["oferta"] = {campo: (texto(oferta.get(campo)) if campo != "impuestos_incluidos" else oferta.get(campo))
+                                     for campo in campos_oferta if campo in oferta}
         ficha["publicacion"] = publicacion
         self._guardar_indice()
 
