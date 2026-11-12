@@ -2764,6 +2764,9 @@ def editor_ficha_publica(clave: str):
     impuestos = ["Pendiente", "Sí", "No"]
     impuesto_actual = ("Sí" if oferta.get("impuestos_incluidos") is True else
                        "No" if oferta.get("impuestos_incluidos") is False else "Pendiente")
+    fuentes = publicacion.get("fuentes", [])
+    if not isinstance(fuentes, list):
+        fuentes = []
     especificaciones = publicacion.get("especificaciones", [])
     if not isinstance(especificaciones, list):
         especificaciones = []
@@ -2788,6 +2791,22 @@ def editor_ficha_publica(clave: str):
         codigo_fabricante = st.text_input("Código de fabricante (opcional)", str(publicacion.get("codigo_fabricante") or ""))
         gtin = st.text_input("GTIN confirmado (opcional)", str(publicacion.get("gtin") or ""),
                              help="El exportador valida longitud y dígito de control; no inventes un código.")
+
+        st.markdown("**Fuentes y revisión interna**")
+        st.caption("Registra evidencia y fecha de verificación para los datos públicos. Esta tabla no se exporta al sitio.")
+        df_fuentes = pd.DataFrame(fuentes, columns=["campo", "referencia", "verificado_el", "responsable"])
+        edit_fuentes = st.data_editor(
+            df_fuentes, num_rows="dynamic", hide_index=True, width="stretch",
+            column_config={
+                "campo": st.column_config.SelectboxColumn("Campo respaldado", options=[
+                    "nombre", "descripcion", "marca", "codigo_fabricante", "gtin", "especificaciones", "imagenes", "otros"
+                ]),
+                "referencia": st.column_config.TextColumn("Fuente o documento"),
+                "verificado_el": st.column_config.TextColumn("Verificado el · AAAA-MM-DD"),
+                "responsable": st.column_config.TextColumn("Revisado por"),
+            },
+            key=f"pub_sources_{clave}_{E.get('p_ver', 0)}",
+        )
 
         st.markdown("**Especificaciones verificables**")
         df_specs = pd.DataFrame(especificaciones, columns=["nombre", "valor"])
@@ -2815,7 +2834,7 @@ def editor_ficha_publica(clave: str):
                                      index=estados_oferta.index(oferta.get("estado", "sin_oferta"))
                                      if oferta.get("estado") in estados_oferta else 0)
         precio = st.text_input("Precio público", str(oferta.get("precio") or ""))
-        moneda = st.text_input("Moneda ISO de tres letras", str(oferta.get("moneda") or "CLP"))
+        moneda = st.text_input("Moneda ISO de tres letras", str(oferta.get("moneda") or ""))
         disponibilidad = st.selectbox(
             "Disponibilidad que se mostrará en la página", disponibilidades,
             index=disponibilidades.index(oferta.get("disponibilidad", ""))
@@ -2833,6 +2852,7 @@ def editor_ficha_publica(clave: str):
             "estado": estado, "slug": slug, "nombre": nombre_publico, "descripcion": descripcion,
             "marca": marca, "categoria": categoria, "codigo_publico": codigo_publico,
             "codigo_fabricante": codigo_fabricante, "gtin": gtin,
+            "fuentes": edit_fuentes.to_dict("records"),
             "especificaciones": edit_specs.to_dict("records"),
             "imagenes": edit_images.to_dict("records"),
             "oferta": {
