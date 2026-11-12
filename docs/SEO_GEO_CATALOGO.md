@@ -4,7 +4,7 @@
 
 Gioval opera como cotizador y biblioteca privada. La app ahora incorpora IDs persistentes y edición de fichas públicas SEO/GEO. El código no migra la biblioteca por sí solo: los UUID de productos existentes se escriben cuando una persona ejecuta la acción explícita desde Biblioteca de productos. No crea una tienda ni publica un sitio.
 
-El exportador solo incluye productos cuya ficha tenga estado publicacion.estado = aprobado. Si faltan la identidad global, descripción, URL estable o una imagen propia/licenciada aprobada, la ficha se omite y el motivo se informa sin imprimir costos ni precios privados.
+El exportador solo incluye productos cuya ficha tenga estado publicacion.estado = aprobado. Exige un ID global válido, slug, nombre y descripción, evidencia verificada para nombre y descripción, y al menos una imagen HTTPS aprobada y propia/licenciada. Si falta alguno, omite la ficha e informa el motivo sin imprimir costos ni precios privados. Las fuentes internas quedan guardadas en la biblioteca, pero no se exportan.
 
 ## Datos públicos separados de la operación
 
