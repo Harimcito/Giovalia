@@ -456,6 +456,20 @@ class Biblioteca:
             if valor is not None:
                 publicacion[campo] = str(valor).strip()
 
+        fuentes = datos.get("fuentes", [])
+        if not isinstance(fuentes, list):
+            raise ValueError("Las fuentes deben ser una lista.")
+        publicacion["fuentes"] = [
+            {"campo": str(item.get("campo") or "").strip(),
+             "referencia": str(item.get("referencia") or "").strip(),
+             "verificado_el": str(item.get("verificado_el") or "").strip(),
+             "responsable": str(item.get("responsable") or "").strip()}
+            for item in fuentes if isinstance(item, dict)
+            and str(item.get("campo") or "").strip()
+            and str(item.get("referencia") or "").strip()
+            and str(item.get("verificado_el") or "").strip()
+        ]
+
         especificaciones = datos.get("especificaciones", [])
         if not isinstance(especificaciones, list):
             raise ValueError("Las especificaciones deben ser una lista.")
