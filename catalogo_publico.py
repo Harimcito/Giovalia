@@ -117,9 +117,23 @@ def crear_producto_jsonld(clave: str, ficha: dict, base_url: str, errores: list[
         errores.append({"clave": clave, "campo": "id_global", "motivo": "uuid_maestro_pendiente"})
         return None
 
+    fuentes_validadas = set()
+    fuentes = publicacion.get("fuentes", [])
+    for fuente in fuentes if isinstance(fuentes, list) else []:
+        if not isinstance(fuente, dict):
+            continue
+        campo = str(fuente.get("campo") or "").strip()
+        referencia = _valor_texto(fuente.get("referencia"), 1000)
+        verificado = _fecha(fuente.get("verificado_el"))
+        if campo and referencia and verificado and verificado <= date.today():
+            fuentes_validadas.add(campo)
+
     slug = str(publicacion.get("slug") or "").strip()
     nombre = _valor_texto(publicacion.get("nombre"), 300)
     descripcion = _valor_texto(publicacion.get("descripcion"), 5000)
+    if not {"nombre", "descripcion"}.issubset(fuentes_validadas):
+        errores.append({"clave": clave, "campo": "publicacion.fuentes", "motivo": "fuentes_de_nombre_y_descripcion_pendientes"})
+        return None
     if not _SLUG.fullmatch(slug) or not nombre or not descripcion:
         errores.append({"clave": clave, "campo": "publicacion", "motivo": "slug_nombre_o_descripcion_pendiente"})
         return None
