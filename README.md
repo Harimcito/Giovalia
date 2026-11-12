@@ -128,3 +128,6 @@ computador» la guarda en `.env` para siempre. No compartas esta carpeta con la 
     biblioteca/CF283A/ficha.pdf
     biblioteca/indice.json   (claves, alias aprendidos y últimos precios)
 
+## Catálogo SEO/GEO y datos de producto
+
+La biblioteca de cotizaciones sigue siendo privada. En **Biblioteca de productos** puedes asignar UUID persistentes, editar la ficha pública SEO/GEO y descargar JSON-LD con registros aprobados. Consulta [la guía de catálogo SEO/GEO](docs/SEO_GEO_CATALOGO.md). Precios de cotización, costos, márgenes, stock exacto e información de clientes quedan fuera de la salida pública.

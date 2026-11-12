@@ -489,6 +489,7 @@ def sugerir_productos_catalogo(descripcion: str, indice: dict, limite: int = 5) 
             continue
         resultados.append({
             "clave": clave,
+            "id_global": str(ficha.get("id_global") or ""),
             "nombre": str(ficha.get("nombre") or clave),
             "score": score,
             "costo_catalogo": numero_seguro(ficha.get("costo_neto")),

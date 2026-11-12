@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 import threading
 import unicodedata
+import uuid
 from copy import copy, deepcopy
 from datetime import date
 from pathlib import Path
@@ -401,13 +402,111 @@ class Biblioteca:
         if not clave:
             return
         clave = clave.strip().upper()
-        ficha = self.indice.setdefault(clave, {"nombre": nombre or clave, "aliases": []})
+        ficha = self.indice.get(clave)
+        if ficha is None:
+            ficha = {"nombre": nombre or clave, "aliases": [], "id_global": str(uuid.uuid4())}
+            self.indice[clave] = ficha
         if precio_neto:
             ficha["precio_neto"] = float(precio_neto)
         if alias and len(normalizar(alias)) >= 6:
             n = normalizar(alias)
             if n not in ficha["aliases"]:
                 ficha["aliases"].append(n)
+        self._guardar_indice()
+
+    def asignar_ids_globales_faltantes(self) -> int:
+        """Asigna UUID persistentes a productos existentes que aún no tienen ID global."""
+        self.refrescar_si_cambio()
+        pendientes = []
+        for clave, ficha in self.indice.items():
+            if not isinstance(ficha, dict):
+                raise ValueError(f"La ficha {clave!r} no es un objeto válido.")
+            actual = str(ficha.get("id_global") or "").strip()
+            if actual:
+                try:
+                    uuid.UUID(actual)
+                except ValueError as exc:
+                    raise ValueError(f"La ficha {clave!r} ya tiene un ID global inválido; no se reemplazó.") from exc
+            else:
+                pendientes.append(clave)
+
+        for clave in pendientes:
+            self.indice[clave]["id_global"] = str(uuid.uuid4())
+        if pendientes:
+            self._guardar_indice()
+        return len(pendientes)
+
+    def actualizar_publicacion(self, clave: str, datos: dict):
+        """Guarda solo los campos explícitos de la ficha pública; los datos operacionales quedan fuera."""
+        clave = clave.strip().upper()
+        ficha = self.indice.get(clave)
+        if not isinstance(ficha, dict):
+            raise ValueError("No se encontró el producto seleccionado.")
+        if not isinstance(datos, dict):
+            raise ValueError("La ficha pública debe ser un objeto.")
+        estados = {"borrador", "pendiente_revision", "aprobado", "retirado"}
+        estado = str(datos.get("estado") or "borrador").strip()
+        if estado not in estados:
+            raise ValueError("Estado de publicación no reconocido.")
+
+        def texto(valor):
+            if valor is None:
+                return ""
+            if isinstance(valor, float) and math.isnan(valor):
+                return ""
+            return str(valor).strip()
+
+        publicacion = {"estado": estado}
+        for campo in ("slug", "nombre", "descripcion", "marca", "categoria",
+                      "codigo_publico", "codigo_fabricante", "gtin"):
+            valor = datos.get(campo)
+            if valor is not None:
+                publicacion[campo] = texto(valor)
+
+        fuentes = datos.get("fuentes", [])
+        if not isinstance(fuentes, list):
+            raise ValueError("Las fuentes deben ser una lista.")
+        publicacion["fuentes"] = [
+            {"campo": texto(item.get("campo")),
+             "referencia": texto(item.get("referencia")),
+             "verificado_el": texto(item.get("verificado_el")),
+             "responsable": texto(item.get("responsable"))}
+            for item in fuentes if isinstance(item, dict)
+            and texto(item.get("campo"))
+            and texto(item.get("referencia"))
+            and texto(item.get("verificado_el"))
+        ]
+
+        especificaciones = datos.get("especificaciones", [])
+        if not isinstance(especificaciones, list):
+            raise ValueError("Las especificaciones deben ser una lista.")
+        publicacion["especificaciones"] = [
+            {"nombre": texto(item.get("nombre")),
+             "valor": texto(item.get("valor"))}
+            for item in especificaciones if isinstance(item, dict)
+            and texto(item.get("nombre"))
+            and texto(item.get("valor"))
+        ]
+
+        imagenes = datos.get("imagenes", [])
+        if not isinstance(imagenes, list):
+            raise ValueError("Las imágenes deben ser una lista.")
+        publicacion["imagenes"] = [
+            {"url": texto(item.get("url")),
+             "alt": texto(item.get("alt")),
+             "derechos": texto(item.get("derechos")),
+             "aprobada": texto(item.get("aprobada")).lower() in {"true", "1"}}
+            for item in imagenes if isinstance(item, dict)
+            and texto(item.get("url"))
+        ]
+
+        oferta = datos.get("oferta")
+        if isinstance(oferta, dict):
+            campos_oferta = ("estado", "precio", "moneda", "disponibilidad",
+                             "verificado_el", "vigente_hasta", "fuente", "impuestos_incluidos")
+            publicacion["oferta"] = {campo: (texto(oferta.get(campo)) if campo != "impuestos_incluidos" else oferta.get(campo))
+                                     for campo in campos_oferta if campo in oferta}
+        ficha["publicacion"] = publicacion
         self._guardar_indice()
 
     # ---------------------------------------------------------- catálogo editable
@@ -476,6 +575,8 @@ class Biblioteca:
             foto, ficha = self.archivos(clave)
             filas.append({"clave": clave, "nombre": f.get("nombre", clave), "foto": bool(foto), "ficha": bool(ficha),
                           "ficha_no_requerida": bool(f.get("ficha_no_requerida", False)),
+                          "id_global": f.get("id_global", ""),
+                          "estado_publicacion": (f.get("publicacion") if isinstance(f.get("publicacion"), dict) else {}).get("estado", "borrador"),
                           "precio_neto": f.get("precio_neto"), "costo_neto": f.get("costo_neto"),
                           "margen_pct": f.get("margen_pct"), "sugerido_neto": self.precio_sugerido(clave),
                           "notas": f.get("notas", "")})

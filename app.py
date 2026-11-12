@@ -19,6 +19,7 @@ import streamlit as st
 
 import buscador as bs
 import cotizador as ct
+import catalogo_publico as cp
 import historial as hs
 import lector_ia as li
 import mercado_publico as mp
@@ -2753,6 +2754,123 @@ def borrar_producto(clave: str):
     E["p_msg"] = ("ok", f"Eliminé {clave}.")
 
 
+def editor_ficha_publica(clave: str):
+    ficha = bib.indice.get(clave, {})
+    publicacion = ficha.get("publicacion") if isinstance(ficha.get("publicacion"), dict) else {}
+    oferta = publicacion.get("oferta") if isinstance(publicacion.get("oferta"), dict) else {}
+    estados = ["borrador", "pendiente_revision", "aprobado", "retirado"]
+    disponibilidades = ["", "en_stock", "agotado", "disponibilidad_limitada", "pedido_pendiente", "preventa"]
+    estados_oferta = ["sin_oferta", "borrador", "aprobada"]
+    impuestos = ["Pendiente", "Sí", "No"]
+    impuesto_actual = ("Sí" if oferta.get("impuestos_incluidos") is True else
+                       "No" if oferta.get("impuestos_incluidos") is False else "Pendiente")
+    fuentes = publicacion.get("fuentes", [])
+    if not isinstance(fuentes, list):
+        fuentes = []
+    especificaciones = publicacion.get("especificaciones", [])
+    if not isinstance(especificaciones, list):
+        especificaciones = []
+    imagenes = publicacion.get("imagenes", [])
+    if not isinstance(imagenes, list):
+        imagenes = []
+    st.caption("El ID global permanece estable aunque cambie el nombre. Copia este UUID para relacionarlo manualmente con Inventario, Radar o Importex.")
+    st.code(ficha.get("id_global") or "ID pendiente · asígnalo desde el panel del catálogo", language=None)
+
+    with st.form(f"publicacion_{clave}_{E.get('p_ver', 0)}"):
+        estado = st.selectbox("Estado de la ficha pública", estados,
+                              index=estados.index(publicacion.get("estado", "borrador"))
+                              if publicacion.get("estado") in estados else 0)
+        slug = st.text_input("Slug de URL", str(publicacion.get("slug") or ""),
+                             help="Minúsculas, números y guiones. Debe ser estable.")
+        nombre_publico = st.text_input("Nombre público", str(publicacion.get("nombre") or ficha.get("nombre") or ""))
+        descripcion = st.text_area("Descripción pública", str(publicacion.get("descripcion") or ""),
+                                   help="Qué es, para quién sirve, usos, compatibilidad y límites confirmados.")
+        marca = st.text_input("Marca", str(publicacion.get("marca") or ""))
+        categoria = st.text_input("Categoría pública", str(publicacion.get("categoria") or ""))
+        codigo_publico = st.text_input("SKU o código público (opcional)", str(publicacion.get("codigo_publico") or ""))
+        codigo_fabricante = st.text_input("Código de fabricante (opcional)", str(publicacion.get("codigo_fabricante") or ""))
+        gtin = st.text_input("GTIN confirmado (opcional)", str(publicacion.get("gtin") or ""),
+                             help="El exportador valida longitud y dígito de control; no inventes un código.")
+
+        st.markdown("**Fuentes y revisión interna**")
+        st.caption("Registra evidencia y fecha de verificación para los datos públicos. Esta tabla no se exporta al sitio.")
+        df_fuentes = pd.DataFrame(fuentes, columns=["campo", "referencia", "verificado_el", "responsable"])
+        edit_fuentes = st.data_editor(
+            df_fuentes, num_rows="dynamic", hide_index=True, width="stretch",
+            column_config={
+                "campo": st.column_config.SelectboxColumn("Campo respaldado", options=[
+                    "nombre", "descripcion", "marca", "codigo_fabricante", "gtin", "especificaciones", "imagenes", "otros"
+                ]),
+                "referencia": st.column_config.TextColumn("Fuente o documento"),
+                "verificado_el": st.column_config.TextColumn("Verificado el · AAAA-MM-DD"),
+                "responsable": st.column_config.TextColumn("Revisado por"),
+            },
+            key=f"pub_sources_{clave}_{E.get('p_ver', 0)}",
+        )
+
+        st.markdown("**Especificaciones verificables**")
+        df_specs = pd.DataFrame(especificaciones, columns=["nombre", "valor"])
+        edit_specs = st.data_editor(
+            df_specs, num_rows="dynamic", hide_index=True, width="stretch",
+            column_config={"nombre": st.column_config.TextColumn("Atributo"),
+                           "valor": st.column_config.TextColumn("Valor")},
+            key=f"pub_specs_{clave}_{E.get('p_ver', 0)}",
+        )
+        st.markdown("**Imágenes autorizadas**")
+        df_images = pd.DataFrame(imagenes, columns=["url", "alt", "derechos", "aprobada"])
+        edit_images = st.data_editor(
+            df_images, num_rows="dynamic", hide_index=True, width="stretch",
+            column_config={
+                "url": st.column_config.TextColumn("URL HTTPS"),
+                "alt": st.column_config.TextColumn("Texto alternativo"),
+                "derechos": st.column_config.SelectboxColumn("Derechos", options=["propia", "licenciada", "pendiente"]),
+                "aprobada": st.column_config.CheckboxColumn("Aprobada"),
+            },
+            key=f"pub_images_{clave}_{E.get('p_ver', 0)}",
+        )
+
+        st.markdown("**Oferta pública · opcional**")
+        estado_oferta = st.selectbox("Estado de la oferta", estados_oferta,
+                                     index=estados_oferta.index(oferta.get("estado", "sin_oferta"))
+                                     if oferta.get("estado") in estados_oferta else 0)
+        precio = st.text_input("Precio público", str(oferta.get("precio") or ""))
+        moneda = st.text_input("Moneda ISO de tres letras", str(oferta.get("moneda") or ""))
+        disponibilidad = st.selectbox(
+            "Disponibilidad que se mostrará en la página", disponibilidades,
+            index=disponibilidades.index(oferta.get("disponibilidad", ""))
+            if oferta.get("disponibilidad") in disponibilidades else 0,
+        )
+        verificado_el = st.text_input("Precio verificado el (AAAA-MM-DD)", str(oferta.get("verificado_el") or ""))
+        vigente_hasta = st.text_input("Oferta válida hasta (AAAA-MM-DD)", str(oferta.get("vigente_hasta") or ""))
+        impuestos_incluidos = st.selectbox("¿Impuestos incluidos?", impuestos, index=impuestos.index(impuesto_actual))
+        fuente = st.text_input("Fuente interna de verificación (URL HTTPS)", str(oferta.get("fuente") or ""))
+        guardar = st.form_submit_button("Guardar ficha pública", type="primary")
+
+    if guardar:
+        incluir_impuestos = {"Pendiente": None, "Sí": True, "No": False}[impuestos_incluidos]
+        datos = {
+            "estado": estado, "slug": slug, "nombre": nombre_publico, "descripcion": descripcion,
+            "marca": marca, "categoria": categoria, "codigo_publico": codigo_publico,
+            "codigo_fabricante": codigo_fabricante, "gtin": gtin,
+            "fuentes": edit_fuentes.to_dict("records"),
+            "especificaciones": edit_specs.to_dict("records"),
+            "imagenes": edit_images.to_dict("records"),
+            "oferta": {
+                "estado": estado_oferta, "precio": precio, "moneda": moneda,
+                "disponibilidad": disponibilidad, "verificado_el": verificado_el,
+                "vigente_hasta": vigente_hasta, "fuente": fuente,
+                "impuestos_incluidos": incluir_impuestos,
+            },
+        }
+        try:
+            bib.actualizar_publicacion(clave, datos)
+            E["p_ver"] += 1
+            E["p_msg"] = ("ok", "Ficha pública guardada. Solo los registros aprobados y completos pasan al exportador.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo guardar la ficha pública: {exc}")
+
+
 def vista_productos():
     E.setdefault("p_ver", 0)
     st.title("Biblioteca de productos", icon=":material/inventory_2:")
@@ -2787,6 +2905,19 @@ def vista_productos():
     m2.metric("Sin foto", total_sin_foto, border=True)
     m3.metric("Sin ficha pendiente", total_sin_ficha, border=True)
     m4.metric("Sin precio reciente", total_sin_precio, border=True)
+
+    ids_pendientes = sum(not f.get("id_global") for f in todas)
+    if ids_pendientes:
+        with st.expander(f"Preparar identidad global · {ids_pendientes} producto(s) sin ID", expanded=False):
+            st.caption("Esto guarda UUID estables en la biblioteca compartida. No cambia nombres, alias, precios, costos, archivos ni cotizaciones.")
+            if st.button(f"Asignar ID global a {ids_pendientes} producto(s)", key="asignar_ids_globales"):
+                try:
+                    asignados = bib.asignar_ids_globales_faltantes()
+                    E["p_ver"] += 1
+                    E["p_msg"] = ("ok", f"IDs globales persistidos: {asignados}. Se conservarán al actualizar la ficha.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudieron asignar los IDs: {exc}")
 
     f1, f2 = st.columns([1.5, 1])
     texto = f1.text_input("Buscar producto", placeholder="Código, modelo, marca o nombre", key="p_texto")
@@ -2923,6 +3054,30 @@ def vista_productos():
     elegido = st.selectbox("Selecciona un producto", codigos, key="p_sel")
     producto_elegido = next(f for f in filas if f["clave"] == elegido)
     tarjeta(elegido, producto_elegido["nombre"])
+    with st.expander("Ficha pública SEO/GEO", expanded=False):
+        editor_ficha_publica(elegido)
+
+    with st.expander("Exportar JSON-LD para una web"):
+        st.caption("Usa solo el dominio oficial confirmado. El archivo incluye productos aprobados y completos; revisa que la web muestre exactamente los mismos datos antes de publicarlo.")
+        base_url = st.text_input("URL base del catálogo público (HTTPS)", key="catalogo_publico_base_url")
+        if st.button("Preparar archivo JSON-LD", key="crear_catalogo_publico"):
+            try:
+                grafo, errores_catalogo = cp.exportar_catalogo(bib.indice, base_url)
+                E["_catalogo_publico_exportado"] = json.dumps(grafo, ensure_ascii=False, indent=2)
+                E["_catalogo_publico_errores"] = errores_catalogo
+            except Exception as exc:
+                E.pop("_catalogo_publico_exportado", None)
+                st.error(f"No se pudo preparar el catálogo: {exc}")
+        if E.get("_catalogo_publico_exportado"):
+            st.download_button(
+                "Descargar catálogo JSON-LD",
+                E["_catalogo_publico_exportado"].encode("utf-8"),
+                file_name="catalogo_publico.json",
+                mime="application/ld+json",
+                key="descargar_catalogo_publico",
+            )
+            st.caption(f"Productos exportados: {len(json.loads(E['_catalogo_publico_exportado']).get('@graph', []))} · Registros omitidos por datos pendientes: {len(E.get('_catalogo_publico_errores', []))}")
+
     with st.expander("Acciones avanzadas: cambiar código o eliminar"):
         st.text_input("Nuevo código", key=f"ren_{elegido}")
         st.checkbox("Combinar si ese código ya existe", key=f"comb_{elegido}")
