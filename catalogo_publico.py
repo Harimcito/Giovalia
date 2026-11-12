@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 import uuid
@@ -65,7 +66,12 @@ def _precio_publico(publicacion: dict, url: str, clave: str, errores: list[dict]
         return None
 
     try:
-        precio = float(oferta.get("precio"))
+        valor_precio = oferta.get("precio")
+        if isinstance(valor_precio, bool):
+            raise ValueError
+        precio = float(valor_precio)
+        if not math.isfinite(precio):
+            raise ValueError
     except (TypeError, ValueError):
         errores.append({"clave": clave, "campo": "oferta.precio", "motivo": "precio_publico_invalido"})
         return None
@@ -81,7 +87,7 @@ def _precio_publico(publicacion: dict, url: str, clave: str, errores: list[dict]
     if not disponibilidad:
         errores.append({"clave": clave, "campo": "oferta.disponibilidad", "motivo": "disponibilidad_no_reconocida"})
         return None
-    if not verificado or not vigencia or vigencia < date.today() or not _url_https(fuente):
+    if not verificado or verificado > date.today() or not vigencia or vigencia < date.today() or not _url_https(fuente):
         errores.append({"clave": clave, "campo": "oferta", "motivo": "fuente_o_vigencia_no_verificable"})
         return None
     if oferta.get("impuestos_incluidos") not in (True, False):
