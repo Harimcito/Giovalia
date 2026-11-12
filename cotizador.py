@@ -417,7 +417,7 @@ class Biblioteca:
     def asignar_ids_globales_faltantes(self) -> int:
         """Asigna UUID persistentes a productos existentes que aún no tienen ID global."""
         self.refrescar_si_cambio()
-        asignados = 0
+        pendientes = []
         for clave, ficha in self.indice.items():
             if not isinstance(ficha, dict):
                 raise ValueError(f"La ficha {clave!r} no es un objeto válido.")
@@ -427,12 +427,14 @@ class Biblioteca:
                     uuid.UUID(actual)
                 except ValueError as exc:
                     raise ValueError(f"La ficha {clave!r} ya tiene un ID global inválido; no se reemplazó.") from exc
-                continue
-            ficha["id_global"] = str(uuid.uuid4())
-            asignados += 1
-        if asignados:
+            else:
+                pendientes.append(clave)
+
+        for clave in pendientes:
+            self.indice[clave]["id_global"] = str(uuid.uuid4())
+        if pendientes:
             self._guardar_indice()
-        return asignados
+        return len(pendientes)
 
     def actualizar_publicacion(self, clave: str, datos: dict):
         """Guarda solo los campos explícitos de la ficha pública; los datos operacionales quedan fuera."""
@@ -552,7 +554,7 @@ class Biblioteca:
             filas.append({"clave": clave, "nombre": f.get("nombre", clave), "foto": bool(foto), "ficha": bool(ficha),
                           "ficha_no_requerida": bool(f.get("ficha_no_requerida", False)),
                           "id_global": f.get("id_global", ""),
-                          "estado_publicacion": (f.get("publicacion") or {}).get("estado", "borrador"),
+                          "estado_publicacion": (f.get("publicacion") if isinstance(f.get("publicacion"), dict) else {}).get("estado", "borrador"),
                           "precio_neto": f.get("precio_neto"), "costo_neto": f.get("costo_neto"),
                           "margen_pct": f.get("margen_pct"), "sugerido_neto": self.precio_sugerido(clave),
                           "notas": f.get("notas", "")})
