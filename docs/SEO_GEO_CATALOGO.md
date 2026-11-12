@@ -2,7 +2,7 @@
 
 ## Alcance de esta entrega
 
-Gioval opera hoy como cotizador y biblioteca privada. Este cambio prepara una capa de exportación, pero no crea una tienda, no publica un sitio y no modifica la biblioteca activa.
+Gioval opera como cotizador y biblioteca privada. La app ahora incorpora IDs persistentes y edición de fichas públicas SEO/GEO. El código no migra la biblioteca por sí solo: los UUID de productos existentes se escriben cuando una persona ejecuta la acción explícita desde Biblioteca de productos. No crea una tienda ni publica un sitio.
 
 El exportador solo incluye productos cuya ficha tenga estado publicacion.estado = aprobado. Si faltan la identidad global, descripción, URL estable o una imagen propia/licenciada aprobada, la ficha se omite y el motivo se informa sin imprimir costos ni precios privados.
 
@@ -19,20 +19,16 @@ La oferta es opcional. Solo se exporta si publicacion.oferta.estado = aprobada y
 
 Estados recomendados para publicacion.estado: borrador, pendiente_revision, aprobado, retirado. Solo aprobado se exporta. No se debe cambiar el precio de cotización a oferta pública por defecto.
 
-## Flujo sin sobrescribir datos
+## Flujo integrado en Giovalia
 
 1. Respaldar la biblioteca desde la app.
-2. Crear una copia de indice.json con preparar_ids_catalogo.py. El script conserva UUID existentes y no modifica el archivo de entrada.
-3. Tratar esa salida como una propuesta de migración, no como un ID ya persistido en la biblioteca activa. Revisar que cada UUID quede unido a la misma entidad y adoptar la copia mediante el flujo soportado por Giovalia. No regenerar los UUID desde el índice antiguo: volverían a cambiar. Si la app no conserva campos adicionales al guardar, primero hay que implementar una migración dentro de la app; no reemplazar a mano la biblioteca activa.
-4. Completar y aprobar las fichas publicacion con fuentes verificables.
-5. Ejecutar catalogo_publico.py con una URL HTTPS real ya validada y una salida nueva.
-6. Revisar el JSON exportado antes de conectarlo con una web. No se incluye inventario en cantidades; solo una disponibilidad aprobada.
+2. Abrir **Biblioteca de productos**. Los productos nuevos reciben ID global al crearse; para los existentes, usar **Preparar identidad global** y asignar los UUID faltantes. La acción no cambia nombres, alias, precios, costos, archivos ni cotizaciones.
+3. Abrir el producto y completar **Ficha pública SEO/GEO**. Mantenerla como borrador mientras falten pruebas. Las imágenes necesitan URL HTTPS accesible, texto alternativo, derechos declarados y aprobación.
+4. Aprobar solo cuando los datos estén verificados y la página que los mostrará esté definida. La oferta pública es opcional y no se rellena desde el último precio de cotización.
+5. En **Exportar JSON-LD para una web**, usar el dominio HTTPS oficial confirmado, preparar el archivo y revisar los productos incluidos y omitidos.
+6. Comparar el archivo con la página antes de publicarlo. No se incluyen cantidades de stock, costos, márgenes, historial, ni datos de clientes.
 
-Ejemplo de preparación de una copia:
-
-    python preparar_ids_catalogo.py --input biblioteca/indice.json --output revision/indice_con_ids.json
-
-Ejemplo de exportación después de revisar las fichas y confirmar el dominio:
+El script preparar_ids_catalogo.py queda como alternativa para preparar una copia offline, por ejemplo para revisar una migración. Esos UUID no se vuelven IDs de la biblioteca activa hasta que se adopten por un flujo persistente. Para usar el exportador por consola:
 
     python catalogo_publico.py --input revision/indice_con_ids.json --output revision/catalogo_publico.json --base-url https://DOMINIO-VALIDADO
 
