@@ -93,7 +93,7 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
   row-gap:.6rem;
 }
 .gv-topbar {display:flex;align-items:center;gap:.85rem;min-width:0}
-.gv-topbar img {background:#eef3ff;padding:.28rem .42rem;border-radius:.5rem;width:7rem;max-width:35vw}
+.gv-topbar img {display:block;width:7rem;height:auto;max-width:35vw}
 .gv-contexto {min-width:0}
 .gv-breadcrumb strong {color:var(--gv-ink);font-size:1rem;font-weight:650}
 .gv-cuenta {display:flex;flex-wrap:wrap;gap:.15rem .55rem;color:#aebed9;font-size:.76rem}
