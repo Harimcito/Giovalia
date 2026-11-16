@@ -808,13 +808,15 @@ def anexo_fotos(items: list[dict], destino) -> Path:
     return Path(destino)
 
 
-def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="nativo", *, resolver_anexos=None) -> dict:
+def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="nativo", *, resolver_anexos=None, progreso=None) -> dict:
     """Arma: cotización + anexo de fotos + fichas técnicas (una por producto).
 
     `lineas` son las líneas a incluir, cada una con 'clave' (puede ir vacía).
     Devuelve un informe con lo que faltó (sin clave / sin foto / sin ficha).
     """
     informe = {"sin_clave": [], "sin_foto": [], "sin_ficha": [], "ficha_dudosa": [], "ficha_ilegible": []}
+    if progreso:
+        progreso("Recopilando fotos y fichas")
     items, vistos, fichas = [], set(), []
     for ln in lineas:
         clave = ln.get("clave", "").strip().upper()
@@ -843,11 +845,15 @@ def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="
         items.append({**ln, "clave": clave, "foto": foto})
 
     with tempfile.TemporaryDirectory() as tmp:
+        if progreso:
+            progreso("Creando páginas de cotización")
         cot = excel_a_pdf(xlsx, Path(tmp) / "cot.pdf", motor)
         informe["paginas_cotizacion"] = len(PdfReader(cot).pages)
         escritor = PdfWriter()
         escritor.append(str(cot), outline_item="Cotización")
         secciones = [("Cotización", 0, len(escritor.pages))]
+        if progreso:
+            progreso("Agregando fotos y fichas")
         if items:
             inicio = len(escritor.pages)
             escritor.append(str(anexo_fotos(items, Path(tmp) / "fotos.pdf")),

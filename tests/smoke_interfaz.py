@@ -4,6 +4,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from io import BytesIO
+
+from PIL import Image
 from tempfile import TemporaryDirectory
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -21,6 +24,15 @@ def comprobar_interfaz(numero, numero_otro):
         page.on('pageerror', lambda error: errores.append(str(error)))
         page.goto('http://127.0.0.1:8610/')
         expect(page.get_by_role('table',name='Cotizaciones recientes')).to_be_visible()
+        page.get_by_role("button", name="Vista y lectura").click()
+        page.get_by_role("combobox", name="Tamaño del texto").click()
+        page.get_by_role("option", name="Muy grande").click()
+        page.wait_for_function("getComputedStyle(document.documentElement).fontSize === '20px'")
+        page.locator(".st-key-ux_contraste").get_by_text("Alto contraste").click()
+        page.wait_for_function("document.querySelector('#gv-preferencias').dataset.contraste === '1'")
+        page.locator(".st-key-ux_mostrador").get_by_text("Modo mostrador").click()
+        expect(page.locator(".st-key-vista").get_by_text("Gestión comercial")).to_have_count(0)
+        page.keyboard.press("Escape")
         page.keyboard.press('Control+k')
         consulta=page.get_by_role('textbox',name='Buscar en Giovalia')
         consulta.fill('TN1060')
@@ -41,6 +53,12 @@ def comprobar_interfaz(numero, numero_otro):
         expect(page.get_by_role('dialog')).to_be_visible()
         page.get_by_role('button',name='Guardar y continuar').click()
         expect(tabla.get_by_role('button',name='Toner Brother TN1060')).to_have_attribute('aria-current','true')
+        barra = page.locator(".st-key-barra_cotizacion")
+        expect(barra.get_by_role("button", name="Guardar borrador")).to_be_visible()
+        assert barra.evaluate("e => getComputedStyle(e).position") == "sticky"
+        page.get_by_role("button", name="Ampliar foto").click()
+        expect(page.get_by_role("dialog", name="Vista ampliada del anexo")).to_be_visible()
+        page.keyboard.press("Escape")
         page.get_by_role('button',name='Ir al campo').first.click()
         expect(page.get_by_role('textbox',name='Nombre o razón social')).to_be_focused()
         page.set_viewport_size({'width':390,'height':850})
@@ -73,6 +91,10 @@ def ejecutar():
         carpeta = Path(temp) / "biblioteca"
         bib = Biblioteca(carpeta)
         bib.registrar("TN1060", "Toner Brother")
+        bib.registrar("RESMA", "Resma oficio")
+        foto = BytesIO()
+        Image.new("RGB", (24, 24), "#20467d").save(foto, "PNG")
+        bib.guardar_archivo("TN1060", "foto", "toner.png", foto.getvalue())
         hist = Historial(carpeta)
         primero = [
             dict(cantidad=1, descripcion="Toner Brother TN1060", clave_auto="TN1060", unitario=1000),

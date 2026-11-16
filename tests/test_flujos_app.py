@@ -14,6 +14,8 @@ from cotizador import Biblioteca
 from flujo_cotizacion import buscar
 from historial import Historial
 from interfaz_giovalia import fragmento_pdf
+from experiencia_giovalia import normalizar_preferencias
+from usuarios import Usuarios
 
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
@@ -45,6 +47,14 @@ class FlujosAppTests(unittest.TestCase):
         next(b for b in app.button if b.label.startswith(etiqueta)).click()
         self.recargar(app)
 
+    def test_preferencias_ux_se_guardan_por_perfil(self):
+        usuarios = Usuarios(self.raiz / "usuarios.db")
+        ajustes = normalizar_preferencias({"texto": "Muy grande", "contraste": True, "mostrador": True})
+        usuarios.guardar_preferencias_ux("harim", ajustes)
+        usuarios.guardar_preferencias_ux("giovanna", normalizar_preferencias(None))
+        self.assertEqual(Usuarios(self.raiz / "usuarios.db").leer_preferencias_ux("harim"), ajustes)
+        self.assertEqual(usuarios.leer_preferencias_ux("giovanna")["texto"], "Normal")
+
     def test_editar_cotizacion_y_generar_pdf_excel(self):
         biblioteca = Biblioteca(self.raiz / "biblioteca")
         biblioteca.registrar("RESMA-CARTA", "Resma carta", precio_neto=500)
@@ -70,6 +80,10 @@ class FlujosAppTests(unittest.TestCase):
             self.recargar(app)
         self.pulsar(app, "Crear el PDF")
         previo = app.session_state["pdf_bytes"]
+        resumen = app.session_state["informe"]["resumen"]
+        self.assertEqual(resumen["total"], 7140)
+        self.assertEqual(resumen["entrega"], "5 días")
+        self.assertEqual(resumen["numero"], app.session_state["cot_numero"])
         secciones = app.session_state["informe"]["secciones"]
         self.assertEqual([s[0] for s in secciones], ["Cotización", "Fotografías"])
         _, desde, hasta = secciones[1]
