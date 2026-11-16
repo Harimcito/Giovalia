@@ -84,27 +84,30 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
 .gv-mark img{width:26px;height:26px}
 .gv-name{font:720 24px/1.15 "Segoe UI",system-ui,sans-serif;letter-spacing:-.9px;color:var(--gv-ink)}
 .gv-sub{color:var(--gv-muted);font-size:9px;text-transform:uppercase;letter-spacing:2.2px;margin-top:5px;font-weight:600}
-.st-key-gv_toolbar{padding-bottom:.75rem;border-bottom:1px solid var(--gv-line)}
-.st-key-gv_toolbar [data-testid="stHorizontalBlock"]:has(>[data-testid="stColumn"] .gv-topbar){
-  display:grid;grid-template-columns:minmax(0,1fr) max-content max-content;align-items:center;gap:.3rem;
+[data-testid="stMain"]:focus {outline:none}
+.st-key-cabecera_giovalia {
+  flex-flow:row wrap;
+  align-items:center;
+  justify-content:space-between;
+  column-gap:1rem;
+  row-gap:.6rem;
 }
-.st-key-gv_toolbar [data-testid="stHorizontalBlock"]:has(>[data-testid="stColumn"] .gv-topbar)>[data-testid="stColumn"]{
-  min-width:0!important;width:auto!important;
+.gv-topbar {display:flex;align-items:center;gap:.85rem;min-width:0}
+.gv-topbar img {background:#eef3ff;padding:.28rem .42rem;border-radius:.5rem;width:7rem;max-width:35vw}
+.gv-contexto {min-width:0}
+.gv-breadcrumb strong {color:var(--gv-ink);font-size:1rem;font-weight:650}
+.gv-cuenta {display:flex;flex-wrap:wrap;gap:.15rem .55rem;color:#aebed9;font-size:.76rem}
+.st-key-gv_cabecera_acciones {display:flex;flex-flow:row wrap;align-items:center;justify-content:flex-end;gap:.45rem}
+.st-key-cabecera_giovalia > [data-testid="stLayoutWrapper"],
+.st-key-gv_cabecera_acciones > :is([data-testid="stElementContainer"], [data-testid="stLayoutWrapper"]) {
+  flex:0 0 auto;
+  width:auto;
+  max-width:100%;
 }
-.gv-topbar{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.gv-breadcrumb{display:flex;align-items:center;gap:9px;color:#8a96ac;font-size:12px;line-height:1.4}
-.gv-breadcrumb strong{color:var(--gv-ink);font-weight:600}
-.gv-account{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gv-muted);padding-right:.45rem}
-.gv-avatar{width:29px;height:29px;border-radius:50%;display:grid;place-items:center;background:var(--gv-panel-strong);color:var(--gv-link);font-weight:700;border:1px solid var(--gv-line)}
-.st-key-gv_toolbar .st-key-refrescar_compartido button,
-.st-key-gv_toolbar .st-key-settings-popover [data-testid="stPopoverButton"]{
-  background:transparent;border:1px solid transparent;border-radius:8px;color:var(--gv-muted);
-  min-height:36px;padding:.35rem .57rem;font-size:.84rem;box-shadow:none;white-space:nowrap;
-}
-.st-key-gv_toolbar .st-key-refrescar_compartido button:hover,
-.st-key-gv_toolbar .st-key-settings-popover [data-testid="stPopoverButton"]:hover,
-.st-key-gv_toolbar .st-key-settings-popover [data-testid="stPopoverButton"][aria-expanded="true"]{
-  background:var(--gv-panel-strong);color:var(--gv-ink);border-color:transparent;box-shadow:none;transform:none;
+.st-key-gv_cabecera_acciones [data-testid="stElementContainer"]:has(#gv-preferencias) {display:none}
+.st-key-gv_cabecera_acciones :is(.stButton, [data-testid="stPopover"]) button {min-height:2.65rem}
+@media(max-width:760px) {
+  .st-key-gv_cabecera_acciones {justify-content:flex-start}
 }
 .gv-page{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:3px 0 18px}
 .gv-kicker{font-size:10px;font-weight:650;color:#7c89a1;letter-spacing:1.4px;text-transform:uppercase;margin-bottom:9px}
@@ -301,21 +304,18 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
   .gv-step{padding:0 3px!important}.gv-step-label{font-size:11px;min-height:25px}.gv-step-status{font-size:9px}}
 @media(max-width:550px){
   [data-testid="stMainBlockContainer"]:has(.st-key-gv_inicio){padding:2.75rem .9rem 2rem}
-  .gv-account,.gv-breadcrumb>span{display:none}
   .st-key-gv_inicio_encabezado{padding:.7rem 0 .9rem}
   .st-key-gv_inicio_actividad,.st-key-gv_inicio_retomar,.st-key-gv_inicio_resumen{padding:.85rem .9rem!important}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 
 @media(min-width:901px) {
-  .st-key-gv_nav_movil {display:none}
+  .st-key-gv_nav_movil, [data-testid="stLayoutWrapper"]:has(> .st-key-gv_nav_movil) {display:none}
 }
 @media(max-width:900px) {
   .st-key-gv_nav_movil button {min-height:2.45rem}
 }
 .gv-page-icon:empty {display:none}
-.st-key-cabecera_giovalia .gv-account > span {display:none}
-.st-key-cabecera_giovalia img[alt="Gioval"] {background:#eef3ff;padding:.3rem .45rem;border-radius:.52rem}
-.st-key-gv_scroll_runtime,.st-key-gv_scripts_runtime {display:none}
-.st-key-cabecera_giovalia .gv-topbar {margin-bottom:.3rem}
+.st-key-gv_scroll_runtime,.st-key-gv_scripts_runtime,
+[data-testid="stLayoutWrapper"]:has(> :is(.st-key-gv_scroll_runtime,.st-key-gv_scripts_runtime)) {display:none}
 .st-key-gv_nav [data-testid="stButton"] button {font-size:.93rem}
