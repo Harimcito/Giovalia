@@ -1,21 +1,41 @@
 [theme]
-base = "light"
-primaryColor = "#010ED0"
-backgroundColor = "#F2F5FB"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#14213D"
-linkColor = "#2538AA"
-borderColor = "#D3DDEC"
-dataframeBorderColor = "#D3DDEC"
-dataframeHeaderBackgroundColor = "#E5EDF9"
-dataframeHeaderTextColor = "#1E365A"
-blueColor = "#274BCC"
-greenColor = "#00785D"
-orangeColor = "#9B4C00"
-redColor = "#B42340"
-violetColor = "#6444A2"
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
-headingFont = "Inter, sans-serif"
-baseRadius = "medium"
-buttonRadius = "medium"
+base = "dark"
+primaryColor = "#3F5BFF"
+backgroundColor = "#0A0D17"
+secondaryBackgroundColor = "#121B2C"
+textColor = "#F3F5FD"
+linkColor = "#A8BCFF"
+borderColor = "#2B3A56"
+dataframeBorderColor = "#2B3A56"
+dataframeHeaderBackgroundColor = "#19263D"
+dataframeHeaderTextColor = "#DCE7FF"
+font = "'Segoe UI', sans-serif"
+headingFont = "'Segoe UI', sans-serif"
+baseFontSize = 15
+headingFontSizes = ["2rem", "1.5rem", "1.15rem", "1rem", "0.9rem", "0.8rem"]
+headingFontWeights = [650, 650, 600, 600, 600, 600]
+metricValueFontSize = "1.75rem"
+metricValueFontWeight = 650
+baseRadius = "12px"
+buttonRadius = "9px"
 showWidgetBorder = true
+showSidebarBorder = true
+greenColor = "#61DFC0"
+blueColor = "#91AAFF"
+orangeColor = "#FFC077"
+redColor = "#FF8EAA"
+violetColor = "#BAA4FF"
+chartCategoricalColors = ["#7188FF", "#61DFC0", "#BAA4FF", "#FFC077", "#FF8EAA"]
+
+[server]
+port = 8501
+
+[client]
+toolbarMode = "minimal"
+
+[theme.sidebar]
+backgroundColor = "#0D1423"
+secondaryBackgroundColor = "#17243A"
+textColor = "#DCE7FF"
+primaryColor = "#758AFF"
+borderColor = "#2B3A56"

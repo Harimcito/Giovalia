@@ -1,13 +1,13 @@
 <style>
   .st-key-descartar_linea { display: none; }
-  #giovalia-linea-pendiente { color: #925000; font-size: .875rem; margin: 0; }
+  #giovalia-linea-pendiente { color: #ffc077; font-size: .875rem; margin: 0; }
   #giovalia-confirmar-linea {
     max-width: min(30rem, 92vw);
     padding: 1.4rem;
     border: 1px solid var(--st-border-color, #cbd5e1);
     border-radius: .8rem;
-    background: var(--st-background-color, #fff);
-    color: var(--st-text-color, #172b4d);
+    background: var(--gv-panel, #111a2a);
+    color: var(--gv-ink, #f3f5fd);
   }
   #giovalia-confirmar-linea::backdrop { background: #0f172a80; }
   #giovalia-confirmar-linea menu { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0; margin-bottom: 0; }
@@ -150,7 +150,7 @@
   }
   const navegacion = [
     ".st-key-vista", ".st-key-linea_editor", ".st-key-cotizacion_volver_borradores",
-    '[class*="st-key-ux_gestion_"]', ".st-key-editor_regresar_historial", '[class*="st-key-revision_campo_"]',
+    '.st-key-gv_nav [class*="st-key-gv_nav_"]', '[class*="st-key-ux_gestion_"]', ".st-key-editor_regresar_historial", '[class*="st-key-revision_campo_"]',
     ".st-key-editor_volver_pedido", ".st-key-editor_ir_fotos", ".st-key-gioval_cerrar_sesion",
     '[class*="st-key-buscar_cotizacion_"]', '[class*="st-key-buscar_cliente_"]',
     '[class*="st-key-buscar_producto_"]', '[class*="st-key-deshacer_linea_"]',

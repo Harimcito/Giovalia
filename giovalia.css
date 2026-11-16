@@ -108,8 +108,8 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
 }
 .gv-page{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:3px 0 18px}
 .gv-kicker{font-size:10px;font-weight:650;color:#7c89a1;letter-spacing:1.4px;text-transform:uppercase;margin-bottom:9px}
-.gv-page h1{font:680 29px/1.2 "Segoe UI",system-ui,sans-serif!important;letter-spacing:-1px!important;color:var(--gv-ink)!important;margin:0 0 9px!important;padding:0!important}
-.gv-page p{font-size:14px;line-height:1.55;color:var(--gv-muted);margin:0;max-width:720px}
+.gv-page h1{font:680 1.82rem/1.2 "Segoe UI",system-ui,sans-serif!important;letter-spacing:-1px!important;color:var(--gv-ink)!important;margin:0 0 9px!important;padding:0!important}
+.gv-page p{font-size:.95rem;line-height:1.55;color:var(--gv-muted);margin:0;max-width:720px}
 .gv-page-icon{width:45px;height:45px;display:grid;place-items:center;background:var(--gv-panel-strong);border:1px solid var(--gv-line);border-radius:13px;color:var(--gv-link);font-size:21px;box-shadow:0 3px 10px #17213e03}
 .gv-section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:15px;padding:6px 0 13px}
 .gv-section-heading h2{font-size:16px;font-weight:650;letter-spacing:-.3px;color:var(--gv-ink);margin:0}
@@ -123,9 +123,9 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
   transform:translateY(-3px);border-color:#c2caf5!important;box-shadow:0 9px 24px #263c7b0c}
 /* Inicio */
 [data-testid="stApp"]:has(.st-key-gv_inicio){
-  --gv-canvas:#101318;
-  --gv-panel:#181d25;
-  --gv-panel-strong:#202833;
+  --gv-canvas:#0a1020;
+  --gv-panel:#111b2d;
+  --gv-panel-strong:#192946;
   --gv-ink:#edf0f6;
   --gv-muted:#a5afbf;
   --gv-line:#2c3543;
@@ -133,9 +133,9 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
   --gv-link:#afbdff;
   --gv-signal:#8ea0ff;
 }
-[data-testid="stAppViewContainer"]:has(.st-key-gv_inicio){background:var(--gv-canvas)}
+
 [data-testid="stMainBlockContainer"]:has(.st-key-gv_inicio){max-width:1360px;padding-top:2.2rem}
-[data-testid="stApp"]:has(.st-key-gv_inicio) [data-testid="stSidebar"]{background:#141820}
+
 .st-key-gv_inicio_encabezado{padding:1.05rem 0 1.15rem}
 .st-key-gv_inicio_encabezado h1{font-size:clamp(1.85rem,3.15vw,2.75rem);line-height:1.14;margin:0;padding:0 0 .22rem}
 .st-key-gv_inicio_encabezado [data-testid="stCaptionContainer"]{opacity:1}
@@ -293,7 +293,7 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
 @media(max-width:760px){
   [data-testid="stMainBlockContainer"]{padding:2.45rem 1rem 2rem}
   .st-key-gv_acciones_etapa{position:static}
-  .gv-page h1{font-size:25px!important}.gv-page-icon{display:none}.gv-page{margin-bottom:20px}.gv-hero{padding:26px;min-height:240px}
+  .gv-page h1{font-size:1.55rem!important}.gv-page-icon{display:none}.gv-page{margin-bottom:20px}.gv-hero{padding:26px;min-height:240px}
   .gv-hero h1{font-size:28px!important;max-width:100%}.gv-hero p{max-width:80%;font-size:12px}.gv-hero .gv-art{right:-125px;top:60px;opacity:.18}
   .gv-chips{gap:10px;font-size:9px}.gv-hero.gv-compact{min-height:510px;padding:32px 28px 260px}.gv-compact h1{font-size:32px!important}.gv-compact p{max-width:100%}
   .gv-compact .gv-art{right:50%;top:auto;bottom:16px;opacity:1;transform:translateX(50%) scale(.94)}
@@ -306,3 +306,16 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
   .st-key-gv_inicio_actividad,.st-key-gv_inicio_retomar,.st-key-gv_inicio_resumen{padding:.85rem .9rem!important}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+@media(min-width:901px) {
+  .st-key-gv_nav_movil {display:none}
+}
+@media(max-width:900px) {
+  .st-key-gv_nav_movil button {min-height:2.45rem}
+}
+.gv-page-icon:empty {display:none}
+.st-key-cabecera_giovalia .gv-account > span {display:none}
+.st-key-cabecera_giovalia img[alt="Gioval"] {background:#eef3ff;padding:.3rem .45rem;border-radius:.52rem}
+.st-key-gv_scroll_runtime,.st-key-gv_scripts_runtime {display:none}
+.st-key-cabecera_giovalia .gv-topbar {margin-bottom:.3rem}
+.st-key-gv_nav [data-testid="stButton"] button {font-size:.93rem}
