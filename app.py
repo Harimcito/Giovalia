@@ -1,5 +1,6 @@
 """Cotizaciones con fotos y fichas técnicas. Ejecutar con:  streamlit run app.py"""
 import hmac
+import html
 import io
 import json
 import os
@@ -22,6 +23,7 @@ from pypdf.errors import PdfReadError
 
 import acceso
 import anexos_cotizacion as anexos_doc
+import fichas_catalogo as fichas_doc
 import buscador as bs
 import cotizador as ct
 import historial as hs
@@ -34,6 +36,8 @@ import revision_cotizacion as revision_doc
 import operacion_comercial as op
 import operacion_comercial_ui as gestion
 import flujo_cotizacion as flujo
+import stock_catalogo
+import edicion_lineas as edicion
 from vista_precios import vista_precios
 import catalogo_clientes as cc
 from productos_ui import editar_ficha
@@ -818,7 +822,7 @@ def persistir_borrador():
         except Exception:
             orden = None
     datos = {
-        "lineas": lineas,
+        "lineas": [{k: v for k, v in linea.items() if k != edicion.ID} for linea in lineas],
         "anexos": anexos_doc.limpiar_referencias(E.get("anexos_cotizacion")),
         "cliente": cliente,
         "origen_pedido": E.get("origen_pedido", "pedido"),
@@ -947,12 +951,23 @@ def editar_cabecera():
 def sincronizar_editor_productos(editada: pd.DataFrame):
     """Copia cambios del editor a las líneas canónicas que usa el borrador y el PDF."""
     anteriores = list(E.get("lineas", []))
+    ids = editada[edicion.ID]
+    editada = editada.drop(columns=[edicion.ID])
     tabla_anterior = E.get("tabla_edit")
     cambio = isinstance(tabla_anterior, pd.DataFrame) and not tabla_anterior.equals(editada)
     con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
     nuevas = []
-    anteriores_base = E.get("lineas_base", anteriores)
+    anteriores_base = {ln[edicion.ID]: ln for ln in E.get("lineas_base", anteriores)}
+    ids_nuevas = E.setdefault("_ids_filas_nuevas", {})
+    posicion_nueva = 0
     for i, fila in editada.iterrows():
+        fila_id = ids.at[i]
+        previa = anteriores_base.get(fila_id, {})
+        if not previa:
+            if posicion_nueva not in ids_nuevas:
+                ids_nuevas[posicion_nueva] = uuid4().hex
+            fila_id = ids_nuevas[posicion_nueva]
+            posicion_nueva += 1
         descripcion = _texto_seguro(fila.get(COL_PROD))
         cantidad = fila.get(COL_CANT)
         try:
@@ -963,7 +978,6 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
             continue
         if not descripcion or descripcion.lower() == "nan" or cantidad <= 0:
             continue
-        previa = anteriores_base[i] if isinstance(i, int) and 0 <= i < len(anteriores_base) else {}
         precio_ui = fila.get(COL_PRECIO)
         anterior_neto = previa.get("unitario")
         if anterior_neto is None:
@@ -986,6 +1000,7 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
             origen = "descripcion"
         nuevas.append({
             **previa,
+            edicion.ID: fila_id,
             "fila": previa.get("fila", i + 1),
             "cantidad": ct._cantidad(cantidad),
             "descripcion": ct.limpiar_descripcion(descripcion),
@@ -1000,6 +1015,9 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
     E["tabla_edit"] = editada
     E["lineas"] = nuevas
     if cambio:
+        registrar_deshacer(anteriores, nuevas)
+        if E.get("paso") == 2 and {ln[edicion.ID] for ln in anteriores} != {ln[edicion.ID] for ln in nuevas}:
+            E["_rebasar_lineas"] = True
         E["editado_manual"] = True
         for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
             E.pop(k, None)
@@ -1021,17 +1039,21 @@ def editor_productos():
         E["tabla_base"] = base.copy()
     version = int(E.get("editor_version", 0))
     if E.get("_lineas_base_version") != (E.get("cot_id"), version):
-        E["lineas_base"] = list(E.get("lineas", []))
+        E["lineas"] = edicion.identificar(E.get("lineas", []))
+        E["lineas_base"] = list(E["lineas"])
+        E["_ids_filas_nuevas"] = {}
         E["_lineas_base_version"] = (E.get("cot_id"), version)
     base = base.assign(**{
+        edicion.ID: pd.Series([ln[edicion.ID] for ln in E["lineas_base"]], index=base.index, dtype="object"),
         flujo.COL_STOCK: base.get(flujo.COL_STOCK, flujo.POR_CONFIRMAR),
         flujo.COL_PLAZO: pd.to_numeric(base.get(flujo.COL_PLAZO, pd.Series(index=base.index, dtype=float))),
     })
     editada = editor(
         base, num_rows="dynamic", hide_index=True, width="stretch",
         key=f"editor_productos_{version}",
-        disabled=[COL_ORIGEN],
+        disabled=[COL_ORIGEN, edicion.ID],
         column_config={
+            edicion.ID: None,
             COL_INCLUIR: st.column_config.CheckboxColumn("Incluir", width="small"),
             COL_CANT: st.column_config.NumberColumn("Cantidad", min_value=0, step=1, width="small"),
             COL_PROD: st.column_config.TextColumn("Producto", width="large"),
@@ -1848,18 +1870,8 @@ def agregar_desde_catalogo():
                 "origen": "biblioteca", "incluir": True,
                 **flujo.datos_entrega(bib.indice[producto["clave"]].get("estado_stock"), None),
             }
-            lineas_actuales = list(E.get("lineas", []))
-            lineas_actuales.append(linea)
-            E["lineas"] = lineas_actuales
-            E["tabla"] = tabla_desde_lineas(lineas_actuales, con_iva=con_iva)
-            E["tabla_edit"] = E["tabla"].copy()
-            E["tabla_base"] = E["tabla"].copy()
-            E["editor_version"] = int(E.get("editor_version", 0)) + 1
-            E["editado_manual"] = True
-            for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
-                E.pop(clave_estado, None)
+            aplicar_lineas_editor([*E.get("lineas", []), linea])
             refrescar_excel_actual()
-            persistir_borrador()
             st.rerun()
 
 
@@ -1934,7 +1946,16 @@ def revisar_asociaciones_catalogo(pendientes: list[str]):
                 st.rerun()
 
 
-def aplicar_lineas_editor(lineas):
+def registrar_deshacer(anteriores, nuevas):
+    if E.get("paso") == 2 and all(edicion.ID in linea for linea in anteriores):
+        cambios = E.get("_deshacer_lineas", [])
+        E["_deshacer_lineas"] = [*cambios, *edicion.cambios(anteriores, nuevas)][-50:]
+
+
+def aplicar_lineas_editor(lineas, *, registrar=True):
+    lineas = edicion.identificar(lineas)
+    if registrar:
+        registrar_deshacer(E.get("lineas", []), lineas)
     tabla = tabla_desde_lineas(lineas)
     E.update(
         lineas=lineas, tabla=tabla, tabla_edit=tabla.copy(), tabla_base=tabla.copy(),
@@ -1945,7 +1966,32 @@ def aplicar_lineas_editor(lineas):
     persistir_borrador()
 
 
+def mostrar_deshacer_lineas():
+    historial = E.get("_deshacer_lineas", [])
+    por_id = {linea[edicion.ID]: linea for linea in E["lineas"]}
+    disponibles = {}
+    for indice, cambio in reversed(list(enumerate(historial))):
+        if cambio["id"] not in disponibles and edicion.debe_deshacerse(cambio, por_id):
+            disponibles[cambio["id"]] = indice
+    if not disponibles or E.get("_conflicto_guardado"):
+        return
+    with st.container(key="panel_deshacer_lineas"):
+        panel = st.popover("Deshacer cambios por línea", icon=":material/undo:")
+    with panel:
+        for indice in disponibles.values():
+            cambio = historial[indice]
+            anterior, posterior = cambio["antes"], cambio["despues"]
+            nombre = (posterior or anterior)["descripcion"]
+            accion = "Recuperar" if posterior is None else "Quitar línea agregada" if anterior is None else "Revertir edición"
+            if st.button(f"{accion} · {nombre}", key=f"deshacer_linea_{indice}", width="stretch"):
+                E["_deshacer_lineas"] = historial[:indice] + historial[indice + 1:]
+                aplicar_lineas_editor(edicion.deshacer(E["lineas"], cambio), registrar=False)
+                st.rerun()
+
+
 def confirmar_linea_editor(indice, clave_widget, total, avanzar):
+    E["_acuse_linea"] = E.get("_acuse_linea", 0) + 1
+    E["_estado_acuse_linea"] = "error"
     try:
         precio = montos.leer(E[clave_widget])
         if precio is not None and precio < 0:
@@ -1957,6 +2003,12 @@ def confirmar_linea_editor(indice, clave_widget, total, avanzar):
     E["_linea_pendiente"] = (indice, precio, entrega)
     if avanzar:
         E["linea_editor"] = (indice + 1) % total
+
+
+def descartar_linea_editor():
+    E["_acuse_linea"] = E.get("_acuse_linea", 0) + 1
+    E["_revision_campos_linea"] = E.get("_revision_campos_linea", 0) + 1
+    E["_estado_acuse_linea"] = "aplicado"
 
 
 def detalle_linea_editor():
@@ -1976,7 +2028,9 @@ def detalle_linea_editor():
     mostrado = None if previo is None else ct.precio_para_mostrar(previo, con_iva)
     entrega = flujo.datos_entrega(linea.get("disponibilidad"), linea.get("plazo_dias"))
     estado, dias = entrega["disponibilidad"], entrega["plazo_dias"]
-    clave_widget = f"precio_linea_{E['cot_id']}_{E.get('editor_version', 0)}_{indice}_{mostrado}_{estado}_{dias}"
+    acuse = E.get("_acuse_linea", 0)
+    revision = E.get("_revision_campos_linea", 0)
+    clave_widget = f"precio_linea_{E['cot_id']}_{E.get('editor_version', 0)}_{indice}_{mostrado}_{estado}_{dias}_{revision}"
     with st.form("form_precio_linea", border=False):
         st.text_input("Precio de la línea seleccionada", value=montos.clp(mostrado), key=clave_widget,
                       placeholder="Monto en pesos")
@@ -1991,8 +2045,25 @@ def detalle_linea_editor():
                                    args=(indice, clave_widget, len(lineas), False))
         avanzar.form_submit_button("Siguiente precio", key="siguiente_precio", on_click=confirmar_linea_editor,
                                    args=(indice, clave_widget, len(lineas), True), disabled=len(lineas) < 2)
+        st.form_submit_button("Descartar edición", key="descartar_linea", on_click=descartar_linea_editor)
+        st.html(
+            f'<p id="giovalia-linea-pendiente" role="status" hidden data-acuse="{acuse}" '
+            f'data-estado="{E.get("_estado_acuse_linea", "")}" data-precio="{html.escape(montos.clp(mostrado))}" '
+            f'data-stock="{html.escape(estado)}" data-plazo="{"" if dias is None else dias}">'
+            'Hay cambios en esta línea por guardar.</p>'
+        )
     clave = linea.get("clave_auto")
     if clave and linea.get("es_producto", True):
+        clave_catalogo = bib.clave_vigente(clave)
+        if clave_catalogo:
+            confirmacion = stock_catalogo.datos_stock(bib.indice[clave_catalogo])
+            fecha = confirmacion["stock_confirmado_el"]
+            if fecha:
+                fuente = confirmacion["stock_fuente"]
+                rotulo = f"Stock de biblioteca · {confirmacion['estado_stock']} · {fecha:%d/%m/%Y}"
+                st.caption(f"{rotulo} · {fuente}" if fuente else rotulo)
+            else:
+                st.caption("Stock de biblioteca sin fecha de confirmación.")
         tarjeta(clave, linea["descripcion"], *estado_anexos(clave, True), de_cotizacion=True)
 
 
@@ -2030,6 +2101,8 @@ def paso_2():
                     lineas[indice] = {**lineas[indice], **entrega, "unitario": neto, "precio_neto": neto}
                     aplicar_lineas_editor(lineas)
                 if not E.get("_conflicto_guardado"):
+                    E["_estado_acuse_linea"] = "aplicado"
+                    E["_revision_campos_linea"] = E.get("_revision_campos_linea", 0) + 1
                     st.toast("Borrador guardado")
         descripcion = ct.limpiar_descripcion(nueva)
         if descripcion:
@@ -2041,12 +2114,17 @@ def paso_2():
             }]
             E["_limpiar_linea_nueva"] = True
             aplicar_lineas_editor(nuevas)
+            E.pop("_rebasar_lineas", None)
+            st.rerun()
+        if E.pop("_rebasar_lineas", False):
+            aplicar_lineas_editor(E["lineas"], registrar=False)
             st.rerun()
         estado = st.container(horizontal=True)
         if st.button("Guardar borrador", key="guardar_editor", icon=":material/save:"):
             persistir_borrador()
             if not E.get("_conflicto_guardado"):
                 st.toast("Borrador guardado")
+        mostrar_deshacer_lineas()
     with detalle:
         detalle_linea_editor()
     with resumen:
@@ -2074,7 +2152,8 @@ def paso_2():
     panel_revision()
 
     atras, sigue = st.columns(2)
-    if atras.button("← Volver", width="stretch"):
+    if atras.button("← Volver", key="editor_volver_pedido", width="stretch"):
+        E.pop("_deshacer_lineas", None)
         con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
         E["orden_df"] = pd.DataFrame({
             "Incluir": [_esta_marcado(ln.get("incluir"), True) for ln in E.get("lineas", [])],
@@ -2091,7 +2170,7 @@ def paso_2():
         E["_orden_coincidencias"] = referencias_lineas_guardadas(E["lineas"])
         E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
         ir_a(1)
-    if sigue.button("Siguiente: fotos y fichas →", type="primary", width="stretch"):
+    if sigue.button("Siguiente: fotos y fichas →", key="editor_ir_fotos", type="primary", width="stretch"):
         claves, _ = datos_productos()
         if not claves:
             st.error("Marca al menos un producto en la columna **Incluir** para buscar sus fotos y fichas.")
@@ -2101,13 +2180,10 @@ def paso_2():
 
 
 # ============================================================== PASO 3: FOTOS Y FICHAS
-@st.cache_data(show_spinner=False)
-def menciones_guardada(ruta: str, mtime: float, clave: str) -> int:
-    """Veces que la ficha guardada nombra el código (-1 = no se pudo leer)."""
-    try:
-        return len(bs.menciones_clave(Path(ruta).read_bytes(), [clave]))
-    except Exception:
-        return -1
+def revisar_ficha_producto(clave, ficha, opcional=False):
+    datos = bib.indice.get(clave, {})
+    codigos = (clave, datos.get("modelo"), datos.get("mpn"), *ct._alias_de_ficha(datos))
+    return fichas_doc.problema_ficha(ficha, [str(codigo) for codigo in codigos if codigo], opcional=opcional)
 
 
 def consultas_sugeridas(clave: str, desc: str) -> tuple[str, str]:
@@ -2206,15 +2282,13 @@ def estado_anexos(clave: str, de_cotizacion: bool = False):
 
 
 def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_cotizacion=False):
-    aviso_ficha = ""
-    if ficha:
-        n = menciones_guardada(str(ficha), ficha.stat().st_mtime, clave) if bs.es_codigo(clave) else -2
-        estado_ficha = "Revisar" if n == 0 else "Disponible"
-        if n == 0:
-            aviso_ficha = (f"La ficha guardada no menciona el código «{clave}». Puede ser de otro producto: "
-                           "busca otra o revísala.")
-    else:
-        estado_ficha = "No requerida" if ficha_no_requerida else "Falta"
+    problema_ficha = revisar_ficha_producto(clave, ficha, ficha_no_requerida)
+    estado_ficha = problema_ficha or ("Disponible" if ficha else "No requerida")
+    aviso_ficha = {
+        fichas_doc.ILEGIBLE: "Este PDF no se pudo leer. Puedes reemplazarlo en Más opciones.",
+        fichas_doc.SIN_TEXTO: "Este PDF no tiene texto verificable. Abre la ficha para revisar el código.",
+        fichas_doc.SIN_CODIGO: "El texto del PDF no contiene el código, modelo ni alias del producto.",
+    }.get(problema_ficha, "")
     with st.container(border=True):
         c1, c2 = st.columns([1, 3])
         with c1:
@@ -2259,8 +2333,9 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
-            buscar_ficha = not ficha and not ficha_no_requerida
-            if b1.button("Buscar archivos faltantes", key=f"b_{clave}", width="stretch",
+            buscar_ficha = bool(problema_ficha)
+            if b1.button("Buscar archivos" if ficha and buscar_ficha else "Buscar archivos faltantes",
+                         key=f"b_{clave}", width="stretch",
                          disabled=bool(foto) and not buscar_ficha):
                 with st.spinner("Buscando…"):
                     for aviso in buscar_para(clave, q_foto, q_ficha, fotos=not foto, fichas=buscar_ficha):
@@ -2292,7 +2367,12 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_
                             st.success("Anexos copiados a la ficha maestra.")
                 st.text_input("Buscar la foto como", value=sug_foto, key=f"qf_{clave}")
                 st.text_input("Buscar la ficha como", value=sug_ficha, key=f"qd_{clave}")
-                if ficha and st.button("Sacar la foto desde la ficha", key=f"xf_{clave}"):
+                if ficha and problema_ficha in (fichas_doc.SIN_TEXTO, fichas_doc.SIN_CODIGO):
+                    st.download_button("Descargar ficha actual", data=ficha.read_bytes,
+                                       file_name=f"{clave}.pdf", mime="application/pdf", key=f"df_{clave}")
+                if ficha and problema_ficha != fichas_doc.ILEGIBLE and st.button(
+                    "Sacar la foto desde la ficha", key=f"xf_{clave}"
+                ):
                     E[f"cand_foto_{clave}"] = bs.fotos_de_ficha(ficha.read_bytes())
                 st.file_uploader("Subir mi propia foto", type=["jpg", "jpeg", "png", "webp"], key=f"foto_{clave}",
                                  on_change=guardar_anexo_subido, args=(clave, "foto", de_cotizacion))
@@ -2648,6 +2728,9 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
     rec = hist.obtener(cot_id)
     if not rec:
         return
+    for campo in ("_deshacer_lineas", "_linea_pendiente", "_lineas_base_version", "linea_editor",
+                  "_error_precio_linea", "_estado_acuse_linea", "_revision_campos_linea"):
+        E.pop(campo, None)
     datos = rec["datos"]
     lineas, cli = datos.get("lineas", []), datos.get("cliente", {})
     con_iva = bool(rec["con_iva"])
@@ -2978,9 +3061,10 @@ def mostrar_busqueda_global():
         return
     with ventana:
         consulta = st.text_input(
-            "Buscar en Giovalia", key="consulta_global",
+            "Buscar en Giovalia", key="consulta_global", value=E.get("_ultima_consulta_global", ""),
             placeholder="Producto o cotización" if GIOVAL_REQUIRE_ACCESS else "Producto, cliente o cotización",
         ).strip()
+        E["_ultima_consulta_global"] = consulta
         if not consulta:
             return
         productos, clientes, cotizaciones = flujo.buscar(consulta, bib, hist, privado=GIOVAL_REQUIRE_ACCESS)
@@ -3006,55 +3090,121 @@ def mostrar_busqueda_global():
                     st.caption(" · ".join(dict.fromkeys(coincidencias[:3])))
 
 
+def editar_stock_masivo(visibles, filtro):
+    panel = st.expander("Actualizar stock de varios productos", key="stock_masivo_panel", on_change="rerun")
+    if not panel.open:
+        E.pop("_base_stock_masivo", None)
+        return
+    contexto, bases = E.get("_base_stock_masivo", (None, None))
+    if contexto != filtro:
+        bases = {clave: dict(bib.indice[clave]) for clave in visibles}
+        E["_base_stock_masivo"] = (filtro, bases)
+    # El formulario se evalúa contra la lista mostrada al abrirlo, incluso cuando
+    # otra sesión ya corrigió un producto y lo sacó del filtro.
+    with panel, st.form(f"stock_masivo_{filtro}"):
+        codigos = st.multiselect(
+            "Productos para actualizar", list(bases), key=f"stock_masivo_codigos_{filtro}",
+            format_func=lambda codigo: f"{codigo} · {bases[codigo].get('nombre') or codigo}",
+        )
+        c1, c2, c3 = st.columns(3)
+        estado = c1.selectbox("Nuevo estado de stock", flujo.DISPONIBILIDADES, key="stock_masivo_estado")
+        fecha = c2.date_input("Fecha de confirmación", date.today(), max_value=date.today(), key="stock_masivo_fecha")
+        fuente = c3.text_input("Proveedor o sucursal", max_chars=120, key="stock_masivo_fuente")
+        if st.form_submit_button("Aplicar stock a la selección", key="stock_masivo_aplicar", type="primary"):
+            if not codigos:
+                st.warning("Selecciona al menos un producto.")
+                return
+            try:
+                campos = stock_catalogo.campos_stock(estado, fecha, fuente)
+                cantidad = bib.actualizar_varios(codigos, campos, bases)
+            except (ValueError, OSError) as exc:
+                E.pop("_base_stock_masivo", None)
+                st.error(str(exc))
+            else:
+                E.pop("_base_stock_masivo", None)
+                E.pop("_base_stock_pendientes", None)
+                E["_mensaje_guardado"] = f"Stock actualizado en {cantidad} producto(s)."
+                st.rerun()
+
+
+def editar_stock_individual(clave, seccion, *, incluye_costo=False):
+    clave_base = f"_base_stock_{seccion}"
+    base_clave, base = E.get(clave_base, (None, None))
+    if base_clave != clave:
+        base = dict(bib.indice[clave])
+        E[clave_base] = (clave, base)
+    confirmacion = stock_catalogo.datos_stock(base)
+    fecha_anterior = confirmacion["stock_confirmado_el"]
+    if fecha_anterior:
+        st.caption(f"Confirmado el {fecha_anterior:%d/%m/%Y} · "
+                   f"{confirmacion['stock_fuente'] or 'Origen sin registrar'}")
+    with st.form(f"stock_{seccion}_{clave}"):
+        c1, c2 = st.columns(2)
+        if incluye_costo:
+            costo_base = base.get("costo_neto")
+            costo = c1.number_input("Costo neto", min_value=0.0, step=100.0,
+                                    value=None if costo_base is None else float(costo_base))
+        disponibilidad = c2.selectbox(
+            "Stock en biblioteca", flujo.DISPONIBILIDADES,
+            index=flujo.DISPONIBILIDADES.index(confirmacion["estado_stock"]),
+        )
+        fecha = c1.date_input("Fecha de confirmación", fecha_anterior or date.today(), max_value=date.today())
+        fuente = c2.text_input("Proveedor o sucursal", confirmacion["stock_fuente"], max_chars=120)
+        if st.form_submit_button("Guardar costo y stock" if incluye_costo else "Guardar stock", type="primary"):
+            try:
+                campos = stock_catalogo.campos_stock(disponibilidad, fecha, fuente)
+                if incluye_costo:
+                    campos["costo_neto"] = costo
+                bib.actualizar(clave, version_esperada=base, **campos)
+            except (ValueError, OSError) as exc:
+                st.error(str(exc))
+                E.pop(clave_base, None)
+            else:
+                E.pop(clave_base, None)
+                E.pop("_base_stock_masivo", None)
+                E["_mensaje_guardado"] = f"Datos guardados para {clave}."
+                st.rerun()
+
+
 def vista_pendientes():
     st.title("Datos pendientes")
-    pendientes = {}
-    for producto in bib.filas_catalogo():
-        clave = producto["clave"]
-        motivos = []
-        if producto["costo_neto"] is None:
-            motivos.append("Sin costo")
-        if bib.indice[clave].get("estado_stock") not in (flujo.EN_STOCK, flujo.A_PEDIDO):
-            motivos.append("Stock sin confirmar")
-        if not producto["ficha"] and not producto["ficha_no_requerida"]:
-            motivos.append("Ficha incompleta")
-        if motivos:
-            pendientes[clave] = (producto, motivos)
-    filtro = st.segmented_control("Pendiente", ("Todos", "Sin costo", "Stock sin confirmar", "Ficha incompleta"),
-                                  default="Todos", required=True)
-    visibles = [clave for clave, (_, motivos) in pendientes.items() if filtro == "Todos" or filtro in motivos]
+    filtro = st.segmented_control(
+        "Pendiente", ("Todos", "Sin costo", "Stock sin confirmar", "Ficha incompleta", "Stock confirmado"),
+        default="Todos", required=True, key="pendientes_filtro",
+    )
+    motivos_por_producto = {}
+    for clave, datos in sorted(bib.indice.items()):
+        motivos = {}
+        stock = stock_catalogo.datos_stock(datos)
+        if datos.get("costo_neto") is None:
+            motivos["Sin costo"] = "Sin costo"
+        if stock["estado_stock"] == flujo.POR_CONFIRMAR:
+            motivos["Stock sin confirmar"] = "Stock sin confirmar"
+        elif stock["stock_confirmado_el"] is None:
+            motivos["Stock sin confirmar"] = "Stock sin fecha de confirmación"
+        if filtro in ("Todos", "Ficha incompleta"):
+            _, ficha = bib.archivos(clave)
+            problema = revisar_ficha_producto(clave, ficha, datos.get("ficha_no_requerida", False))
+            if problema:
+                motivos["Ficha incompleta"] = problema
+        if filtro == "Stock confirmado" and stock["estado_stock"] != flujo.POR_CONFIRMAR:
+            motivos_por_producto[clave] = {"Stock confirmado": stock["estado_stock"]}
+        elif motivos and (filtro == "Todos" or filtro in motivos):
+            motivos_por_producto[clave] = motivos
+    visibles = list(motivos_por_producto)
+    if visibles or E.get("_base_stock_masivo"):
+        editar_stock_masivo(visibles, filtro)
     if not visibles:
-        st.success("No hay productos pendientes con este filtro.")
+        st.success("No hay productos con stock confirmado." if filtro == "Stock confirmado"
+                   else "No hay productos pendientes con este filtro.")
         return
     st.caption(f"{len(visibles)} productos")
     clave = st.selectbox("Producto pendiente", visibles,
-                        format_func=lambda codigo: f"{codigo} · {pendientes[codigo][0]['nombre']}")
-    producto, motivos = pendientes[clave]
-    st.write(" · ".join(motivos))
-    ficha_actual = dict(bib.indice[clave])
-    base_clave, base = E.get("_base_producto_pendiente", (None, None))
-    if base_clave != clave:
-        base = ficha_actual
-        E["_base_producto_pendiente"] = (clave, base)
-    with st.form(f"pendiente_{clave}"):
-        c1, c2 = st.columns(2)
-        costo = c1.number_input("Costo neto", min_value=0.0, step=100.0, value=producto["costo_neto"])
-        anterior = base.get("estado_stock")
-        disponibilidad = c2.selectbox(
-            "Stock en biblioteca", flujo.DISPONIBILIDADES,
-            index=flujo.DISPONIBILIDADES.index(anterior) if anterior in flujo.DISPONIBILIDADES else 0,
-        )
-        if st.form_submit_button("Guardar costo y stock", type="primary"):
-            try:
-                bib.actualizar(clave, version_esperada=base, costo_neto=costo, estado_stock=disponibilidad)
-            except ValueError as exc:
-                st.error(str(exc))
-                E.pop("_base_producto_pendiente", None)
-            else:
-                E.pop("_base_producto_pendiente", None)
-                E["_mensaje_guardado"] = f"Datos guardados para {clave}."
-                st.rerun()
-    tarjeta(clave, producto["nombre"], *estado_anexos(clave))
+                        format_func=lambda codigo: f"{codigo} · {bib.indice[codigo].get('nombre') or codigo}")
+    producto = bib.indice[clave]
+    st.write(" · ".join(motivos_por_producto[clave].values()))
+    editar_stock_individual(clave, "pendientes", incluye_costo=True)
+    tarjeta(clave, producto.get("nombre") or clave, *estado_anexos(clave))
 
 
 def vista_productos():
@@ -3231,6 +3381,11 @@ def vista_productos():
     elegido = st.selectbox("Selecciona un producto", codigos, key="p_sel")
     producto_elegido = next(f for f in filas if f["clave"] == elegido)
     tarjeta(elegido, producto_elegido["nombre"], *estado_anexos(elegido))
+    with st.expander("Disponibilidad de stock", key="biblioteca_stock_panel", on_change="rerun") as panel_stock:
+        if panel_stock.open:
+            editar_stock_individual(elegido, "biblioteca")
+        else:
+            E.pop("_base_stock_biblioteca", None)
     editar_ficha(bib, elegido)
     with st.expander("Acciones avanzadas: cambiar código o eliminar"):
         st.text_input("Nuevo código", key=f"ren_{elegido}")
@@ -3570,6 +3725,7 @@ vista = st.segmented_control(
     label_visibility="collapsed",
 )
 st.html(Path(__file__).with_name("atajos_cotizacion.html"), unsafe_allow_javascript=True)
+st.html(Path(__file__).with_name("cambios_linea.html"), unsafe_allow_javascript=True)
 mostrar_busqueda_global()
 if vista == VISTAS[1]:
     vista_historial()
