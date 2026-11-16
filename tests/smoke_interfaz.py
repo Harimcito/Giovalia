@@ -74,7 +74,7 @@ def comprobar_interfaz(numero, numero_otro):
         historial=page.get_by_role('table',name='Cotizaciones del historial')
         expect(historial).to_be_visible()
         historial.get_by_role('button',name=numero).click()
-        expect(historial.get_by_role('button',name=numero)).to_have_attribute('aria-current','true')
+        expect(historial.get_by_role('button',name=numero).and_(page.locator('[aria-current="true"]'))).to_be_visible()
         page.get_by_role('textbox',name='Buscar',exact=True).fill(numero)
         page.get_by_role('textbox',name='Buscar',exact=True).press('Enter')
         expect(historial.get_by_role('button',name=numero_otro)).to_have_count(0)
