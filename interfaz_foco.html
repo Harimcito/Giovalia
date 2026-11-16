@@ -1,0 +1,82 @@
+<script>
+(() => {
+  if (window.giovaliaInterfazFoco) return;
+  window.giovaliaInterfazFoco = true;
+  const consulta = () => document.querySelector(".st-key-consulta_global input");
+  const resultados = () => [...document.querySelectorAll('[class*="st-key-buscar_"] button')]
+    .filter(b => b.getClientRects().length);
+  const buscado = () => document.getElementById("gv-consulta")?.dataset.consulta;
+  document.addEventListener("keydown", (e) => {
+    if (!["ArrowDown","ArrowUp","Enter"].includes(e.key)) return;
+    const botones = resultados();
+    const actual = botones.indexOf(e.target);
+    if ((!botones.length || consulta()?.value.trim() !== buscado()) ||
+        (e.target !== consulta() && actual < 0) || (e.key === "Enter" && actual < 0)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.key === "Enter") {
+      if (!e.repeat) botones[actual].click();
+      return;
+    }
+    const paso = e.key === "ArrowDown" ? 1 : -1;
+    const siguiente = actual < 0 ? (paso > 0 ? 0 : botones.length - 1) :
+      (actual + paso + botones.length) % botones.length;
+    botones[siguiente].focus();
+  }, true);
+  document.addEventListener("focusin", (e) => {
+    const resaltado = document.querySelector(".gv-destino");
+    if (resaltado && resaltado !== e.target) resaltado.classList.remove("gv-destino");
+  });
+  let atendido;
+  function simplificar(texto) {
+    return texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  }
+  function actualizar() {
+    const destino = document.getElementById("gv-destino");
+    if (destino && destino !== atendido) {
+      const campo = document.querySelector(destino.dataset.selector);
+      campo?.closest("details")?.setAttribute("open", "");
+      if (campo?.getClientRects().length) {
+        atendido = destino;
+        if (destino.dataset.movil !== "1" || matchMedia("(max-width:800px)").matches) {
+          campo.classList.add("gv-destino");
+          campo.scrollIntoView({block:"center"});
+          campo.focus({preventScroll:true});
+        }
+      }
+    }
+    if (!CSS.highlights || typeof Highlight === "undefined") return;
+    const termino = simplificar(buscado() || "").replace(/[^a-z0-9]/g,"");
+    const rangos = [];
+    if (termino) {
+      for (const boton of resultados()) {
+        const lector = document.createTreeWalker(boton, NodeFilter.SHOW_TEXT);
+        for (let n = lector.nextNode(); n; n = lector.nextNode()) {
+          const offsets = [];
+          let texto = "";
+          for (let i = 0; i < n.length; i++) {
+            const c = simplificar(n.data[i]);
+            if (/^[a-z0-9]$/.test(c)) { texto += c; offsets.push(i); }
+          }
+          const indice = texto.indexOf(termino);
+          if (indice >= 0) {
+            const rango = new Range();
+            rango.setStart(n, offsets[indice]);
+            rango.setEnd(n, offsets[indice + termino.length - 1] + 1);
+            rangos.push(rango);
+          }
+        }
+      }
+    }
+    if (rangos.length) CSS.highlights.set("gv-coincidencia", new Highlight(...rangos));
+    else CSS.highlights.delete("gv-coincidencia");
+  }
+  let programado = false;
+  new MutationObserver(() => {
+    if (programado) return;
+    programado = true;
+    requestAnimationFrame(() => { programado = false; actualizar(); });
+  }).observe(document.body, {childList:true, subtree:true, characterData:true});
+  actualizar();
+})();
+</script>

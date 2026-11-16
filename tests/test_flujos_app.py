@@ -13,6 +13,7 @@ from streamlit.testing.v1 import AppTest
 from cotizador import Biblioteca
 from flujo_cotizacion import buscar
 from historial import Historial
+from interfaz_giovalia import fragmento_pdf
 
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
@@ -69,6 +70,13 @@ class FlujosAppTests(unittest.TestCase):
             self.recargar(app)
         self.pulsar(app, "Crear el PDF")
         previo = app.session_state["pdf_bytes"]
+        secciones = app.session_state["informe"]["secciones"]
+        self.assertEqual([s[0] for s in secciones], ["Cotización", "Fotografías"])
+        _, desde, hasta = secciones[1]
+        self.assertEqual(len(PdfReader(BytesIO(fragmento_pdf(previo, desde, hasta))).pages), hasta - desde)
+        app.selectbox(key=f"seccion_pdf_{app.session_state['cot_id']}").set_value(2)
+        self.recargar(app)
+        self.assertEqual(app.session_state["pdf_bytes"], previo)
         self.assertFalse(app.session_state["pdf_confirmado"])
         sin_confirmar = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])
         self.assertIsNone(sin_confirmar["pdf"])
@@ -95,6 +103,43 @@ class FlujosAppTests(unittest.TestCase):
                 self.assertTrue(any("Segunda descripción · A pedido, 5 días" in fila for fila in wb.active.values))
             finally:
                 wb.close()
+
+    def test_revision_galeria_y_regreso_al_historial(self):
+        bib = Biblioteca(self.raiz / "biblioteca")
+        bib.registrar("TN1060", "Tóner Brother")
+        hist = Historial(self.raiz / "biblioteca")
+        lineas = [{"cantidad": 1, "descripcion": "Tóner TN1060", "clave_auto": "TN1060"}]
+        cot_id, numero = hist.crear({}, lineas, {})
+        hist.actualizar(cot_id, datos={"lineas": lineas, "paso": 2})
+        app = self.iniciar()
+        app.button(key="inicio_ultimo_borrador").click()
+        self.recargar(app)
+        app.button(key="revision_campo_error_0").click()
+        self.recargar(app)
+        self.assertEqual(app.session_state["linea_editor"], 0)
+        self.assertTrue(any('data-selector=' in e.proto.body for e in app.get("html")))
+        app.session_state["vista"] = "Biblioteca"
+        self.recargar(app)
+        app.button(key="biblioteca_indicador_Sin foto").click()
+        self.recargar(app)
+        self.assertEqual(app.session_state["p_filtro_estado"], "Sin foto")
+        app.session_state["biblioteca_modo"] = "Galería"
+        self.recargar(app)
+        app.button(key="biblioteca_galeria_TN1060").click()
+        self.recargar(app)
+        self.assertEqual(app.session_state["p_sel"], "TN1060")
+        app.button(key="biblioteca_limpiar").click()
+        self.recargar(app)
+        self.assertEqual(app.session_state["p_filtro_estado"], "Todos")
+        app.session_state["vista"] = "Historial"
+        self.recargar(app)
+        app.text_input(key="h_texto").set_value(numero)
+        self.recargar(app)
+        app.button(key=f"edi_{cot_id}").click()
+        self.recargar(app)
+        app.button(key="editor_regresar_historial").click()
+        self.recargar(app)
+        self.assertEqual(app.text_input(key="h_texto").value, numero)
 
     def test_busqueda_editor_y_bandeja_comparten_datos(self):
         bib = Biblioteca(self.raiz / "biblioteca")

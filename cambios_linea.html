@@ -27,12 +27,20 @@
     const aviso = marca();
     const form = aviso?.closest('[data-testid="stForm"]');
     if (!form) return false;
-    const precio = form.querySelector('[data-testid="stTextInput"] input');
-    const plazo = form.querySelector('[data-testid="stNumberInput"] input');
+    const precio = form.querySelector('[aria-label="Precio de la línea seleccionada"]');
+    const plazo = form.querySelector('[aria-label="Plazo (días)"]');
     const stock = form.querySelector('[data-testid="stSelectbox"] input[role="combobox"]');
+    const cantidad = form.querySelector('[aria-label="Cantidad de la línea seleccionada"]');
+    const descripcion = form.querySelector('[aria-label="Producto de la línea seleccionada"]');
+    const codigo = form.querySelector('[aria-label="Código de la línea seleccionada"]');
+    const incluir = form.querySelector('input[type="checkbox"]');
     const valorStock = stock?.value || form.querySelector('[data-testid="stSelectbox"] [data-baseweb="select"]')?.innerText.trim();
     return Boolean((precio && precio.value.trim() !== aviso.dataset.precio) ||
       (plazo && plazo.value !== aviso.dataset.plazo) ||
+      (cantidad && Number(cantidad.value) !== Number(aviso.dataset.cantidad)) ||
+      (descripcion && descripcion.value !== aviso.dataset.descripcion) ||
+      (codigo && codigo.value !== aviso.dataset.codigo) ||
+      (incluir && Number(incluir.checked) !== Number(aviso.dataset.incluir)) ||
       (valorStock && valorStock !== aviso.dataset.stock));
   }
   window.giovaliaCambiosLinea = pendiente;
@@ -142,6 +150,7 @@
   }
   const navegacion = [
     ".st-key-vista", ".st-key-linea_editor", ".st-key-cotizacion_volver_borradores",
+    ".st-key-editor_regresar_historial", '[class*="st-key-revision_campo_"]',
     ".st-key-editor_volver_pedido", ".st-key-editor_ir_fotos", ".st-key-gioval_cerrar_sesion",
     '[class*="st-key-buscar_cotizacion_"]', '[class*="st-key-buscar_cliente_"]',
     '[class*="st-key-buscar_producto_"]', '[class*="st-key-deshacer_linea_"]',
@@ -150,6 +159,11 @@
   function proponer(volver) {
     if (!esperando && !document.getElementById("giovalia-confirmar-linea")) decidir(volver);
   }
+  window.giovaliaSolicitarNavegacion = (volver) => {
+    if (reproduciendo || !pendiente()) return false;
+    proponer(volver);
+    return true;
+  };
   document.addEventListener("click", (evento) => {
     if (reproduciendo || !pendiente() || !(evento.target instanceof Element)) return;
     const origen = evento.target;

@@ -39,6 +39,7 @@ def preparar(datos, kw):
             label=anterior.get("label"), width=anterior.get("width"),
             help=anterior.get("help") or "Pesos chilenos sin decimales. Ejemplo: $1.234.567",
             disabled=anterior.get("disabled"),
+            pinned=anterior.get("pinned"), alignment=anterior.get("alignment") or "right",
             validate=r"^\s*\$?\s*-?(?:\d{1,3}(?:\.\d{3})+|\d+)?\s*$",
         )
     return df, {**kw, "column_config": config}, columnas

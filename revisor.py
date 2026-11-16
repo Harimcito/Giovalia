@@ -49,8 +49,8 @@ def validar_rut(rut) -> bool | None:
     return r[-1] == dv
 
 
-def _h(nivel: str, texto: str) -> dict:
-    return {"nivel": nivel, "texto": texto}
+def _h(nivel: str, texto: str, **destino) -> dict:
+    return {"nivel": nivel, "texto": texto, **destino}
 
 
 def revisar(d: dict, claves: list[str] | None = None, bib=None) -> list[dict]:
@@ -66,15 +66,14 @@ def revisar(d: dict, claves: list[str] | None = None, bib=None) -> list[dict]:
         return [_h("error", "La cotización no tiene productos.")]
 
     # ---- precios y cantidades
-    sin_precio = [ln["descripcion"][:40] for ln in lineas if not ln.get("unitario")]
-    if sin_precio:
-        h.append(_h("error", "Faltan precios en: " + ", ".join(sin_precio) + "."))
-    for ln in lineas:
+    for i, ln in enumerate(lineas):
+        if not ln.get("unitario"):
+            h.append(_h("error", f"Falta el precio de «{ln['descripcion'][:40]}».", campo="precio", linea=i))
         c = ln["cantidad"]
         if isinstance(c, float) and not c.is_integer():
-            h.append(_h("aviso", f"«{ln['descripcion'][:40]}»: la cantidad es {c} (con decimales). ¿Es correcto?"))
+            h.append(_h("aviso", f"«{ln['descripcion'][:40]}»: la cantidad es {c} (con decimales). ¿Es correcto?", campo="cantidad", linea=i))
         elif c >= 1000:
-            h.append(_h("aviso", f"«{ln['descripcion'][:40]}»: la cantidad es {c:g}. Revisa que no sobre un cero."))
+            h.append(_h("aviso", f"«{ln['descripcion'][:40]}»: la cantidad es {c:g}. Revisa que no sobre un cero.", campo="cantidad", linea=i))
 
     # ---- totales
     suma = sum((ln.get("unitario") or 0) * ln["cantidad"] for ln in lineas)
@@ -123,12 +122,12 @@ def revisar(d: dict, claves: list[str] | None = None, bib=None) -> list[dict]:
     # ---- datos del cliente
     cli = {_norm(e): v for e, v in d["izquierda"] + d["derecha"]}
     if not str(cli.get("NOMBRE", "")).strip():
-        h.append(_h("error", "Falta el nombre del cliente."))
+        h.append(_h("error", "Falta el nombre del cliente.", campo="nombre"))
     rut = str(cli.get("RUT", "")).strip()
     if not rut:
-        h.append(_h("aviso", "Falta el RUT del cliente."))
+        h.append(_h("aviso", "Falta el RUT del cliente.", campo="rut"))
     elif validar_rut(rut) is False:
-        h.append(_h("aviso", f"El RUT «{rut}» no parece válido (revisa el dígito verificador)."))
+        h.append(_h("aviso", f"El RUT «{rut}» no parece válido (revisa el dígito verificador).", campo="rut"))
     fecha = cli.get("FECHA")
     if fecha:
         try:

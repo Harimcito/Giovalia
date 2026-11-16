@@ -38,6 +38,7 @@ import operacion_comercial_ui as gestion
 import flujo_cotizacion as flujo
 import stock_catalogo
 import edicion_lineas as edicion
+import interfaz_giovalia as interfaz
 from vista_precios import vista_precios
 import catalogo_clientes as cc
 from productos_ui import editar_ficha
@@ -292,6 +293,7 @@ def limpiar_estado_trabajo():
         "_respaldo_zip",
         "_respaldo_nombre",
         "_servicios_sesion",
+        "_filtros_historial", "_historial_seleccion", "_ambito_historial", "pref_densidad",
     )
     valores = {clave: E[clave] for clave in conservar if clave in E}
     E.clear()
@@ -325,6 +327,9 @@ def mostrar_pasos(actual: int):
             st.button("Borradores", icon=":material/arrow_back:", type="tertiary",
                       key="cotizacion_volver_borradores", on_click=limpiar_estado_trabajo,
                       disabled=bool(E.get("_conflicto_guardado")))
+            if E.get("_regreso_historial"):
+                st.button("Volver al historial", icon=":material/history:", key="editor_regresar_historial",
+                          on_click=lambda: E.update(vista=VISTAS[1]))
         with st.container(horizontal=True, vertical_alignment="center"):
             for i, nombre in enumerate(nombres, 1):
                 if i < actual:
@@ -1026,7 +1031,7 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
         persistir_borrador()
 
 
-def editor_productos():
+def editor_productos(*, compacto=False):
     """Lista editable de cantidades, descripciones, códigos y precios para todos los pasos."""
     # No pases de vuelta el dataframe ya editado como nuevo origen: Streamlit mantiene
     # un delta de edición propio del widget y, si el origen cambia en cada rerun,
@@ -1050,14 +1055,15 @@ def editor_productos():
     })
     editada = editor(
         base, num_rows="dynamic", hide_index=True, width="stretch",
-        key=f"editor_productos_{version}",
+        key=f"editor_productos_{version}", row_height=34 if compacto else 46,
+        column_order=[COL_PROD, COL_COD, COL_INCLUIR, COL_CANT, COL_PRECIO, flujo.COL_STOCK, flujo.COL_PLAZO, COL_ORIGEN],
         disabled=[COL_ORIGEN, edicion.ID],
         column_config={
             edicion.ID: None,
             COL_INCLUIR: st.column_config.CheckboxColumn("Incluir", width="small"),
             COL_CANT: st.column_config.NumberColumn("Cantidad", min_value=0, step=1, width="small"),
-            COL_PROD: st.column_config.TextColumn("Producto", width="large"),
-            COL_COD: st.column_config.TextColumn("Código", width="medium"),
+            COL_PROD: st.column_config.TextColumn("Producto", width="medium", pinned=True),
+            COL_COD: st.column_config.TextColumn("Código", width="small", pinned=True),
             COL_PRECIO: st.column_config.NumberColumn("Precio unitario", min_value=0, format="$ %d", width="medium"),
             COL_ORIGEN: st.column_config.TextColumn("Identificación", width="medium"),
             **columnas_editor_entrega(),
@@ -1308,6 +1314,10 @@ def selector_borradores():
         with st.container(border=True):
             st.subheader("Borradores")
             if borradores:
+                ultimo = max(borradores, key=lambda r: (r.get("actualizado") or r.get("creado") or "", r["id"]))
+                st.button("Retomar el último borrador", icon=":material/edit_document:", type="primary",
+                          width="stretch", key="inicio_ultimo_borrador", on_click=restaurar_borrador, args=(ultimo["id"],))
+                st.caption(ultimo["numero"])
                 opciones = {
                     (
                         f"{r['numero']} · {fecha_corta(r.get('fecha') or '')}"
@@ -1331,20 +1341,10 @@ def selector_borradores():
         with st.container(border=True):
             st.subheader("Actividad reciente")
             if registros:
-                recientes = registros[:5]
-                tabla = {
-                    "N°": [r.get("numero", "") for r in recientes],
-                    "Fecha": [fecha_corta(r.get("fecha") or "") for r in recientes],
-                    "Total": [r.get("total") or 0 for r in recientes],
-                    "Estado": [r.get("estado") or "Borrador" for r in recientes],
-                }
-                if not GIOVAL_REQUIRE_ACCESS:
-                    tabla["Cliente"] = [r.get("cliente") or "Sin cliente" for r in recientes]
-                montos.tabla(
-                    pd.DataFrame(tabla), hide_index=True, width="stretch",
-                    column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
-                    alt="Cotizaciones recientes",
-                )
+                elegido = lista_cotizaciones("Cotizaciones recientes", registros[:5], key="actividad_reciente")
+                if elegido is not None:
+                    restaurar_borrador(elegido)
+                    st.rerun()
                 st.button(
                     "Ver todas las cotizaciones", icon=":material/arrow_forward:",
                     width="stretch", on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_ver_todas",
@@ -1999,8 +1999,20 @@ def confirmar_linea_editor(indice, clave_widget, total, avanzar):
     except ValueError as exc:
         E["_error_precio_linea"] = str(exc)
         return
-    entrega = flujo.datos_entrega(E[f"{clave_widget}_stock"], E[f"{clave_widget}_plazo"])
-    E["_linea_pendiente"] = (indice, precio, entrega)
+    descripcion = ct.limpiar_descripcion(E[f"{clave_widget}_descripcion"])
+    cantidad = E[f"{clave_widget}_cantidad"]
+    if not descripcion or not cantidad or cantidad <= 0:
+        E["_error_precio_linea"] = "Completa el producto y una cantidad mayor que cero."
+        return
+    codigo = E[f"{clave_widget}_codigo"].strip().upper()
+    es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
+    cambios = {
+        **flujo.datos_entrega(E[f"{clave_widget}_stock"], E[f"{clave_widget}_plazo"]),
+        "descripcion": descripcion, "cantidad": ct._cantidad(cantidad),
+        "clave_auto": codigo or (ct.clave_descriptiva(descripcion) if es_producto else ""),
+        "es_producto": es_producto, "incluir": E[f"{clave_widget}_incluir"],
+    }
+    E["_linea_pendiente"] = (indice, precio, cambios)
     if avanzar:
         E["linea_editor"] = (indice + 1) % total
 
@@ -2018,11 +2030,10 @@ def detalle_linea_editor():
     indices = range(len(lineas))
     if E.get("linea_editor") not in indices:
         E["linea_editor"] = 0
-    indice = st.selectbox(
-        "Línea seleccionada", indices, key="linea_editor",
-        format_func=lambda i: f"{i + 1}. {lineas[i]['descripcion']}",
-    )
+    indice = E["linea_editor"]
     linea = lineas[indice]
+    st.html('<span id="giovalia-detalle-linea" tabindex="-1"></span>')
+    st.subheader(f"{indice + 1}. {linea['descripcion']}")
     con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
     previo = linea.get("unitario")
     mostrado = None if previo is None else ct.precio_para_mostrar(previo, con_iva)
@@ -2032,6 +2043,12 @@ def detalle_linea_editor():
     revision = E.get("_revision_campos_linea", 0)
     clave_widget = f"precio_linea_{E['cot_id']}_{E.get('editor_version', 0)}_{indice}_{mostrado}_{estado}_{dias}_{revision}"
     with st.form("form_precio_linea", border=False):
+        st.text_input("Producto de la línea seleccionada", value=linea["descripcion"], key=f"{clave_widget}_descripcion")
+        codigo, cantidad = st.columns(2)
+        codigo.text_input("Código de la línea seleccionada", value=linea.get("clave_auto") or "", key=f"{clave_widget}_codigo")
+        cantidad.number_input("Cantidad de la línea seleccionada", min_value=0.0, step=1.0,
+                              value=float(linea["cantidad"]), key=f"{clave_widget}_cantidad")
+        st.checkbox("Incluir en la cotización", value=linea.get("incluir", True), key=f"{clave_widget}_incluir")
         st.text_input("Precio de la línea seleccionada", value=montos.clp(mostrado), key=clave_widget,
                       placeholder="Monto en pesos")
         stock, plazo = st.columns(2)
@@ -2049,6 +2066,8 @@ def detalle_linea_editor():
         st.html(
             f'<p id="giovalia-linea-pendiente" role="status" hidden data-acuse="{acuse}" '
             f'data-estado="{E.get("_estado_acuse_linea", "")}" data-precio="{html.escape(montos.clp(mostrado))}" '
+            f'data-descripcion="{html.escape(linea["descripcion"])}" data-codigo="{html.escape(linea.get("clave_auto") or "")}" '
+            f'data-cantidad="{linea["cantidad"]}" data-incluir="{int(linea.get("incluir", True))}" '
             f'data-stock="{html.escape(estado)}" data-plazo="{"" if dias is None else dias}">'
             'Hay cambios en esta línea por guardar.</p>'
         )
@@ -2065,6 +2084,34 @@ def detalle_linea_editor():
             else:
                 st.caption("Stock de biblioteca sin fecha de confirmación.")
         tarjeta(clave, linea["descripcion"], *estado_anexos(clave, True), de_cotizacion=True)
+
+
+def mostrar_tabla_lineas(compacta):
+    lineas = E["lineas"]
+    if not lineas:
+        st.info("Agrega un producto para editar su precio y entrega.")
+        return
+    activa = E.get("linea_editor", 0)
+    if activa not in range(len(lineas)):
+        activa = 0
+    con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
+    filas = [
+        [ln[edicion.ID], ln["descripcion"], ln.get("clave_auto") or "—", str(ln["cantidad"]),
+         montos.clp(ct.precio_para_mostrar(ln["unitario"], con_iva)) if ln.get("unitario") is not None else "Sin precio",
+         f"{ln.get('disponibilidad') or flujo.POR_CONFIRMAR} · {flujo.texto_plazo(flujo.plazo_efectivo(ln))}"
+         if ln.get("incluir", True) else "No incluido"]
+        for ln in lineas
+    ]
+    elegida = interfaz.lista(
+        "Productos de la cotización", ("Producto", "Código", "Cantidad", "Precio unitario", "Entrega"),
+        filas, key=f"tabla_lineas_{E['cot_id']}", activa=lineas[activa][edicion.ID], compacta=compacta,
+        montos=(2, 3), fijar=True, proteger=True,
+    )
+    elegida = next((i for i, ln in enumerate(lineas) if ln[edicion.ID] == elegida), None)
+    if elegida is not None and elegida != activa:
+        E["linea_editor"] = elegida
+        E["_destino_visual"] = "linea"
+        st.rerun()
 
 
 def mostrar_entregas(lineas):
@@ -2087,18 +2134,24 @@ def paso_2():
     tabla, detalle = trabajo.columns([2.5, 1.3], border=True)
     with tabla:
         nueva = st.text_input("Nueva línea", key="linea_nueva", placeholder="Descripción del producto y Enter")
-        editor_productos()
+        densidad = st.segmented_control("Vista de la tabla", ["Cómoda", "Compacta"],
+                                       default=E.get("pref_densidad", "Cómoda"), key="densidad_editor",
+                                       required=True, label_visibility="collapsed")
+        E["pref_densidad"] = densidad
+        with st.expander("Editar la tabla completa"):
+            editor_productos(compacto=densidad == "Compacta")
         if cambio := E.pop("_linea_pendiente", None):
-            indice, precio, entrega = cambio
+            indice, precio, campos = cambio
             lineas = list(E["lineas"])
             if indice < len(lineas):
                 con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
                 actual = lineas[indice].get("unitario")
                 mostrado = None if actual is None else ct.precio_para_mostrar(actual, con_iva)
-                actual_entrega = flujo.datos_entrega(lineas[indice].get("disponibilidad"), lineas[indice].get("plazo_dias"))
-                if precio != mostrado or entrega != actual_entrega:
+                if precio != mostrado or any(lineas[indice].get(k) != v for k, v in campos.items()):
                     neto = actual if precio == mostrado else None if precio is None else ct.neto_desde(precio, con_iva)
-                    lineas[indice] = {**lineas[indice], **entrega, "unitario": neto, "precio_neto": neto}
+                    if campos["clave_auto"] != lineas[indice].get("clave_auto"):
+                        campos["origen"] = "descripcion"
+                    lineas[indice] = {**lineas[indice], **campos, "unitario": neto, "precio_neto": neto}
                     aplicar_lineas_editor(lineas)
                 if not E.get("_conflicto_guardado"):
                     E["_estado_acuse_linea"] = "aplicado"
@@ -2119,13 +2172,14 @@ def paso_2():
         if E.pop("_rebasar_lineas", False):
             aplicar_lineas_editor(E["lineas"], registrar=False)
             st.rerun()
+        mostrar_tabla_lineas(densidad == "Compacta")
         estado = st.container(horizontal=True)
         if st.button("Guardar borrador", key="guardar_editor", icon=":material/save:"):
             persistir_borrador()
             if not E.get("_conflicto_guardado"):
                 st.toast("Borrador guardado")
         mostrar_deshacer_lineas()
-    with detalle:
+    with detalle, st.expander("Detalle de la línea", expanded=True):
         detalle_linea_editor()
     with resumen:
         mostrar_totales()
@@ -2542,15 +2596,46 @@ def hallazgos() -> list[dict]:
     return rv.revisar(d, claves if len(claves) == len(d["lineas"]) else None, bib)
 
 
+def hallazgos_editor():
+    indices = [i for i, ln in enumerate(E["lineas"]) if ln.get("incluir", True)]
+    lineas = [E["lineas"][i] for i in indices]
+    cliente, tot = cliente_actual(), totales_actuales()
+    resultado = rv.revisar({
+        "lineas": lineas, "izquierda": [("Nombre", cliente["nombre"]), ("RUT", cliente["rut"])],
+        "derecha": [("Fecha", cliente["fecha"].strftime("%d/%m/%Y"))],
+        "totales": [("Total Neto", tot["neto"]), ("IVA", tot["iva"]), ("Total", tot["total"])],
+    }, [ln.get("clave_auto", "") for ln in lineas], bib)
+    return [{**h, "linea": indices[h["linea"]]} if "linea" in h else h for h in resultado]
+
+
+def mostrar_hallazgo(h, key):
+    if not h.get("campo"):
+        st.text(h["texto"])
+        return
+    mensaje, accion = st.columns([3, 1.25], vertical_alignment="center")
+    mensaje.text(h["texto"])
+    accion.button("Ir al campo", icon=":material/arrow_forward:", key=key, width="stretch",
+                  on_click=lambda: E.update(_hallazgo_destino=(h["campo"], h.get("linea"))))
+
+
+def ir_al_hallazgo(campo, linea):
+    if linea is not None:
+        E["linea_editor"] = linea
+    for clave in ("pdf_bytes", "pdf_nombre", "xlsx_vista_previa", "informe", "pdf_confirmado"):
+        E.pop(clave, None)
+    E["_destino_visual"] = campo
+    ir_a(2)
+
+
 def panel_revision(en_paso_4: bool = False) -> int:
     """Muestra errores y avisos antes de crear el PDF; devuelve errores bloqueantes."""
     try:
-        hallazgos_actuales = hallazgos()
+        hallazgos_actuales = hallazgos_editor()
     except Exception as exc:
         st.warning(f"No pude terminar la revisión automática: {exc}")
         return 0
-    errores = [h["texto"] for h in hallazgos_actuales if h["nivel"] == "error"]
-    avisos = [h["texto"] for h in hallazgos_actuales if h["nivel"] == "aviso"]
+    errores = [h for h in hallazgos_actuales if h["nivel"] == "error"]
+    avisos = [h for h in hallazgos_actuales if h["nivel"] == "aviso"]
     if not hallazgos_actuales:
         st.success("Revisión completada: totales, IVA, precios y datos del cliente en orden.")
         return 0
@@ -2566,8 +2651,8 @@ def panel_revision(en_paso_4: bool = False) -> int:
     if errores:
         st.error(f"{len(errores)} problema(s) que requieren atención.")
         with st.expander("Ver errores de la cotización", expanded=True):
-            for problema in errores:
-                st.markdown(f"- {problema}")
+            for i, problema in enumerate(errores):
+                mostrar_hallazgo(problema, f"revision_campo_error_{i}")
         if en_paso_4:
             st.button(
                 "Volver a productos y precios",
@@ -2582,8 +2667,8 @@ def panel_revision(en_paso_4: bool = False) -> int:
 
     if avisos:
         with st.expander(f"Ver avisos de revisión ({len(avisos)})", expanded=bool(not errores)):
-            for aviso in avisos:
-                st.markdown(f"- {aviso}")
+            for i, aviso in enumerate(avisos):
+                mostrar_hallazgo(aviso, f"revision_campo_aviso_{i}")
     return len(errores)
 
 
@@ -2650,6 +2735,7 @@ def paso_4():
         mostrar_totales()
         mostrar_resumen_lineas()
         editar_cabecera()
+        panel_revision(en_paso_4=True)
 
         if st.button("Guardar versión de trabajo", key="guardar_version_cotizacion"):
             try:
@@ -2671,23 +2757,50 @@ def paso_4():
     else:
         informe = E["informe"]
         st.subheader(f"Vista previa · {informe['paginas']} páginas")
-        textos = (
+        visor, acciones = st.columns([2.1, 1])
+        with visor:
+            secciones = informe.get("secciones", [])
+            rotulos = ["Documento completo", *(f"{nombre} · pág. {inicio + 1}" for nombre, inicio, _ in secciones)]
+            elegida = st.selectbox("Ir a una sección del PDF", range(len(rotulos)), format_func=rotulos.__getitem__,
+                                   key=f"seccion_pdf_{E['cot_id']}")
+            contenido = E["pdf_bytes"]
+            if elegida:
+                _, inicio, fin = secciones[elegida - 1]
+                contenido = interfaz.fragmento_pdf(contenido, inicio, fin)
+            try:
+                st.pdf(contenido, height=650, key=f"pdf_preview_{E['cot_id']}_{elegida}", alt=rotulos[elegida])
+            except Exception:
+                st.download_button("Abrir copia para revisar", E["pdf_bytes"], file_name=E["pdf_nombre"],
+                                   mime="application/pdf", on_click="ignore")
+        with acciones:
+            acciones_vista_pdf(informe)
+    st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
+
+
+def acciones_vista_pdf(informe):
+    with st.container(border=True):
+        st.subheader("Revisar y aprobar")
+        etiquetas = (
             ("sin_clave", "Productos sin código"), ("sin_foto", "Fotos faltantes"),
-            ("sin_ficha", "Fichas técnicas faltantes"), ("ficha_dudosa", "Fichas que requieren verificar el código"),
-            ("ficha_ilegible", "Fichas ilegibles excluidas del PDF"),
+            ("sin_ficha", "Fichas técnicas faltantes"), ("ficha_dudosa", "Fichas con código por verificar"),
+            ("ficha_ilegible", "Fichas ilegibles excluidas"),
         )
-        for campo, texto in textos:
-            if informe.get(campo):
-                st.warning(f"{texto}: " + ", ".join(informe[campo]))
-        for item in informe["validacion_excel"]:
-            st.warning(item["texto"])
-        for aviso in informe["paginas_revisar"]:
-            st.warning(aviso)
-        try:
-            st.pdf(E["pdf_bytes"], height=760, key=f"pdf_preview_{E['cot_id']}")
-        except Exception:
-            st.download_button("Abrir copia para revisar", E["pdf_bytes"], file_name=E["pdf_nombre"],
-                               mime="application/pdf", on_click="ignore")
+        alertas = [f"{texto} · " + ", ".join(informe[campo]) for campo, texto in etiquetas if informe.get(campo)]
+        alertas += informe["paginas_revisar"]
+        revision = informe["validacion_excel"]
+        if alertas or revision:
+            with st.expander(f"Alertas de revisión ({len(alertas) + len(revision)})", expanded=True):
+                for alerta in alertas:
+                    st.text(alerta)
+                indices = [i for i, ln in enumerate(E["lineas"]) if ln.get("incluir", True)]
+                for i, hallazgo in enumerate(revision):
+                    linea = hallazgo.get("linea")
+                    if linea is None:
+                        mostrar_hallazgo(hallazgo, f"pdf_campo_{i}")
+                    elif linea < len(indices):
+                        mostrar_hallazgo({**hallazgo, "linea": indices[linea]}, f"pdf_campo_{i}")
+                    else:
+                        st.text(hallazgo["texto"])
         if not E.get("pdf_confirmado"):
             requiere_revision = bool(informe["paginas_revisar"] or informe["ficha_ilegible"]
                                      or any(item["nivel"] == "error" for item in informe["validacion_excel"]))
@@ -2711,7 +2824,6 @@ def paso_4():
                 E.pop(campo, None)
             E["editado_manual"] = True
             st.rerun()
-    st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
 
 
 # ============================================================== HISTORIAL
@@ -2728,6 +2840,7 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
     rec = hist.obtener(cot_id)
     if not rec:
         return
+    E["_regreso_historial"] = E.get("vista") == VISTAS[1]
     for campo in ("_deshacer_lineas", "_linea_pendiente", "_lineas_base_version", "linea_editor",
                   "_error_precio_linea", "_estado_acuse_linea", "_revision_campos_linea"):
         E.pop(campo, None)
@@ -2858,6 +2971,19 @@ def panel_versiones(registro):
                   on_click=restaurar_version_interfaz, args=(cot_id, origen, registro["actualizado"]))
 
 
+def lista_cotizaciones(titulo, registros, *, key, activa=None, memoria=None):
+    columnas = ["Cotización", "Fecha", "Total", "Estado"]
+    if not GIOVAL_REQUIRE_ACCESS:
+        columnas.append("Cliente")
+    filas = [
+        [r["id"], r["numero"], fecha_corta(r["fecha"]), rv.clp(r["total"] or 0), r["estado"],
+         *([] if GIOVAL_REQUIRE_ACCESS else [r["cliente"] or "Sin cliente"])]
+        for r in registros
+    ]
+    elegida = interfaz.lista(titulo, columnas, filas, key=key, activa=activa, montos=(2,), memoria=memoria)
+    return elegida if elegida in {r["id"] for r in registros} else None
+
+
 def historial_cotizaciones():
     E.setdefault("h_ver", 0)
     todos = hist.listar(incluir_datos=False)
@@ -2869,16 +2995,19 @@ def historial_cotizaciones():
     m2.metric("Monto cotizado", rv.clp(sum(r["total"] or 0 for r in todos)), border=True)
     m3.metric("Monto aceptado", rv.clp(sum(r["total"] or 0 for r in todos if r["estado"] == "Aceptada")), border=True)
     f1, f2, f3 = st.columns([2.5, 1, 1.4])
+    estados = ["Todos", *hs.ESTADOS]
+    periodos = ["Todas las fechas", "Últimos 30 días", "Últimos 90 días", "Este año"]
+    filtros = E.get("_filtros_historial", ("", estados[0], periodos[0]))
     texto = f1.text_input(
         "Buscar",
         placeholder="Número de cotización" if GIOVAL_REQUIRE_ACCESS else "Número, cliente, RUT o notas",
-        key="h_texto",
+        key="h_texto", value=filtros[0],
     )
-    estado = f2.selectbox("Estado", ["Todos"] + hs.ESTADOS, key="h_estado")
+    estado = f2.selectbox("Estado", estados, index=estados.index(filtros[1]), key="h_estado")
     periodo = f3.selectbox(
-        "Período", ["Todas las fechas", "Últimos 30 días", "Últimos 90 días", "Este año"],
-        key="h_periodo",
+        "Período", periodos, index=periodos.index(filtros[2]), key="h_periodo",
     )
+    E["_filtros_historial"] = (texto, estado, periodo)
     regs = hist.listar(texto, estado, incluir_datos=False) if texto.strip() or estado != "Todos" else todos
     hoy = date.today()
     if periodo == "Últimos 30 días":
@@ -2893,6 +3022,20 @@ def historial_cotizaciones():
     if not regs:
         st.info("No encontré cotizaciones con esos filtros. Cambia el estado, período o búsqueda.")
         return
+    lista, detalle = st.columns([1.55, 1])
+    vigente = E.get("_historial_seleccion")
+    if vigente not in {r["id"] for r in regs}:
+        vigente = regs[0]["id"]
+    ambito = E.setdefault("_ambito_historial", uuid4().hex)
+    huella = sha256(repr((ambito, texto, estado, periodo)).encode()).hexdigest()[:20]
+    with lista:
+        elegido = lista_cotizaciones("Cotizaciones del historial", regs, key=f"historial_lista_{huella}",
+                                     activa=vigente, memoria=f"giovalia:historial:{huella}")
+        if elegido is not None and elegido != vigente:
+            E["_historial_seleccion"] = elegido
+            st.rerun()
+    E["_historial_seleccion"] = vigente
+    panel = lista.expander("Editar estados y notas" if not GIOVAL_REQUIRE_ACCESS else "Editar estados")
     datos_tabla = {
         "id": [r["id"] for r in regs], "N°": [r["numero"] for r in regs],
         "Fecha": [fecha_corta(r["fecha"]) for r in regs],
@@ -2902,12 +3045,13 @@ def historial_cotizaciones():
         datos_tabla["Cliente"] = [r["cliente"] for r in regs]
         datos_tabla["Notas"] = [r["notas"] or "" for r in regs]
     df = pd.DataFrame(datos_tabla)
-    editado = editor(
-        df, hide_index=True, width="stretch", key=f"h_tabla_{E['h_ver']}_{texto}_{estado}",
-        disabled=[c for c in ("N°", "Fecha", "Total", "Cliente") if c in df.columns],
-        column_config={"id": None, "Total": st.column_config.NumberColumn(format="$ %d"),
-                       "Estado": st.column_config.SelectboxColumn(options=hs.ESTADOS, required=True)})
-    if st.button("Guardar estados" if GIOVAL_REQUIRE_ACCESS else "Guardar estados y notas", icon=":material/save:"):
+    with panel:
+        editado = editor(
+            df, hide_index=True, width="stretch", key=f"h_tabla_{E['h_ver']}_{texto}_{estado}_{periodo}",
+            disabled=[c for c in ("N°", "Fecha", "Total", "Cliente") if c in df.columns],
+            column_config={"id": None, "Total": st.column_config.NumberColumn(format="$ %d"),
+                           "Estado": st.column_config.SelectboxColumn(options=hs.ESTADOS, required=True)})
+    if panel.button("Guardar estados" if GIOVAL_REQUIRE_ACCESS else "Guardar estados y notas", icon=":material/save:"):
         cambios, conflictos = 0, 0
         for (_, fila), reg in zip(editado.iterrows(), regs):
             nuevo_estado = fila["Estado"]
@@ -2939,15 +3083,11 @@ def historial_cotizaciones():
             st.success(f"Guardado ({cambios} cambios).")
         st.rerun()
 
-    st.divider()
-    opciones = {
-        (f"{r['numero']} · {rv.clp(r['total'] or 0)}" if GIOVAL_REQUIRE_ACCESS
-         else f"{r['numero']} · {r['cliente'] or 'sin cliente'} · {rv.clp(r['total'] or 0)}"): r["id"]
-        for r in regs
-    }
-    elegida = st.selectbox("Elige una cotización para ver qué puedes hacer con ella", list(opciones))
-    rec = hist.obtener(opciones[elegida])
-    with st.container(border=True):
+    rec = hist.obtener(vigente)
+    if not rec:
+        detalle.info("La cotización seleccionada ya no está disponible.")
+        return
+    with detalle.container(border=True):
         if GIOVAL_REQUIRE_ACCESS:
             st.markdown(f"**{rec['numero']}** · Cotización comercial compartida · {rec['estado']} · "
                         f"{fecha_corta(rec['fecha'])}")
@@ -3065,6 +3205,7 @@ def mostrar_busqueda_global():
             placeholder="Producto o cotización" if GIOVAL_REQUIRE_ACCESS else "Producto, cliente o cotización",
         ).strip()
         E["_ultima_consulta_global"] = consulta
+        st.html(f'<span id="gv-consulta" hidden data-consulta="{html.escape(consulta)}"></span>')
         if not consulta:
             return
         productos, clientes, cotizaciones = flujo.buscar(consulta, bib, hist, privado=GIOVAL_REQUIRE_ACCESS)
@@ -3240,11 +3381,12 @@ def vista_productos():
     total_sin_ficha = sum(not f["ficha"] and not f.get("ficha_no_requerida", False) for f in todas)
     total_sin_precio = sum(f.get("precio_neto") is None for f in todas)
     total_margen_pendiente = sum(f.get("costo_neto") is None or f.get("margen_pct") is None for f in todas)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Productos", len(todas), border=True)
-    m2.metric("Sin foto", total_sin_foto, border=True)
-    m3.metric("Sin ficha pendiente", total_sin_ficha, border=True)
-    m4.metric("Sin precio reciente", total_sin_precio, border=True)
+    opciones = (("Productos", len(todas), "Todos"), ("Sin foto", total_sin_foto, "Sin foto"),
+                ("Sin ficha", total_sin_ficha, "Sin ficha pendiente"), ("Sin precio", total_sin_precio, "Sin precio"))
+    for col, (titulo, conteo, opcion) in zip(st.columns(4), opciones):
+        col.button(f"{titulo} · {conteo}", width="stretch", key=f"biblioteca_indicador_{opcion}",
+                   type="primary" if E.get("p_filtro_estado", "Todos") == opcion else "secondary",
+                   on_click=lambda valor=opcion: E.update(p_filtro_estado=valor))
 
     f1, f2 = st.columns([1.5, 1])
     texto = f1.text_input("Buscar producto", placeholder="Código, modelo, marca o nombre", key="p_texto")
@@ -3254,6 +3396,9 @@ def vista_productos():
          "Margen pendiente", "Ficha no requerida"],
         key="p_filtro_estado",
     )
+    if filtro != "Todos" or texto.strip():
+        st.button("Limpiar búsqueda y filtros", icon=":material/filter_alt_off:", key="biblioteca_limpiar",
+                  on_click=lambda: E.update(p_texto="", p_filtro_estado="Todos"))
     consulta = texto.strip().casefold()
     filas = []
     for producto in todas:
@@ -3283,6 +3428,42 @@ def vista_productos():
         st.info("No hay productos que coincidan con esos filtros.")
         return
 
+    modo = st.segmented_control("Formato de la biblioteca", ["Tabla", "Galería"], default="Tabla",
+                                required=True, key="biblioteca_modo")
+    if modo == "Galería":
+        galeria_biblioteca(filas)
+    else:
+        editar_tabla_biblioteca(filas, texto, filtro)
+    st.divider()
+    detalle_biblioteca(filas)
+
+
+def galeria_biblioteca(filas):
+    paginas = (len(filas) + 11) // 12
+    clave = "biblioteca_galeria_pagina"
+    if E.get(clave, 1) > paginas:
+        E[clave] = 1
+    pagina = st.number_input("Página de productos", 1, paginas, step=1, key=clave) if paginas > 1 else 1
+    grupo = filas[12 * (pagina - 1):12 * pagina]
+    for i in range(0, len(grupo), 3):
+        for col, producto in zip(st.columns(3), grupo[i:i + 3]):
+            codigo = producto["clave"]
+            with col.container(border=True):
+                foto, _ = bib.archivos(codigo)
+                if foto:
+                    try:
+                        st.image(str(foto), width=144, alt=producto["nombre"])
+                    except (OSError, ValueError, st.errors.StreamlitAPIException):
+                        st.caption("Foto no disponible")
+                else:
+                    st.caption("Sin foto")
+                st.write(producto["nombre"])
+                st.caption(codigo)
+                st.button("Ver producto", key=f"biblioteca_galeria_{codigo}", width="stretch",
+                          on_click=lambda c=codigo: E.update(p_sel=c, _destino_visual="producto"))
+
+
+def editar_tabla_biblioteca(filas, texto, filtro):
     mostrar_detalles = st.checkbox(
         "Mostrar notas y sugerencia con IVA", value=False, key="p_mostrar_detalles"
     )
@@ -3318,8 +3499,8 @@ def vista_productos():
     configuracion_columnas["Margen %"] = st.column_config.NumberColumn(
         format="%.1f %%", min_value=0, step=1, width="small"
     )
-    configuracion_columnas["Código"] = st.column_config.TextColumn(width="medium")
-    configuracion_columnas["Producto"] = st.column_config.TextColumn(width="large")
+    configuracion_columnas["Código"] = st.column_config.TextColumn(width="small", pinned=True)
+    configuracion_columnas["Producto"] = st.column_config.TextColumn(width="medium", pinned=True)
     configuracion_columnas["Foto"] = st.column_config.TextColumn(width="small")
     configuracion_columnas["Ficha"] = st.column_config.TextColumn(width="small")
 
@@ -3375,9 +3556,14 @@ def vista_productos():
         E["p_msg"] = ("ok", f"Guardado: {cambios} producto(s) actualizado(s) en la biblioteca compartida.")
         st.rerun()
 
-    st.divider()
+
+
+def detalle_biblioteca(filas):
+    st.html('<span id="giovalia-detalle-producto" tabindex="-1"></span>')
     st.subheader("Detalle del producto")
     codigos = [f["clave"] for f in filas]
+    if E.get("p_sel") not in codigos:
+        E["p_sel"] = codigos[0]
     elegido = st.selectbox("Selecciona un producto", codigos, key="p_sel")
     producto_elegido = next(f for f in filas if f["clave"] == elegido)
     tarjeta(elegido, producto_elegido["nombre"], *estado_anexos(elegido))
@@ -3644,12 +3830,13 @@ def guardar_conflicto_como_nueva():
 
 # ============================================================== PANTALLA
 # La cabecera identifica el espacio de trabajo activo.
+cabecera = st.container(key="cabecera_giovalia")
 if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
-    col_marca, col_estado, col_salir, col_ajustes = st.columns(
+    col_marca, col_estado, col_salir, col_ajustes = cabecera.columns(
         [3.5, 2, 1, 1], vertical_alignment="center"
     )
 else:
-    col_marca, col_estado, col_ajustes = st.columns([4, 2, 1], vertical_alignment="center")
+    col_marca, col_estado, col_ajustes = cabecera.columns([4, 2, 1], vertical_alignment="center")
 with col_marca:
     logo_marca = Path(__file__).with_name("logo_gioval_catalogo.png")
     if logo_marca.is_file():
@@ -3704,6 +3891,9 @@ if E.get("_conflicto_guardado"):
 if E.get("_mensaje_guardado"):
     st.success(E.pop("_mensaje_guardado"))
 
+if destino := E.pop("_hallazgo_destino", None):
+    ir_al_hallazgo(*destino)
+
 etiquetas_vista = {
     VISTAS[0]: ":material/edit_document: Cotizar",
     VISTAS[1]: ":material/history: Historial",
@@ -3726,6 +3916,8 @@ vista = st.segmented_control(
 )
 st.html(Path(__file__).with_name("atajos_cotizacion.html"), unsafe_allow_javascript=True)
 st.html(Path(__file__).with_name("cambios_linea.html"), unsafe_allow_javascript=True)
+st.html(Path(__file__).with_name("interfaz_giovalia.css"))
+st.html(Path(__file__).with_name("interfaz_foco.html"), unsafe_allow_javascript=True)
 mostrar_busqueda_global()
 if vista == VISTAS[1]:
     vista_historial()
@@ -3746,3 +3938,13 @@ else:
         E["paso"] = 1
     mostrar_pasos(E["paso"])
     {1: paso_1, 2: paso_2, 3: paso_3, 4: paso_4}[E["paso"]]()
+
+if destino := E.pop("_destino_visual", None):
+    selectores = {
+        "linea": "#giovalia-detalle-linea", "producto": "#giovalia-detalle-producto",
+        "nombre": ".st-key-c_nombre input", "rut": ".st-key-c_rut input",
+        "precio": '[aria-label="Precio de la línea seleccionada"]',
+        "cantidad": '[aria-label="Cantidad de la línea seleccionada"]',
+    }
+    selector = html.escape(selectores[destino])
+    st.html(f'<span id="gv-destino" hidden data-selector="{selector}" data-movil="{int(destino == "linea")}"></span>')
