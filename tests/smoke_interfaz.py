@@ -7,6 +7,7 @@ from pathlib import Path
 from io import BytesIO
 
 from PIL import Image
+from reportlab.pdfgen.canvas import Canvas
 from tempfile import TemporaryDirectory
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -100,7 +101,32 @@ def comprobar_interfaz(numero, numero_otro):
         expect(page.get_by_text('Detalle del producto',exact=True)).to_be_visible()
         page.get_by_role('button',name='Limpiar búsqueda y filtros').click()
         assert not errores, errores
+        comprobar_canastas_y_evidencia(browser, numero_otro)
         print('Chrome: actividad, teclado, resaltado, filas, guardado, foco de alertas, móvil, historial y galería OK')
+
+
+def comprobar_canastas_y_evidencia(browser, numero):
+    page = browser.new_page(viewport={"width": 1440, "height": 930})
+    page.goto("http://127.0.0.1:8610/")
+    page.get_by_role("table", name="Cotizaciones recientes").get_by_role("button", name=numero).click()
+    page.get_by_text("Armar canastas por presupuesto", exact=True).click()
+    limite = page.get_by_role("textbox", name="Presupuesto máximo con IVA")
+    limite.fill("3.000")
+    limite.press("Enter")
+    page.get_by_role("button", name="Comparar tres canastas").click()
+    expect(page.get_by_text("No hay una combinación con stock confirmado hoy dentro del presupuesto.")).to_be_visible()
+    page.get_by_role("button", name="Aplicar esta canasta").first.click()
+    page.get_by_role("button", name="Siguiente: fotos").click()
+    page.get_by_text("Evidencia por requisito", exact=True).click()
+    page.get_by_role("textbox", name="Requisitos técnicos, uno por línea").fill("75 g/m²\n500 hojas")
+    page.get_by_role("button", name="Guardar requisitos").click()
+    expect(page.get_by_text("Página 2 ·", exact=False)).to_be_visible()
+    expect(page.get_by_text("Revisión manual · sin coincidencia textual en la ficha.")).to_be_visible()
+    page.get_by_role("button", name="Siguiente: revisar").click()
+    page.get_by_role("button", name="Crear el PDF para revisar").click()
+    expect(page.get_by_text("Requisito sin evidencia textual · Cartucho nuevo · 500 hojas")).to_be_visible()
+    expect(page.get_by_role("button", name="Confirmar versión y habilitar descarga")).to_be_disabled()
+    page.close()
 
 
 def ejecutar():
@@ -117,6 +143,15 @@ def ejecutar():
             dict(cantidad=1, descripcion="Toner Brother TN1060", clave_auto="TN1060", unitario=1000),
             dict(cantidad=2, descripcion="Resma oficio", clave_auto="RESMA", unitario=1000),
         ]
+        bib.registrar("NUEVO", "Cartucho nuevo")
+        bib.guardar_archivo("NUEVO", "foto", "nuevo.png", foto.getvalue())
+        contenido_ficha = BytesIO()
+        ficha = Canvas(contenido_ficha)
+        ficha.drawString(55, 720, "Modelo NUEVO")
+        ficha.showPage()
+        ficha.drawString(55, 720, "Gramaje 75 g/m²")
+        ficha.save()
+        bib.guardar_archivo("NUEVO", "ficha", "nuevo.pdf", contenido_ficha.getvalue())
         segundo = [dict(cantidad=1, descripcion="Cartucho nuevo", clave_auto="NUEVO", unitario=2000)]
         numeros = []
         for lineas in (primero, segundo):

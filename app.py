@@ -39,6 +39,7 @@ import flujo_cotizacion as flujo
 import stock_catalogo
 import cotizacion_opciones as opciones_cot
 import cotizacion_opciones_ui as opciones_ui
+import planificacion_cotizacion_ui as planificacion
 import edicion_lineas as edicion
 import interfaz_giovalia as interfaz
 import identidad_visual as visual
@@ -2286,6 +2287,9 @@ def paso_2():
         mostrar_totales()
     lineas = [ln for ln in E.get("lineas", []) if ln.get("es_producto", True)]
     editar_alternativas()
+    if nuevas := planificacion.presupuesto(E["lineas"], bib, E["cot_id"]):
+        aplicar_lineas_editor(nuevas)
+        st.rerun()
     mostrar_faltantes_cotizacion()
     mostrar_entregas(lineas)
     sin_vinculo = productos_pendientes_de_asociar(lineas)
@@ -2605,6 +2609,9 @@ def paso_3():
     mostrar_totales()
     mostrar_resumen_lineas()
     editar_cabecera()
+    if nuevas := planificacion.requisitos(E["lineas"], estado_anexos, E["cot_id"], editar=True):
+        aplicar_lineas_editor(nuevas)
+        st.rerun()
     claves, descripciones = datos_productos()
     if not claves:
         st.warning("No hay productos seleccionados. Marca al menos uno en el paso anterior.")
@@ -2840,6 +2847,7 @@ def generar_pdf(estado=None):
     informe["paginas_revisar"] = revision_doc.revisar_paginas(pdf_bytes, informe["paginas_cotizacion"])
     documento = pc.leer_para_pdf(ruta)
     informe["validacion_excel"] = hallazgos(documento)
+    informe["alertas_evidencia"] = planificacion.alertas_evidencia(finales, estado_anexos)
     informe["resumen"] = resumen_pdf(documento)
     numero = re.sub(r"[^A-Za-z0-9._-]", "_", E.get("cot_numero") or "cotizacion")
     E.update(pdf_bytes=pdf_bytes, pdf_nombre=f"{numero}.pdf", informe=informe,
@@ -2868,6 +2876,7 @@ def paso_4():
         mostrar_resumen_lineas()
         editar_cabecera()
         panel_revision(en_paso_4=True)
+        planificacion.requisitos(E["lineas"], estado_anexos, E["cot_id"], editar=False)
 
         if st.button("Guardar versión de trabajo", key="guardar_version_cotizacion"):
             try:
@@ -2908,6 +2917,7 @@ def paso_4():
                                    mime="application/pdf", on_click="ignore")
         with acciones:
             acciones_vista_pdf(informe)
+            planificacion.requisitos(E["lineas"], estado_anexos, E["cot_id"], editar=False)
     st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
 
 
@@ -2930,6 +2940,7 @@ def acciones_vista_pdf(informe):
         )
         alertas = [f"{texto} · " + ", ".join(informe[campo]) for campo, texto in etiquetas if informe.get(campo)]
         alertas += informe["paginas_revisar"]
+        alertas += informe.get("alertas_evidencia", [])
         revision = informe["validacion_excel"]
         if alertas or revision:
             with st.expander(f"Alertas de revisión ({len(alertas) + len(revision)})", expanded=True):
@@ -2946,6 +2957,7 @@ def acciones_vista_pdf(informe):
                         st.text(hallazgo["texto"])
         if not E.get("pdf_confirmado"):
             requiere_revision = bool(informe["paginas_revisar"] or informe["ficha_ilegible"]
+                                     or informe.get("alertas_evidencia")
                                      or any(item["nivel"] == "error" for item in informe["validacion_excel"]))
             acepto = not requiere_revision or st.checkbox("Revisé las alertas y quiero aprobar esta versión",
                                                           key="ok_revision_pdf")
