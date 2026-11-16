@@ -293,7 +293,8 @@ class Biblioteca:
             if self.registrar_cambio and combinado != indice_actual:
                 for clave in indice_actual.keys() | combinado.keys():
                     antes, despues = indice_actual.get(clave, {}), combinado.get(clave, {})
-                    for campo in ("nombre", "costo_neto", "precio_neto", "margen_pct", "precio_recomendado_neto"):
+                    for campo in ("nombre", "costo_neto", "precio_neto", "margen_pct", "precio_recomendado_neto",
+                                  "estado_stock", "stock_confirmado_el", "stock_fuente"):
                         if antes.get(campo) != despues.get(campo):
                             self.registrar_cambio("Biblioteca", clave, campo, antes.get(campo), despues.get(campo))
 
@@ -464,6 +465,7 @@ class Biblioteca:
     CAMPOS_EDITABLES = (
         "nombre", "descripcion", "costo_neto", "margen_pct", "notas", "precio_neto", "ficha_no_requerida", "estado_stock",
         "precio_recomendado_neto", "precio_recomendado_fuente", "precio_recomendado_fecha",
+        "stock_confirmado_el", "stock_fuente",
         "marca", "modelo", "gtin", "mpn", "unidad_venta", "compatibilidad", "atributos_tecnicos",
         "seo_titulo", "seo_descripcion", "seo_slug", "seo_url_publica", "seo_imagen_url", "seo_imagen_alt",
         "seo_precio_publico", "seo_disponibilidad", "seo_condicion", "geo_resumen", "geo_faq",
@@ -491,22 +493,50 @@ class Biblioteca:
                 raise ValueError("Otra sesión cambió este producto. Recarga la ficha antes de guardar.")
             if ficha is None:
                 return
-            for k, v in campos.items():
-                if k not in self.CAMPOS_EDITABLES:
-                    continue
-                if v is None or v == "" or (isinstance(v, float) and math.isnan(v)):
-                    if k != "nombre":
-                        ficha.pop(k, None)
-                elif k == "publicacion":
-                    if not isinstance(v, dict):
-                        raise ValueError("La ficha pública debe ser un objeto.")
-                    ficha[k] = deepcopy(v)
-                elif k == "ficha_no_requerida":
-                    ficha[k] = bool(v)
-                else:
-                    ficha[k] = float(v) if k in ("costo_neto", "margen_pct", "precio_neto",
-                                                 "precio_recomendado_neto", "seo_precio_publico") else str(v).strip()
+            self.indice[clave.strip().upper()] = self._editar_ficha(ficha, campos)
             self._guardar_indice()
+
+    @classmethod
+    def _editar_ficha(cls, original, campos):
+        ficha = dict(original)
+        for k, v in campos.items():
+            if k not in cls.CAMPOS_EDITABLES:
+                continue
+            if v is None or v == "" or (isinstance(v, float) and math.isnan(v)):
+                if k != "nombre":
+                    ficha.pop(k, None)
+            elif k == "publicacion":
+                if not isinstance(v, dict):
+                    raise ValueError("La ficha pública debe ser un objeto.")
+                ficha[k] = deepcopy(v)
+            elif k == "ficha_no_requerida":
+                ficha[k] = bool(v)
+            else:
+                ficha[k] = float(v) if k in ("costo_neto", "margen_pct", "precio_neto",
+                                             "precio_recomendado_neto", "seo_precio_publico") else str(v).strip()
+        return ficha
+
+    def actualizar_varios(self, codigos, campos, versiones):
+        """Actualiza el lote en un guardado después de comprobar todas las fichas."""
+        with _INDICE_LOCK:
+            self.refrescar_si_cambio()
+            nuevas = {}
+            for codigo in codigos:
+                ficha = self.indice.get(codigo)
+                if ficha is None or ficha != versiones.get(codigo):
+                    raise ValueError(f"Otra sesión cambió {codigo}. Revisa la lista y vuelve a aplicar el stock.")
+                nueva = self._editar_ficha(ficha, campos)
+                if nueva != ficha:
+                    nuevas[codigo] = nueva
+            if nuevas:
+                anteriores = {codigo: self.indice[codigo] for codigo in nuevas}
+                self.indice.update(nuevas)
+                try:
+                    self._guardar_indice()
+                except OSError:
+                    self.indice.update(anteriores)
+                    raise
+            return len(nuevas)
 
     def eliminar(self, clave: str):
         """Borra el producto del catálogo junto con su foto y su ficha."""

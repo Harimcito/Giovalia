@@ -183,6 +183,64 @@ class FlujosAppTests(unittest.TestCase):
         self.assertEqual(guardadas[0]["unitario"], 1000.3)
         self.assertEqual(guardadas[0]["plazo_dias"], 7)
 
+    def test_deshacer_por_linea_preserva_ediciones_de_otras_y_recupera_duplicados(self):
+        hist = Historial(self.raiz / "biblioteca")
+        lineas = [
+            {"cantidad": 1, "descripcion": "Tóner pedido A", "clave_auto": "TN1060", "unitario": 1000},
+            {"cantidad": 2, "descripcion": "Tóner pedido B", "clave_auto": "TN1060", "unitario": 2000},
+        ]
+        cot_id, _ = hist.crear({}, lineas, {})
+        hist.actualizar(cot_id, datos={"lineas": lineas, "paso": 2})
+        app = self.iniciar()
+        app.session_state["busqueda_global_popover"] = True
+        self.recargar(app)
+        app.text_input(key="consulta_global").set_value("TN1060")
+        self.recargar(app)
+        app.button(key=f"buscar_cotizacion_{cot_id}").click()
+        self.recargar(app)
+        version = app.session_state["editor_version"]
+        clave = f"editor_productos_{version}__clp"
+        app.session_state[clave] = {
+            "edited_rows": {"0": {"Cantidad": 3}, "1": {"Precio unitario": "$3.570"}},
+            "added_rows": [], "deleted_rows": [],
+        }
+        self.recargar(app)
+        self.pulsar(app, "Revertir edición · Tóner pedido A")
+        guardadas = hist.obtener(cot_id)["datos"]["lineas"]
+        self.assertEqual([ln["cantidad"] for ln in guardadas], [1, 2])
+        self.assertEqual(guardadas[1]["unitario"], 3000)
+        self.assertTrue(all("_editor_id" not in ln for ln in guardadas))
+        version = app.session_state["editor_version"]
+        app.session_state[f"editor_productos_{version}__clp"] = {
+            "edited_rows": {}, "added_rows": [], "deleted_rows": [0],
+        }
+        self.recargar(app)
+        self.pulsar(app, "Recuperar · Tóner pedido A")
+        guardadas = hist.obtener(cot_id)["datos"]["lineas"]
+        self.assertEqual([ln["descripcion"] for ln in guardadas], ["Tóner pedido A", "Tóner pedido B"])
+        self.assertEqual(guardadas[1]["unitario"], 3000)
+        version = app.session_state["editor_version"]
+        app.session_state[f"editor_productos_{version}__clp"] = {
+            "edited_rows": {}, "deleted_rows": [1],
+            "added_rows": [{"Cantidad": 1, "Producto": "Carpeta", "Precio unitario": "$1.190"}],
+        }
+        self.recargar(app)
+        self.pulsar(app, "Recuperar · Tóner pedido B")
+        guardadas = hist.obtener(cot_id)["datos"]["lineas"]
+        self.assertEqual([ln["descripcion"] for ln in guardadas], ["Tóner pedido A", "Tóner pedido B", "Carpeta"])
+        self.pulsar(app, "Quitar línea agregada · Carpeta")
+        self.assertEqual(len(hist.obtener(cot_id)["datos"]["lineas"]), 2)
+
+        precio = next(c for c in app.text_input if c.label == "Precio de la línea seleccionada")
+        precio.set_value("abc")
+        plazo = next(c for c in app.number_input if c.label == "Plazo (días)")
+        plazo.set_value(5)
+        app.button(key="aplicar_precio").click()
+        self.recargar(app)
+        self.assertTrue(any("pesos enteros" in el.value for el in app.error))
+        self.assertEqual(app.text_input(key=precio.key).value, "abc")
+        self.assertEqual(app.number_input(key=plazo.key).value, 5)
+
     def test_historial_compara_y_restaura_una_version(self):
         hist = Historial(self.raiz / "biblioteca")
         cot_id, numero = hist.crear({}, [], {})

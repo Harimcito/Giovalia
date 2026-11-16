@@ -45,7 +45,7 @@
       const campo = document.querySelector(selector);
       const editandoLinea = campo?.closest('[data-testid="stForm"]')?.contains(document.activeElement);
       const boton = document.querySelector(guardar
-        ? (editandoLinea ? ".st-key-aplicar_precio button" : ".st-key-guardar_editor button")
+        ? ((editandoLinea || window.giovaliaCambiosLinea?.()) ? ".st-key-aplicar_precio button" : ".st-key-guardar_editor button")
         : ".st-key-siguiente_precio button");
       if (!boton || boton.disabled) return;
       evento.preventDefault();

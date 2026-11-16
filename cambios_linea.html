@@ -1,0 +1,187 @@
+<style>
+  .st-key-descartar_linea { display: none; }
+  #giovalia-linea-pendiente { color: #925000; font-size: .875rem; margin: 0; }
+  #giovalia-confirmar-linea {
+    max-width: min(30rem, 92vw);
+    padding: 1.4rem;
+    border: 1px solid var(--st-border-color, #cbd5e1);
+    border-radius: .8rem;
+    background: var(--st-background-color, #fff);
+    color: var(--st-text-color, #172b4d);
+  }
+  #giovalia-confirmar-linea::backdrop { background: #0f172a80; }
+  #giovalia-confirmar-linea menu { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0; margin-bottom: 0; }
+  #giovalia-confirmar-linea button {
+    font: inherit; color: inherit; background: transparent;
+    border: 1px solid currentColor; padding: .35rem .7rem; border-radius: .5rem;
+  }
+  #giovalia-confirmar-linea button[value=guardar] { background: #12617a; color: white; }
+</style>
+<script>
+(() => {
+  if (window.giovaliaCambiosLinea) return;
+  const marca = () => document.getElementById("giovalia-linea-pendiente");
+  const guardar = () => document.querySelector(".st-key-aplicar_precio button");
+  const descartar = () => document.querySelector(".st-key-descartar_linea button");
+  function pendiente() {
+    const aviso = marca();
+    const form = aviso?.closest('[data-testid="stForm"]');
+    if (!form) return false;
+    const precio = form.querySelector('[data-testid="stTextInput"] input');
+    const plazo = form.querySelector('[data-testid="stNumberInput"] input');
+    const stock = form.querySelector('[data-testid="stSelectbox"] input[role="combobox"]');
+    const valorStock = stock?.value || form.querySelector('[data-testid="stSelectbox"] [data-baseweb="select"]')?.innerText.trim();
+    return Boolean((precio && precio.value.trim() !== aviso.dataset.precio) ||
+      (plazo && plazo.value !== aviso.dataset.plazo) ||
+      (valorStock && valorStock !== aviso.dataset.stock));
+  }
+  window.giovaliaCambiosLinea = pendiente;
+
+  let esperando = null;
+  let reproduciendo = false;
+  let revisionProgramada = false;
+  function revisar() {
+    revisionProgramada = false;
+    const aviso = marca();
+    if (!aviso) return;
+    const ocultar = !pendiente();
+    if (aviso.hidden !== ocultar) aviso.hidden = ocultar;
+    if (!esperando || aviso.dataset.acuse === esperando.acuse) return;
+    const {volver, temporizador} = esperando;
+    esperando = null;
+    clearTimeout(temporizador);
+    if (aviso.dataset.estado !== "aplicado") return;
+    requestAnimationFrame(() => {
+      reproduciendo = true;
+      try { volver(); } finally { reproduciendo = false; }
+    });
+  }
+  function programarRevision() {
+    if (revisionProgramada) return;
+    revisionProgramada = true;
+    requestAnimationFrame(revisar);
+  }
+  const observer = new MutationObserver(programarRevision);
+  observer.observe(document.body, {subtree: true, childList: true, characterData: true, attributes: true,
+    attributeFilter: ["value", "data-acuse", "data-estado"]});
+  document.addEventListener("input", programarRevision, true);
+  document.addEventListener("change", programarRevision, true);
+  window.addEventListener("beforeunload", (evento) => {
+    if (!pendiente()) return;
+    evento.preventDefault();
+    evento.returnValue = "";
+  });
+
+  function accionNavegacion(origen, contenedor) {
+    const selector = 'button, a, input, [role="combobox"], [role="radio"]';
+    const control = origen.closest(selector) || contenedor.querySelector(selector);
+    const clave = [...contenedor.classList].find(c => c.startsWith("st-key-"));
+    const posicion = [...contenedor.querySelectorAll(selector)].indexOf(control);
+    return () => {
+      const buscarControl = () => {
+        if (control?.isConnected && control.getClientRects().length) return control;
+        return document.querySelector("." + CSS.escape(clave))?.querySelectorAll(selector)[posicion];
+      };
+      const pulsar = (encontrado) => {
+        encontrado.focus();
+        encontrado.click();
+      };
+      const disponible = buscarControl();
+      if (disponible?.getClientRects().length) return pulsar(disponible);
+
+      // El foco del diálogo puede cerrar el popover y desmontar su botón.
+      const panel = clave.startsWith("st-key-buscar_") ? ".st-key-busqueda_global button" :
+        clave.startsWith("st-key-deshacer_linea_") ? ".st-key-panel_deshacer_lineas button" : null;
+      const abrir = panel && document.querySelector(panel);
+      if (!abrir) return;
+      if (abrir.getAttribute("aria-expanded") !== "true") abrir.click();
+      let intentos = 0;
+      const buscar = () => {
+        const destino = buscarControl();
+        if (destino?.getClientRects().length) pulsar(destino);
+        else if (intentos++ < 50) setTimeout(buscar, 50);
+      };
+      buscar();
+    };
+  }
+  function decidir(volver) {
+    const dialogo = document.createElement("dialog");
+    dialogo.id = "giovalia-confirmar-linea";
+    dialogo.setAttribute("aria-labelledby", "giovalia-confirmar-titulo");
+    const form = document.createElement("form");
+    form.method = "dialog";
+    const titulo = document.createElement("strong");
+    titulo.id = "giovalia-confirmar-titulo";
+    titulo.textContent = "Tienes cambios pendientes en esta línea";
+    const detalle = document.createElement("p");
+    detalle.textContent = "Guárdalos antes de continuar o descártalos.";
+    const menu = document.createElement("menu");
+    for (const [valor, texto] of [
+      ["guardar", "Guardar y continuar"],
+      ["descartar", "Descartar y continuar"],
+      ["cancelar", "Seguir editando"],
+    ]) {
+      const boton = document.createElement("button");
+      boton.value = valor;
+      boton.textContent = texto;
+      boton.autofocus = valor === "cancelar";
+      menu.append(boton);
+    }
+    form.append(titulo, detalle, menu);
+    dialogo.append(form);
+    dialogo.addEventListener("close", () => {
+      const accion = dialogo.returnValue;
+      dialogo.remove();
+      const boton = accion === "guardar" ? guardar() : accion === "descartar" ? descartar() : null;
+      if (!boton || !marca()) return;
+      esperando = {acuse: marca().dataset.acuse, volver, temporizador: setTimeout(() => { esperando = null; }, 15000)};
+      boton.click();
+    }, {once: true});
+    document.body.append(dialogo);
+    dialogo.showModal();
+  }
+  const navegacion = [
+    ".st-key-vista", ".st-key-linea_editor", ".st-key-cotizacion_volver_borradores",
+    ".st-key-editor_volver_pedido", ".st-key-editor_ir_fotos", ".st-key-gioval_cerrar_sesion",
+    '[class*="st-key-buscar_cotizacion_"]', '[class*="st-key-buscar_cliente_"]',
+    '[class*="st-key-buscar_producto_"]', '[class*="st-key-deshacer_linea_"]',
+    '[class*="st-key-catalogo_agregar_"]', '[class*="st-key-catalogo_vincular_"]',
+  ].join(",");
+  function proponer(volver) {
+    if (!esperando && !document.getElementById("giovalia-confirmar-linea")) decidir(volver);
+  }
+  document.addEventListener("click", (evento) => {
+    if (reproduciendo || !pendiente() || !(evento.target instanceof Element)) return;
+    const origen = evento.target;
+    const guardado = origen.closest(".st-key-guardar_editor button");
+    const destino = origen.closest(navegacion);
+    if (!guardado && !destino) return;
+    evento.preventDefault();
+    evento.stopImmediatePropagation();
+    if (guardado) guardar()?.click();
+    else proponer(accionNavegacion(origen, destino));
+  }, true);
+  document.addEventListener("keydown", (evento) => {
+    if (reproduciendo || !pendiente() || !(evento.target instanceof Element)) return;
+    const selector = evento.target.closest(".st-key-linea_editor");
+    const nueva = evento.target.closest(".st-key-linea_nueva");
+    const teclaSelector = selector && ["ArrowDown", "ArrowUp", "Enter", " "].includes(evento.key);
+    if (!teclaSelector && !(nueva && evento.key === "Enter")) return;
+    evento.preventDefault();
+    evento.stopImmediatePropagation();
+    if (teclaSelector) {
+      proponer(() => {
+        const abrir = document.querySelector(".st-key-linea_editor button[aria-haspopup=listbox]");
+        if (abrir) abrir.click();
+        else document.querySelector(".st-key-linea_editor [role=combobox]")?.click();
+      });
+    } else {
+      proponer(() => {
+        const campo = document.querySelector(".st-key-linea_nueva input");
+        campo?.focus();
+        campo?.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", code: "Enter", bubbles: true}));
+      });
+    }
+  }, true);
+})();
+</script>
