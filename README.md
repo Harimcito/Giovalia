@@ -61,6 +61,8 @@ búsqueda, pega el enlace directo de una imagen o PDF, o usa los botones de Goog
 - **Mis productos:** catálogo con foto, ficha, último precio, costo y margen. Precio sugerido = costo × (1 + margen);
   al armar un pedido esos productos aparecen con su precio ya puesto. Aquí también se cambia el código,
   se combinan duplicados y se eliminan productos.
+- **Catálogo PDF:** guarda selecciones de la Biblioteca y emite un PDF A4 vertical para clientes. Incluye precios netos más IVA y permite usar ilustraciones marcadas como referenciales cuando falta una foto. Los PDFs y su registro se guardan dentro de la biblioteca seleccionada.
+- **SEO y GEO:** edita datos verificables en la ficha de producto y descarga JSON y JSON-LD desde Catálogo PDF → SEO y GEO. Consulta [los criterios de Gioval](SEO_GEO_GIOVAL.md) para preparar una futura publicación.
 - **Biblioteca compartida:** el servidor central comparte productos, fotos, fichas y el historial comercial de cotizaciones (líneas, cantidades, precios, totales y estado). Los datos del cliente y los PDF/Excel finales no se guardan en el historial común; los documentos se descargan desde la sesión que los genera.
 - Para respaldar el modo local, copia la biblioteca. Para el modo compartido, usa Ajustes → Copia de seguridad y conserva los ZIP fuera del computador central.
 

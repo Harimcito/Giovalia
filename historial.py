@@ -399,8 +399,10 @@ class Historial:
             reg["datos"] = _datos_compartidos(reg["datos"])
         return reg
 
-    def listar(self, texto: str = "", estado: str | None = None) -> list[dict]:
-        consulta, args = "SELECT * FROM cotizaciones", []
+    def listar(self, texto: str = "", estado: str | None = None, *, incluir_datos: bool = True) -> list[dict]:
+        """Lista cotizaciones. Las vistas de resumen pueden omitir el JSON de las líneas."""
+        columnas = "*" if incluir_datos else "id, numero, fecha, cliente, rut, total, estado, notas, pdf, actualizado, creado"
+        consulta, args = f"SELECT {columnas} FROM cotizaciones", []
         cond = []
         if estado and estado != "Todos":
             cond.append("estado=?")
@@ -416,11 +418,13 @@ class Historial:
         if PRIVACIDAD_COMPARTIDA:
             for reg in salida:
                 reg["cliente"] = reg["rut"] = reg["notas"] = ""
-                reg["xlsx"] = reg["pdf"] = None
-                try:
-                    reg["datos"] = _json(_datos_compartidos(json.loads(reg.get("datos") or "{}")))
-                except (TypeError, json.JSONDecodeError):
-                    reg["datos"] = "{}"
+                reg["pdf"] = None
+                if incluir_datos:
+                    reg["xlsx"] = None
+                    try:
+                        reg["datos"] = _json(_datos_compartidos(json.loads(reg.get("datos") or "{}")))
+                    except (TypeError, json.JSONDecodeError):
+                        reg["datos"] = "{}"
         return salida
 
     def eliminar(self, cot_id: int):
