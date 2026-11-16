@@ -462,7 +462,7 @@ class Biblioteca:
 
     # ---------------------------------------------------------- catálogo editable
     CAMPOS_EDITABLES = (
-        "nombre", "descripcion", "costo_neto", "margen_pct", "notas", "precio_neto", "ficha_no_requerida",
+        "nombre", "descripcion", "costo_neto", "margen_pct", "notas", "precio_neto", "ficha_no_requerida", "estado_stock",
         "precio_recomendado_neto", "precio_recomendado_fuente", "precio_recomendado_fecha",
         "marca", "modelo", "gtin", "mpn", "unidad_venta", "compatibilidad", "atributos_tecnicos",
         "seo_titulo", "seo_descripcion", "seo_slug", "seo_url_publica", "seo_imagen_url", "seo_imagen_alt",
