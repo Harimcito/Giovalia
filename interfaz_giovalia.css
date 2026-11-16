@@ -49,6 +49,7 @@
   .st-key-gv_area_edicion [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-gv_detalle_linea)>[data-testid="stColumn"]:has(.st-key-gv_detalle_linea) {display:contents}
   .st-key-gv_detalle_linea {display:none}
   html[data-gv-linea-abierta] [data-testid="stMain"] {overflow:hidden}
+  html[data-gv-linea-abierta] :is([data-testid="stSidebar"],[data-testid="stHeader"]) {visibility:hidden}
   html[data-gv-linea-abierta]::after {content:"";position:fixed;inset:0;background:#050a13ae;z-index:1000}
   html[data-gv-linea-abierta] .st-key-gv_detalle_linea {
     display:flex;position:fixed;inset:0 0 0 auto;width:min(32rem, 100%);height:100dvh;

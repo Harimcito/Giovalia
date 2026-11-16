@@ -82,6 +82,7 @@ def comprobar_interfaz(numero, numero_otro):
         tabla.get_by_role("button", name="Resma oficio").click()
         panel = page.get_by_role("dialog", name="Fila 2 · Resma oficio")
         expect(panel).to_be_visible()
+        expect(page.locator('[data-testid="stSidebar"]')).to_be_hidden()
         assert panel.bounding_box()["width"] <= 390
         panel.get_by_role("button", name="Volver a productos").click()
         expect(panel).to_be_hidden()
