@@ -314,6 +314,8 @@ button[kind="primary"]:not(:disabled):hover,button[data-testid="stBaseButton-pri
   .st-key-gv_nav_movil button {min-height:2.45rem}
 }
 .gv-page-icon:empty {display:none}
-.st-key-cabecera_giovalia .gv-account {display:none}
+.st-key-cabecera_giovalia .gv-account > span {display:none}
+.st-key-cabecera_giovalia img[alt="Gioval"] {background:#eef3ff;padding:.3rem .45rem;border-radius:.52rem}
+.st-key-gv_scroll_runtime,.st-key-gv_scripts_runtime {display:none}
 .st-key-cabecera_giovalia .gv-topbar {margin-bottom:.3rem}
 .st-key-gv_nav [data-testid="stButton"] button {font-size:.93rem}
