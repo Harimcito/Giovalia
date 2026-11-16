@@ -11,9 +11,7 @@ $script:supervisorLog = Join-Path $script:logDir "actualizador-servidor.log"
 $script:gitExe = (Get-Command git.exe -ErrorAction SilentlyContinue).Source
 $script:plainPassword = $null
 $script:cotizadorProcess = $null
-$script:radarProcess = $null
 $script:cotizadorErrorLog = $null
-$script:radarErrorLog = $null
 $script:pollSeconds = 30
 $script:updateIntervalSeconds = 300
 
@@ -42,37 +40,31 @@ function Test-StreamlitHealth([int]$Port) {
     }
 }
 
-function Stop-AppProcesses {
-    foreach ($proc in @($script:cotizadorProcess, $script:radarProcess)) {
-        if ($null -ne $proc) {
-            try {
-                if (-not $proc.HasExited) {
-                    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-                    $null = $proc.WaitForExit(5000)
-                }
-            } catch {
-                # El proceso puede haber terminado entre la comprobación y el cierre.
+function Stop-Cotizador {
+    $proc = $script:cotizadorProcess
+    if ($null -ne $proc) {
+        try {
+            if (-not $proc.HasExited) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                $null = $proc.WaitForExit(5000)
             }
+        } catch {
+            # El proceso puede haber terminado entre la comprobación y el cierre.
         }
     }
     $script:cotizadorProcess = $null
-    $script:radarProcess = $null
 }
 
-function Start-AppProcesses {
+function Start-Cotizador {
     if (-not (Test-Path $script:venvPython)) {
         throw "No existe el entorno Python: $script:venvPython. Ejecuta instalar_servidor_gioval.bat."
     }
     $cotizadorApp = Join-Path $script:repoRoot "app.py"
-    $radarApp = Join-Path $script:repoRoot "radar_comercial\app.py"
     if (-not (Test-Path $cotizadorApp)) { throw "No encuentro app.py en $script:repoRoot." }
-    if (-not (Test-Path $radarApp)) { throw "No encuentro radar_comercial\app.py en $script:repoRoot." }
 
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $cotizadorOut = Join-Path $script:logDir "cotizador-$stamp.log"
     $script:cotizadorErrorLog = Join-Path $script:logDir "cotizador-error-$stamp.log"
-    $radarOut = Join-Path $script:logDir "radar-$stamp.log"
-    $script:radarErrorLog = Join-Path $script:logDir "radar-error-$stamp.log"
 
     $oldData = $env:GIOVAL_DATA_DIR
     $oldRequire = $env:GIOVAL_REQUIRE_ACCESS
@@ -89,9 +81,6 @@ function Start-AppProcesses {
 
         $cotizadorArgs = '-m streamlit run "{0}" --server.address 0.0.0.0 --server.port 8501 --server.headless true --server.fileWatcherType none' -f $cotizadorApp
         $script:cotizadorProcess = Start-Process -FilePath $script:venvPython -ArgumentList $cotizadorArgs -WorkingDirectory $script:repoRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $cotizadorOut -RedirectStandardError $script:cotizadorErrorLog
-
-        $radarArgs = '-m streamlit run "{0}" --server.address 0.0.0.0 --server.port 8502 --server.headless true --global.developmentMode false --server.fileWatcherType none' -f $radarApp
-        $script:radarProcess = Start-Process -FilePath $script:venvPython -ArgumentList $radarArgs -WorkingDirectory $script:repoRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $radarOut -RedirectStandardError $script:radarErrorLog
     } finally {
         $env:GIOVAL_DATA_DIR = $oldData
         $env:GIOVAL_REQUIRE_ACCESS = $oldRequire
@@ -106,16 +95,13 @@ function Start-AppProcesses {
         if ($null -eq $script:cotizadorProcess -or $script:cotizadorProcess.HasExited) {
             throw "El cotizador no pudo iniciar. Revisa $script:cotizadorErrorLog."
         }
-        if ($null -eq $script:radarProcess -or $script:radarProcess.HasExited) {
-            throw "Radar Comercial no pudo iniciar. Revisa $script:radarErrorLog."
-        }
-        if ((Test-StreamlitHealth 8501) -and (Test-StreamlitHealth 8502)) {
-            Write-Log "Cotizador (8501) y Radar Comercial (8502) están disponibles."
+        if (Test-StreamlitHealth 8501) {
+            Write-Log "El cotizador está disponible en el puerto 8501."
             return
         }
     } while ((Get-Date) -lt $deadline)
 
-    throw "Las aplicaciones no respondieron dentro de 180 segundos. Revisa los archivos de log en $script:logDir."
+    throw "El cotizador no respondió dentro de 180 segundos. Revisa los archivos de log en $script:logDir."
 }
 
 function Update-RepositoryIfNeeded {
@@ -161,15 +147,15 @@ function Update-RepositoryIfNeeded {
         }
 
         $oldHead = $current
-        Write-Log "Nueva versión detectada en GitHub ($current -> $remote). Pausando las aplicaciones para actualizar."
-        Stop-AppProcesses
+        Write-Log "Nueva versión detectada en GitHub ($current -> $remote). Pausando el cotizador para actualizar."
+        Stop-Cotizador
 
         try {
             $null = Invoke-GitText -GitArgs @("pull", "--ff-only", "origin", "main")
             & $script:venvPython -m pip install -r (Join-Path $script:repoRoot "requirements.txt")
             if ($LASTEXITCODE -ne 0) { throw "Falló la instalación de requirements.txt." }
 
-            Start-AppProcesses
+            Start-Cotizador
             if (Test-Path $failedUpdateFile) { Remove-Item -LiteralPath $failedUpdateFile -Force -ErrorAction SilentlyContinue }
             $newHead = Invoke-GitText -GitArgs @("rev-parse", "HEAD")
             Write-Log "Actualización aplicada correctamente: $newHead"
@@ -178,7 +164,7 @@ function Update-RepositoryIfNeeded {
             $headAfterFailure = Invoke-GitText -GitArgs @("rev-parse", "HEAD")
             $newCodeHadBeenApplied = ($headAfterFailure -ne $oldHead)
             Write-Log "La versión nueva no arrancó correctamente: $updateError. Intentando volver a $oldHead."
-            Stop-AppProcesses
+            Stop-Cotizador
             & $script:gitExe -C $script:repoRoot reset --hard $oldHead 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 throw "Falló la actualización y también el rollback a $oldHead. Error original: $updateError"
@@ -188,7 +174,7 @@ function Update-RepositoryIfNeeded {
             if ($newCodeHadBeenApplied) {
                 [System.IO.File]::WriteAllText($failedUpdateFile, $remote, [System.Text.Encoding]::ASCII)
             }
-            Start-AppProcesses
+            Start-Cotizador
             if ($newCodeHadBeenApplied) {
                 Write-Log "Rollback completado. Se mantiene activa la versión anterior ($oldHead). La revisión $remote queda en cuarentena para evitar reinicios repetidos."
             } else {
@@ -220,9 +206,9 @@ try {
     Write-Log "Supervisor iniciado para $script:repoRoot. Consultará GitHub cada 5 minutos."
     $stopSignal = Join-Path $script:baseDir "detener-actualizador.flag"
     try {
-        Start-AppProcesses
+        Start-Cotizador
     } catch {
-        Stop-AppProcesses
+        Stop-Cotizador
         Write-Log ("El inicio no se completó; se reintentará en 30 segundos: {0}" -f $_.Exception.Message)
     }
     $nextUpdateCheck = (Get-Date).AddSeconds($script:updateIntervalSeconds)
@@ -232,20 +218,19 @@ try {
 
         if (Test-Path $stopSignal) {
             Remove-Item -LiteralPath $stopSignal -Force -ErrorAction SilentlyContinue
-            Write-Log "Se recibió una solicitud de detención. Cerrando las aplicaciones de forma ordenada."
+            Write-Log "Se recibió una solicitud de detención. Cerrando el cotizador de forma ordenada."
             break
         }
 
         $cotizadorDead = ($null -eq $script:cotizadorProcess -or $script:cotizadorProcess.HasExited)
-        $radarDead = ($null -eq $script:radarProcess -or $script:radarProcess.HasExited)
-        if ($cotizadorDead -or $radarDead) {
-            Write-Log "Se detectó un proceso detenido. Reiniciando las aplicaciones."
-            Stop-AppProcesses
+        if ($cotizadorDead) {
+            Write-Log "Se detuvo el proceso del cotizador. Reiniciando."
+            Stop-Cotizador
             try {
-                Start-AppProcesses
+                Start-Cotizador
             } catch {
-                Stop-AppProcesses
-                Write-Log ("No pude reiniciar las aplicaciones; volveré a intentarlo: {0}" -f $_.Exception.Message)
+                Stop-Cotizador
+                Write-Log ("No pude reiniciar el cotizador; volveré a intentarlo: {0}" -f $_.Exception.Message)
             }
         }
 
@@ -258,7 +243,7 @@ try {
     Write-Log ("Error fatal del supervisor: {0}" -f $_.Exception.Message)
     exit 1
 } finally {
-    Stop-AppProcesses
+    Stop-Cotizador
     $env:GIOVAL_ACCESS_PASSWORD = $null
     $script:plainPassword = $null
 }

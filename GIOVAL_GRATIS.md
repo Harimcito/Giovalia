@@ -20,19 +20,23 @@ Compartir una sola biblioteca entre los dos trabajadores sin pagar alojamiento. 
 
 ## 1.1 Actualizaciones automáticas desde GitHub (Windows)
 
-Esta función mantiene actualizados el cotizador y Radar Comercial sin que tengas que descargar el repositorio cada vez. **Requiere que la carpeta del proyecto sea un clon de Git** (no una carpeta obtenida solo al descomprimir ZIP) y que Git for Windows esté instalado.
+Esta función mantiene actualizado el cotizador sin que tengas que descargar el repositorio cada vez. **Requiere que la carpeta del proyecto sea un clon de Git** (no una carpeta obtenida solo al descomprimir ZIP) y que Git for Windows esté instalado.
 
 1. En el computador central, ejecuta primero `instalar_servidor_gioval.bat`.
 2. Abre `iniciar_servidor_gioval.bat` una vez y crea la clave compartida, si aún no existe. Detén esa ventana con Ctrl+C.
-3. Si tienes abiertos el cotizador o Radar en ventanas de servidor anteriores, detén ambas con Ctrl+C.
+3. Si el cotizador ya está abierto en otra ventana de servidor, detenlo con Ctrl+C.
 4. Haz doble clic en `instalar_actualizaciones_servidor_gioval.bat`. Registrará una tarea de Windows y arrancará el servidor automático. También se iniciará cuando vuelvas a iniciar sesión en Windows.
 
-El supervisor consulta la rama `main` cada cinco minutos. Cuando detecta una versión nueva, detiene brevemente las dos aplicaciones, descarga el código, instala los requisitos actualizados y comprueba que los puertos 8501 y 8502 respondan. Si la versión nueva no arranca, intenta restaurar la versión anterior. No reemplaza los datos de `%LOCALAPPDATA%\Gioval\Datos`.
+El supervisor consulta la rama `main` cada cinco minutos. Cuando detecta una versión nueva, detiene brevemente el cotizador, descarga el código, instala los requisitos actualizados y comprueba que el puerto 8501 responda. Si la versión nueva no arranca, intenta restaurar la versión anterior. No reemplaza los datos de `%LOCALAPPDATA%\Gioval\Datos`.
 
-Por seguridad, si detecta cambios locales sin confirmar en el repositorio, omite esa actualización para no sobrescribir archivos editados. Revisa el registro en `%LOCALAPPDATA%\Gioval\logs\actualizador-servidor.log`; los registros de inicio de cada aplicación se guardan en la misma carpeta.
+Por seguridad, si detecta cambios locales sin confirmar en el repositorio, omite esa actualización para no sobrescribir archivos editados. Revisa el registro en `%LOCALAPPDATA%\Gioval\logs\actualizador-servidor.log`; los registros de inicio del cotizador se guardan en la misma carpeta.
 
-Para desactivar la tarea automática, ejecuta `desinstalar_actualizaciones_servidor_gioval.bat`. El cierre puede tardar hasta unos 30 segundos. Después puedes iniciar las aplicaciones manualmente con `iniciar_servidor_gioval.bat` y `iniciar_radar_gioval.bat`.
+Para desactivar la tarea automática, ejecuta `desinstalar_actualizaciones_servidor_gioval.bat`. El cierre puede tardar hasta unos 30 segundos. Después puedes iniciar el cotizador manualmente con `iniciar_servidor_gioval.bat`.
 
+
+### Actualizar una instalación con el supervisor anterior
+
+En el computador central ejecuta `desinstalar_actualizaciones_servidor_gioval.bat` y espera hasta que el servidor se detenga. Desde la carpeta del clon, con `main` activa y sin cambios locales, ejecuta `git pull --ff-only origin main` y vuelve a ejecutar `instalar_actualizaciones_servidor_gioval.bat`. Hazlo una vez para que Windows cargue el supervisor nuevo. El supervisor anterior conserva sus funciones en memoria y puede revertir el cambio si aún espera que arranque la segunda aplicación.
 
 ### Importar datos ya existentes
 

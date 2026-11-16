@@ -66,6 +66,7 @@ _TAMANO_PRODUCTO = {"CARTA": "CARTA", "LETTER": "CARTA", "OFICIO": "OFICIO", "LE
                     "A4": "A4", "A3": "A3", "A5": "A5", "TABLOIDE": "TABLOIDE"}
 _MARCAS_PRODUCTO = {"EQUALIT", "DURACELL", "FULTON", "COLON", "HP", "CANON", "EPSON", "KYOCERA",
                     "BROTHER", "SAMSUNG", "XEROX", "LEXMARK", "TOSHIBA", "LAVORO", "RHEIN", "TORRE"}
+_PILAS_PRODUCTO = frozenset({"AA", "AAA"})
 
 
 @lru_cache(maxsize=8192)
@@ -86,11 +87,11 @@ def _tokens_producto(texto: str, ignorar_similares: bool = True) -> frozenset[st
 @lru_cache(maxsize=32)
 def _carpetas_por_alias(ruta: str, mtime_ns: int) -> dict[str, tuple[Path, ...]]:
     """Indexa una vez las carpetas antiguas; evita recorrer toda la biblioteca por producto."""
-    raiz = Path(ruta)
     mapa: dict[str, list[Path]] = {}
-    for carpeta in raiz.iterdir():
-        if carpeta.is_dir():
-            mapa.setdefault(normalizar(carpeta.name), []).append(carpeta)
+    with os.scandir(ruta) as carpetas:
+        for carpeta in carpetas:
+            if carpeta.is_dir():
+                mapa.setdefault(normalizar(carpeta.name), []).append(Path(carpeta.path))
     return {alias: tuple(candidatas) for alias, candidatas in mapa.items()}
 
 
@@ -102,29 +103,36 @@ def _mapa_carpetas(raiz: Path) -> dict[str, tuple[Path, ...]]:
     return _carpetas_por_alias(str(raiz.resolve()), mtime_ns)
 
 
-def _conflicto_producto(a: set[str], b: set[str]) -> bool:
-    tamanos_a = {_TAMANO_PRODUCTO[t] for t in a if t in _TAMANO_PRODUCTO}
-    tamanos_b = {_TAMANO_PRODUCTO[t] for t in b if t in _TAMANO_PRODUCTO}
-    if tamanos_a and tamanos_b and tamanos_a.isdisjoint(tamanos_b):
-        return True
-    pilas_a, pilas_b = a & {"AA", "AAA"}, b & {"AA", "AAA"}
-    if pilas_a and pilas_b and pilas_a.isdisjoint(pilas_b):
-        return True
-    marcas_a, marcas_b = a & _MARCAS_PRODUCTO, b & _MARCAS_PRODUCTO
-    if marcas_a and marcas_b and marcas_a.isdisjoint(marcas_b):
-        return True
-    # No unir presentaciones distintas cuando ambas describen explícitamente una cantidad.
-    nums_a = {t for t in a if t.isdigit() and len(t) <= 5}
-    nums_b = {t for t in b if t.isdigit() and len(t) <= 5}
-    return bool(nums_a and nums_b and nums_a.isdisjoint(nums_b))
+@lru_cache(maxsize=8192)
+def _atributos_producto(tokens: frozenset[str]) -> tuple[frozenset[str], ...]:
+    """Agrupa los atributos incompatibles de cada variante una vez."""
+    return (
+        frozenset(_TAMANO_PRODUCTO[t] for t in tokens if t in _TAMANO_PRODUCTO),
+        tokens & _PILAS_PRODUCTO,
+        tokens & _MARCAS_PRODUCTO,
+        frozenset(t for t in tokens if t.isdigit() and len(t) <= 5),
+    )
+
+
+def _conflicto_atributos(a, b) -> bool:
+    for izquierda, derecha in zip(a, b):
+        if izquierda and derecha and izquierda.isdisjoint(derecha):
+            return True
+    return False
+
+
+def _conflicto_producto(a, b) -> bool:
+    return _conflicto_atributos(_atributos_producto(frozenset(a)), _atributos_producto(frozenset(b)))
+
+
+def _alias_de_ficha(ficha: dict) -> list:
+    alias = ficha.get("aliases", []) or []
+    return alias if isinstance(alias, list) else [alias]
 
 
 def identidad_conflictiva(clave: str, ficha: dict) -> bool:
     """Marca fichas que mezclan tamaños, presentaciones o marcas incompatibles entre clave y alias."""
-    alias = ficha.get("aliases", []) or []
-    if not isinstance(alias, list):
-        alias = [alias]
-    variantes = [clave, ficha.get("nombre", ""), *alias]
+    variantes = [clave, ficha.get("nombre", ""), *_alias_de_ficha(ficha)]
     tokens = [_tokens_producto(v, ignorar_similares=False) for v in variantes if v]
     tamanos = {_TAMANO_PRODUCTO[t] for grupo in tokens for t in grupo if t in _TAMANO_PRODUCTO}
     pilas = {t for grupo in tokens for t in grupo if t in {"AA", "AAA"}}
@@ -186,7 +194,7 @@ class Biblioteca:
         self._indice_mtime_ns = self._mtime_indice()
         self._semantic_mtime_ns = None
         self._semantic_postings: dict[str, set[str]] = {}
-        self._semantic_variantes: dict[str, tuple[frozenset[str], ...]] = {}
+        self._semantic_variantes = {}
         self.asociar_carpetas_anteriores()
 
     def _mtime_indice(self) -> int:
@@ -271,8 +279,10 @@ class Biblioteca:
                     combinado[clave] = deepcopy(ficha_local)
 
             temporal = self._idx.with_suffix(".json.tmp")
-            temporal.write_text(json.dumps(combinado, ensure_ascii=False, indent=2), "utf-8")
-            os.replace(temporal, self._idx)
+            existia = self._idx.exists()
+            if combinado != indice_actual or not existia:
+                temporal.write_text(json.dumps(combinado, ensure_ascii=False, indent=2), "utf-8")
+                os.replace(temporal, self._idx)
             self.indice = combinado
             self._snapshot_indice = deepcopy(combinado)
             self._indice_mtime_ns = self._mtime_indice()
@@ -287,12 +297,12 @@ class Biblioteca:
         for clave, ficha in self.indice.items():
             if identidad_conflictiva(clave, ficha):
                 continue
-            variantes = [ficha.get("nombre", clave), clave, *(ficha.get("aliases", []) or [])]
+            variantes = [ficha.get("nombre", clave), clave, *_alias_de_ficha(ficha)]
             grupos = tuple(
                 _tokens_producto(str(variante), ignorar_similares=False)
                 for variante in variantes if variante
             )
-            variantes_por_clave[clave] = grupos
+            variantes_por_clave[clave] = tuple((grupo, _atributos_producto(grupo)) for grupo in grupos if grupo)
             for grupo in grupos:
                 for token in grupo:
                     postings.setdefault(token, set()).add(clave)
@@ -347,21 +357,31 @@ class Biblioteca:
         return re.sub(r"[^A-Za-z0-9._-]", "_", clave.strip().upper())
 
     def carpeta(self, clave: str) -> Path:
-        return self.dir / self._slug(clave)
+        nombre = self._slug(clave)
+        if (
+            not nombre or nombre.endswith(".")
+            or nombre in {"COTIZACIONES", "CATALOGOS_EMITIDOS"}
+            or re.fullmatch(r"CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]", nombre.split(".")[0])
+        ):
+            raise ValueError("El código no es válido para la biblioteca.")
+        return self.dir / nombre
 
     def archivos(self, clave: str):
         """(foto, ficha), usando también las carpetas de códigos antiguos vinculados por alias."""
         if not clave:
             return None, None
-        c = self.carpeta(clave)
+        try:
+            c = self.carpeta(clave)
+        except ValueError:
+            return None, None
         foto = next((p for e in EXT_FOTO if (p := c / f"foto{e}").exists()), None)
-        ficha = c / "ficha.pdf"
-        if foto and ficha.exists():
+        ficha = p if (p := c / "ficha.pdf").exists() else None
+        if foto and ficha:
             return foto, ficha
 
         ficha_producto = self.indice.get(clave.strip().upper(), {})
         alias_norm = {normalizar(clave)}
-        alias_norm.update(normalizar(a) for a in ficha_producto.get("aliases", []) if a)
+        alias_norm.update(normalizar(a) for a in _alias_de_ficha(ficha_producto) if a)
         mapa_carpetas = _mapa_carpetas(self.dir)
         carpetas_anteriores = sorted(
             (p for alias in alias_norm for p in mapa_carpetas.get(alias, ()) if p != c),
@@ -370,28 +390,38 @@ class Biblioteca:
         for anterior in carpetas_anteriores:
             if not foto:
                 foto = next((p for e in EXT_FOTO if (p := anterior / f"foto{e}").exists()), None)
-            if not ficha.exists():
+            if not ficha:
                 ficha_antigua = anterior / "ficha.pdf"
                 if ficha_antigua.exists():
                     ficha = ficha_antigua
-            if foto and ficha.exists():
+            if foto and ficha:
                 break
-        return foto, (ficha if ficha.exists() else None)
+        return foto, ficha
 
     def guardar_archivo(self, clave: str, tipo: str, nombre_origen: str, datos: bytes):
         c = self.carpeta(clave)
-        c.mkdir(parents=True, exist_ok=True)
         if tipo == "foto":
             ext = Path(nombre_origen).suffix.lower()
             if ext not in EXT_FOTO:
                 raise ValueError(f"Formato de imagen no soportado: {ext}")
-            for e in EXT_FOTO:  # reemplaza la foto anterior
-                (c / f"foto{e}").unlink(missing_ok=True)
-            (c / f"foto{ext}").write_bytes(datos)
+            destino = c / f"foto{ext}"
+            opciones = [c / f"foto{e}" for e in EXT_FOTO]
         elif tipo == "ficha":
-            (c / "ficha.pdf").write_bytes(datos)
+            destino = c / "ficha.pdf"
+            opciones = [destino]
         else:
             raise ValueError("tipo debe ser 'foto' o 'ficha'")
+        with _INDICE_LOCK:
+            c.mkdir(parents=True, exist_ok=True)
+            temporal = destino.with_suffix(destino.suffix + ".tmp")
+            try:
+                temporal.write_bytes(datos)
+                os.replace(temporal, destino)
+                for ruta in opciones:
+                    if ruta != destino:
+                        ruta.unlink(missing_ok=True)
+            finally:
+                temporal.unlink(missing_ok=True)
 
     def registrar(self, clave: str, nombre: str | None = None, alias: str | None = None,
                   precio_neto: float | None = None):
@@ -401,6 +431,7 @@ class Biblioteca:
         if not clave:
             return
         clave = clave.strip().upper()
+        self.carpeta(clave)
         ficha = self.indice.setdefault(clave, {"nombre": nombre or clave, "aliases": []})
         if precio_neto:
             ficha["precio_neto"] = float(precio_neto)
@@ -411,30 +442,44 @@ class Biblioteca:
         self._guardar_indice()
 
     # ---------------------------------------------------------- catálogo editable
-    CAMPOS_EDITABLES = ("nombre", "costo_neto", "margen_pct", "notas", "precio_neto", "ficha_no_requerida")
+    CAMPOS_EDITABLES = (
+        "nombre", "descripcion", "costo_neto", "margen_pct", "notas", "precio_neto", "ficha_no_requerida",
+        "precio_recomendado_neto", "precio_recomendado_fuente", "precio_recomendado_fecha",
+        "marca", "modelo", "gtin", "mpn", "unidad_venta", "compatibilidad", "atributos_tecnicos",
+        "seo_titulo", "seo_descripcion", "seo_slug", "seo_url_publica", "seo_imagen_url", "seo_imagen_alt",
+        "seo_precio_publico", "seo_disponibilidad", "seo_condicion", "geo_resumen", "geo_faq",
+        "geo_fuente", "geo_verificado",
+    )
 
-    def actualizar(self, clave: str, **campos):
+    def actualizar(self, clave: str, *, version_esperada=None, **campos):
         """Cambia nombre, costo neto, margen %, notas o último precio. None borra el dato."""
-        ficha = self.indice.get(clave.strip().upper())
-        if ficha is None:
-            return
-        for k, v in campos.items():
-            if k not in self.CAMPOS_EDITABLES:
-                continue
-            if v is None or v == "" or (isinstance(v, float) and math.isnan(v)):
-                if k != "nombre":
-                    ficha.pop(k, None)
-            elif k == "ficha_no_requerida":
-                ficha[k] = bool(v)
-            else:
-                ficha[k] = float(v) if k in ("costo_neto", "margen_pct", "precio_neto") else str(v).strip()
-        self._guardar_indice()
+        with _INDICE_LOCK:
+            if version_esperada is not None:
+                self.refrescar_si_cambio()
+            ficha = self.indice.get(clave.strip().upper())
+            if version_esperada is not None and ficha != version_esperada:
+                raise ValueError("Otra sesión cambió este producto. Recarga la ficha antes de guardar.")
+            if ficha is None:
+                return
+            for k, v in campos.items():
+                if k not in self.CAMPOS_EDITABLES:
+                    continue
+                if v is None or v == "" or (isinstance(v, float) and math.isnan(v)):
+                    if k != "nombre":
+                        ficha.pop(k, None)
+                elif k == "ficha_no_requerida":
+                    ficha[k] = bool(v)
+                else:
+                    ficha[k] = float(v) if k in ("costo_neto", "margen_pct", "precio_neto",
+                                                 "precio_recomendado_neto", "seo_precio_publico") else str(v).strip()
+            self._guardar_indice()
 
     def eliminar(self, clave: str):
         """Borra el producto del catálogo junto con su foto y su ficha."""
         clave = clave.strip().upper()
+        carpeta = self.carpeta(clave)
         self.indice.pop(clave, None)
-        shutil.rmtree(self.carpeta(clave), ignore_errors=True)
+        shutil.rmtree(carpeta, ignore_errors=True)
         self._guardar_indice()
 
     def renombrar(self, viejo: str, nuevo: str, combinar: bool = False) -> str:
@@ -445,6 +490,7 @@ class Biblioteca:
             raise ValueError("Código no válido.")
         if nuevo in self.indice and not combinar:
             raise ValueError("Ya existe un producto con ese código.")
+        carp_v, carp_n = self.carpeta(viejo), self.carpeta(nuevo)
         origen = self.indice.pop(viejo)
         destino = self.indice.setdefault(nuevo, {"nombre": origen.get("nombre", nuevo), "aliases": []})
         destino["aliases"] = sorted(set(destino.get("aliases", [])) | set(origen.get("aliases", []))
@@ -452,7 +498,6 @@ class Biblioteca:
         for k, v in origen.items():
             if k not in ("aliases", "nombre") and k not in destino:
                 destino[k] = v
-        carp_v, carp_n = self.carpeta(viejo), self.carpeta(nuevo)
         if carp_v.exists():
             carp_n.mkdir(parents=True, exist_ok=True)
             for archivo in carp_v.iterdir():
@@ -466,9 +511,31 @@ class Biblioteca:
     def precio_sugerido(self, clave: str) -> float | None:
         """Precio neto sugerido = costo × (1 + margen %). None si falta el costo o el margen."""
         ficha = self.indice.get(clave.strip().upper(), {})
+        recomendado = ficha.get("precio_recomendado_neto")
+        try:
+            if recomendado is not None and math.isfinite(float(recomendado)) and float(recomendado) > 0:
+                return float(recomendado)
+        except (TypeError, ValueError):
+            pass
         if ficha.get("costo_neto") and ficha.get("margen_pct") is not None:
             return ficha["costo_neto"] * (1 + ficha["margen_pct"] / 100)
         return None
+
+    def clave_vigente(self, clave: str) -> str | None:
+        """Resuelve el código de una ficha aunque se haya renombrado después de cotizar."""
+        if not clave:
+            return None
+        clave = clave.strip().upper()
+        if clave in self.indice:
+            return clave
+        referencia = normalizar(clave)
+        if not referencia:
+            return None
+        coincidencias = [
+            actual for actual, ficha in self.indice.items()
+            if any(normalizar(alias) == referencia for alias in _alias_de_ficha(ficha))
+        ]
+        return coincidencias[0] if len(coincidencias) == 1 else None
 
     def filas_catalogo(self) -> list[dict]:
         filas = []
@@ -493,10 +560,7 @@ class Biblioteca:
         for clave, datos in self.indice.items():
             if identidad_conflictiva(clave, datos):
                 continue
-            aliases = datos.get("aliases", []) or []
-            if not isinstance(aliases, list):
-                aliases = [aliases]
-            for token in [clave, datos.get("nombre", "")] + aliases:
+            for token in [clave, datos.get("nombre", ""), *_alias_de_ficha(datos)]:
                 n = normalizar(token)
                 if len(n) >= 3 and n in dn and len(n) > largo:
                     mejor, largo = clave, len(n)
@@ -514,22 +578,20 @@ class Biblioteca:
         if not consulta:
             return []
         self._asegurar_indice_semantico()
-        candidatos = set().union(*(self._semantic_postings.get(token, set()) for token in consulta))
+        atributos_consulta = _atributos_producto(consulta)
+        marcas_consulta = atributos_consulta[2]
+        candidatos = set().union(*(self._semantic_postings.get(token, ()) for token in consulta))
         resultados = []
         for clave in candidatos:
             ficha = self.indice.get(clave, {})
             mejor = 0.0
-            for tokens in self._semantic_variantes.get(clave, ()):
-                if not tokens or _conflicto_producto(consulta, tokens):
-                    continue
+            for tokens, atributos in self._semantic_variantes.get(clave, ()):
                 comunes = consulta & tokens
-                if not comunes:
+                if not comunes or _conflicto_atributos(atributos_consulta, atributos):
                     continue
                 # F1 sobre tokens: tolera palabras adicionales sin aceptar un solo término genérico.
                 score = 2 * len(comunes) / (len(consulta) + len(tokens))
-                marcas_consulta = consulta & _MARCAS_PRODUCTO
-                marcas_candidata = tokens & _MARCAS_PRODUCTO
-                if marcas_consulta and not marcas_candidata:
+                if marcas_consulta and not atributos[2]:
                     score *= 0.75
                 if len(comunes) == 1 and len(consulta) > 1:
                     score *= 0.65

@@ -2,12 +2,6 @@
 
 Gioval puede compartir una única biblioteca entre los usuarios. **Si no tienes presupuesto, utiliza el servidor propio gratuito descrito en [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md).** Un computador Windows que ya tengas ejecuta el servidor y guarda el catálogo de productos, las fotos, las fichas técnicas y el historial comercial de cotizaciones. Los demás equipos abren ese mismo servidor.
 
-## Alternativa alojada en Render (pago)
-
-El archivo `render.yaml` configura un servicio de Render con disco persistente. Este disco requiere un servicio web de pago; no pulses Apply si no quieres contratar ese plan. La modalidad gratuita de Render pierde los cambios del sistema de archivos al reiniciar o suspenderse, así que no debe usarse como única copia de la biblioteca.
-
-Para la ruta gratuita, sigue paso a paso [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md).
-
 ## Acceso y datos
 
 `GIOVAL_REQUIRE_ACCESS=true` activa el acceso protegido y el modo de privacidad de la biblioteca compartida. En ese modo se comparten:

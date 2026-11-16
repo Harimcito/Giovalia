@@ -22,9 +22,11 @@ import cotizador as ct
 import historial as hs
 import lector_ia as li
 import mercado_publico as mp
-from radar_comercial import ui_montos as montos
+import ui_montos as montos
 import pdf_cotizacion as pc
 import revisor as rv
+import catalogo_clientes as cc
+from productos_ui import editar_ficha
 
 APP_DIR = Path(os.environ.get("GIOVAL_DATA_DIR") or Path(__file__).parent).expanduser().resolve()
 E = st.session_state
@@ -50,6 +52,24 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+if GIOVAL_REQUIRE_ACCESS:
+    if not GIOVAL_ACCESS_PASSWORD:
+        st.error("El acceso a la biblioteca compartida no está configurado.")
+        st.stop()
+    if not E.get("gioval_autenticado"):
+        st.title("Giovalia · Biblioteca compartida")
+        with st.form("gioval_login_compartido", clear_on_submit=True):
+            clave_ingresada = st.text_input(
+                "Clave de acceso", type="password", key="gioval_clave", autocomplete="current-password",
+            )
+            entrar = st.form_submit_button("Entrar a Gioval", type="primary")
+        if entrar:
+            if hmac.compare_digest(clave_ingresada.encode("utf-8"), GIOVAL_ACCESS_PASSWORD.encode("utf-8")):
+                E["gioval_autenticado"] = True
+                st.rerun()
+            st.error("La clave no es correcta.")
+        st.stop()
 
 
 def crear_respaldo_biblioteca(carpeta: Path) -> bytes:
@@ -210,8 +230,21 @@ ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
 
 
 # ============================================================== FUNCIONES COMUNES
-VISTAS = ["Cotizar", "Historial", "Biblioteca"]
+VISTAS = ["Cotizar", "Historial", "Biblioteca", "Catálogo PDF"]
 OPCIONES_PRECIO = ["Incluyen IVA (lo que paga el cliente)", "Son netos (sin IVA)"]
+FUENTE_TEXTO = "Lo escribo o pego aquí"
+FUENTE_TABLA = "Subir Excel o CSV"
+FUENTE_DOCUMENTO = "Subir PDF o foto"
+FUENTE_MERCADO_PUBLICO = "Mercado Público"
+FUENTE_COTIZACION = "Cotización en Excel"
+ETIQUETAS_FUENTES = {
+    FUENTE_TEXTO: ":material/edit_note: Texto",
+    FUENTE_TABLA: ":material/table_view: Excel o CSV",
+    FUENTE_DOCUMENTO: ":material/description: PDF o foto",
+    FUENTE_MERCADO_PUBLICO: ":material/account_balance: Mercado Público",
+    FUENTE_COTIZACION: ":material/upload_file: Cotización en Excel",
+}
+
 if E.get("vista") in {"Mis productos", "Catálogo"}:
     E["vista"] = VISTAS[2]
 elif E.get("vista") in {"Nueva cotización", "Inicio"}:
@@ -231,6 +264,7 @@ def limpiar_estado_trabajo():
     """Reinicia la cotización actual sin cerrar el login ni borrar preferencias útiles."""
     conservar = (
         "gioval_autenticado",
+        "config_carpeta",
         "config_usar_lo",
         "config_api_key",
         "_mercado_publico_ticket",
@@ -260,18 +294,22 @@ def ir_a(paso: int):
 
 def mostrar_pasos(actual: int):
     nombres = ["Pedido", "Productos", "Fotos y fichas", "PDF"]
-    with st.container(horizontal=True, vertical_alignment="center"):
-        for i, nombre in enumerate(nombres, 1):
-            if i < actual:
-                st.badge(f"{i}. {nombre}", icon=":material/check_circle:", color="green")
-            elif i == actual:
-                st.badge(f"{i}. {nombre}", icon=":material/edit_note:", color="blue")
-            else:
-                st.badge(f"{i}. {nombre}", icon=":material/radio_button_unchecked:", color="gray")
-    st.progress((actual - 1) / 3, text=f"Etapa {actual} de 4 · {nombres[actual - 1]}")
-    if E.get("_ultima_guarda"):
-        etiqueta = "biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "este computador"
-        st.caption(f"Guardado en {etiqueta} · {E['_ultima_guarda']}")
+    with st.container(border=True):
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.markdown(f"**Cotización {E.get('cot_numero', '')}**")
+            if E.get("_ultima_guarda") and not E.get("_conflicto_guardado"):
+                st.badge(f"Guardada · {E['_ultima_guarda']}", icon=":material/cloud_done:", color="green")
+            st.button("Borradores", icon=":material/arrow_back:", type="tertiary",
+                      key="cotizacion_volver_borradores", on_click=limpiar_estado_trabajo,
+                      disabled=bool(E.get("_conflicto_guardado")))
+        with st.container(horizontal=True, vertical_alignment="center"):
+            for i, nombre in enumerate(nombres, 1):
+                if i < actual:
+                    st.badge(f"{i}. {nombre}", icon=":material/check:", color="green")
+                elif i == actual:
+                    st.badge(f"{i}. {nombre}", icon=":material/edit_note:", color="blue", help="Etapa actual")
+                else:
+                    st.badge(f"{i}. {nombre}", color="gray")
 
 
 def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
@@ -677,16 +715,17 @@ def mostrar_totales():
         a, b, c = st.columns(3)
         a.metric("Neto", rv.clp(tot["neto"]))
         b.metric("IVA (19 %)", rv.clp(tot["iva"]))
-        c.metric("Total", rv.clp(tot["total"]))
+        c.metric("Total con IVA", rv.clp(tot["total"]), border=True)
         pendientes = [
             ln for ln in E.get("lineas", [])
             if _esta_marcado(ln.get("incluir", ln.get("es_producto", True)), True)
             and ln.get("unitario") is None and ln.get("precio_neto") is None
         ]
         if pendientes:
-            st.caption(
-                f"Pendiente de precio: {len(pendientes)} línea(s). "
-                "El total mostrado no suma los precios que faltan."
+            st.badge(
+                f"{len(pendientes)} {'línea sin precio' if len(pendientes) == 1 else 'líneas sin precio'}",
+                icon=":material/pending_actions:", color="orange",
+                help="El total corresponde a los productos incluidos con precio registrado.",
             )
 
 
@@ -694,6 +733,10 @@ def mostrar_resumen_lineas():
     """Resumen de lectura con subtotal por línea, precio pendiente e inclusión."""
     tabla = E.get("tabla_edit")
     if not isinstance(tabla, pd.DataFrame) or tabla.empty:
+        return
+    resumen = st.expander("Subtotales por producto", icon=":material/table_rows:", key="subtotal_lineas",
+                          on_change="rerun")
+    if not resumen.open:
         return
     con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
     etiqueta = "con IVA" if con_iva else "neto"
@@ -724,7 +767,7 @@ def mostrar_resumen_lineas():
         })
     if not filas:
         return
-    with st.expander("Resumen por producto y subtotales", expanded=True):
+    with resumen:
         montos.tabla(
             pd.DataFrame(filas), hide_index=True, width="stretch",
             column_config={
@@ -1037,7 +1080,7 @@ def boton_actualizar_totales():
             width="stretch",
         )
     with c_ayuda:
-        st.caption("Al terminar de editar, presiona Enter o haz clic fuera de la celda. Luego selecciona «Actualizar totales» para guardar y recalcular.")
+        st.caption("Presiona Enter para aplicar el valor de la celda.")
 
     if actualizar:
         persistir_borrador()
@@ -1085,7 +1128,7 @@ def refrescar_excel_actual():
             E["ruta"] = Path(registro["xlsx"])
 
 
-def iniciar_borrador():
+def iniciar_borrador(fuente: str = FUENTE_TEXTO):
     """Crea inmediatamente una cotización vacía, lista para guardar avances."""
     limpiar_estado_trabajo()
     fecha = date.today()
@@ -1094,7 +1137,7 @@ def iniciar_borrador():
                                 con_iva=True, fecha=fecha, origen="pedido")
     E.update(
         cot_id=cot_id, cot_numero=numero, c_fecha=fecha, precios_modo=OPCIONES_PRECIO[0],
-        paso=1, vista=VISTAS[0], lineas=[], orden_texto="", fuente_orden="",
+        paso=1, vista=VISTAS[0], lineas=[], orden_texto="", fuente_orden="", fuente_pedido=fuente,
         editor_version=1, editado_manual=False, origen_pedido="pedido",
         _cotizacion_version=(hist.obtener(cot_id) or {}).get("actualizado"),
     )
@@ -1232,23 +1275,25 @@ def restaurar_borrador(cot_id: int):
 
 def selector_borradores():
     """Inicio operativo: atajos, indicadores, borradores y cotizaciones recientes."""
-    registros = hist.listar()
+    registros = hist.listar(incluir_datos=False)
     borradores = [r for r in registros if r.get("estado") == "Borrador"]
     cotizaciones_aceptadas = sum(
         float(r.get("total") or 0) for r in registros if r.get("estado") == "Aceptada"
     )
 
-    with st.container(border=True):
-        titulo, accion = st.columns([3, 1], vertical_alignment="center")
-        with titulo:
-            st.caption("GIOVAL · COTIZADOR COMERCIAL")
-            st.title("Cotiza sin compromiso")
-            st.caption("Prepara una propuesta clara con tus productos, precios y fotos guardados en la biblioteca.")
-        with accion:
-            st.button(
-                "Nueva cotización", icon=":material/add:", type="primary",
-                width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
-            )
+    titulo, accion = st.columns([3, 1], vertical_alignment="center")
+    with titulo:
+        st.title("Cotizaciones")
+        st.caption("Inicia una propuesta o retoma un borrador guardado.")
+    with accion:
+        st.button(
+            "Nueva cotización", icon=":material/add:", type="primary",
+            width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
+        )
+        st.button(
+            "Desde Mercado Público", icon=":material/account_balance:", width="stretch",
+            on_click=iniciar_borrador, args=(FUENTE_MERCADO_PUBLICO,), key="inicio_mercado_publico",
+        )
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Cotizaciones", len(registros), border=True)
@@ -1256,10 +1301,10 @@ def selector_borradores():
     m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas), border=True)
     m4.metric("Productos en biblioteca", len(bib.indice), border=True)
 
-    izq, der = st.columns([1.15, 1])
+    izq, der = st.columns([1, 1.35])
     with izq:
         with st.container(border=True):
-            st.subheader("Retomar un borrador")
+            st.subheader("Borradores")
             if borradores:
                 opciones = {
                     (
@@ -1274,16 +1319,12 @@ def selector_borradores():
                     key="borrador_a_retomar", label_visibility="collapsed",
                 )
                 st.button(
-                    "Continuar cotización", icon=":material/arrow_forward:", type="primary",
+                    "Abrir borrador", icon=":material/arrow_forward:",
                     width="stretch", on_click=restaurar_borrador, args=(opciones[elegido],),
                     key="inicio_retomar_borrador",
                 )
             else:
                 st.caption("No tienes borradores pendientes.")
-                st.button(
-                    "Crear una cotización", icon=":material/add:", type="primary",
-                    width="stretch", on_click=iniciar_borrador, key="inicio_comenzar_ahora",
-                )
     with der:
         with st.container(border=True):
             st.subheader("Actividad reciente")
@@ -1383,10 +1424,8 @@ def _firma_lineas_borrador(lineas):
     return tuple(firma)
 
 
-def pedido_ui():
-    st.caption("El borrador se guarda mientras trabajas. Puedes volver a él desde el inicio.")
+def pedido_ui(fuente: str):
     E.setdefault("precios_modo", OPCIONES_PRECIO[0])
-    E.setdefault("fuente_pedido", "Lo escribo o pego aquí")
     con_iva = st.segmented_control(
         "Los precios que ingresarás",
         OPCIONES_PRECIO,
@@ -1396,42 +1435,25 @@ def pedido_ui():
         width="content",
         persist_state="session",
     ) == OPCIONES_PRECIO[0]
-    FUENTES = ["Lo escribo o pego aquí", "Subir Excel o CSV", "Subir PDF o foto", "Mercado Público"]
-    etiqueta_fuente = {
-        FUENTES[0]: ":material/edit_note: Texto",
-        FUENTES[1]: ":material/table_view: Excel o CSV",
-        FUENTES[2]: ":material/description: PDF o foto",
-        FUENTES[3]: ":material/account_balance: Mercado Público",
-    }
-    fuente = st.segmented_control(
-        "Origen del pedido",
-        FUENTES,
-        key="fuente_pedido",
-        format_func=lambda valor: etiqueta_fuente[valor],
-        required=True,
-        width="stretch",
-        wrap=True,
-        persist_state="session",
-    )
     E["fuente_orden"] = fuente
     texto = st.text_area(
         "Escribe un producto por línea, con su cantidad adelante",
         placeholder="10 Tóner HP CF283A\n15 Tóner Kyocera TK-3182\n2 Resma carta",
         height=170, key="orden_texto",
-    ) if fuente == FUENTES[0] else ""
+    ) if fuente == FUENTE_TEXTO else ""
     archivo_orden, archivos_ia = None, []
     archivos_mp = []
     codigo_mp = ""
-    if fuente == FUENTES[1]:
+    if fuente == FUENTE_TABLA:
         archivo_orden = st.file_uploader("Sube el Excel o CSV del pedido", type=["xlsx", "csv"], key="orden_archivo")
-    elif fuente == FUENTES[2]:
+    elif fuente == FUENTE_DOCUMENTO:
         archivos_ia = st.file_uploader("Sube el PDF o las fotos del pedido (puedes subir varias)",
                                        type=["pdf", "jpg", "jpeg", "png", "webp"],
                                        accept_multiple_files=True, key="orden_ia")
         st.caption("El pedido se envía a OpenAI para leerlo. Después revisa que haya quedado bien.")
         if not api_key:
             st.warning("Para leer PDF o fotos necesito la clave de OpenAI (Ajustes, arriba a la derecha).")
-    elif fuente == FUENTES[3]:
+    elif fuente == FUENTE_MERCADO_PUBLICO:
         codigo_mp = st.text_input(
             "Código de Compra Ágil u orden de compra",
             placeholder="635-659-COT26 o 635-659-AG26",
@@ -1452,10 +1474,10 @@ def pedido_ui():
         if isinstance(detalle_mostrado, dict) and detalle_mostrado.get("codigo", "").casefold() == codigo_mp.casefold():
             _mostrar_detalle_mercado_publico(detalle_mostrado)
 
-    etiqueta_leer = "Consultar y cargar productos" if fuente == FUENTES[3] else "Leer el pedido"
+    etiqueta_leer = "Consultar y cargar productos" if fuente == FUENTE_MERCADO_PUBLICO else "Leer el pedido"
     if st.button(etiqueta_leer, icon=":material/description:", type="primary", width="stretch"):
         try:
-            if fuente == FUENTES[3]:
+            if fuente == FUENTE_MERCADO_PUBLICO:
                 if not codigo_mp:
                     raise ValueError("Ingresa el código de la Compra Ágil o de la orden de compra.")
                 mp.clasificar_codigo(codigo_mp)
@@ -1479,12 +1501,12 @@ def pedido_ui():
                         raise ValueError("Para leer PDF, Word o imágenes necesitas configurar OpenAI en Ajustes. Excel y CSV no requieren esa clave.")
                     with st.spinner("Leyendo los adjuntos y contrastando productos…"):
                         filas.extend(mp.leer_adjuntos(archivos_mp, api_key))
-            elif fuente == FUENTES[2]:
+            elif fuente == FUENTE_DOCUMENTO:
                 if not archivos_ia:
                     raise ValueError("Primero sube un PDF o una foto.")
                 with st.spinner("Leyendo el pedido…"):
                     filas = li.leer_orden_ia([(f.name, f.getvalue()) for f in archivos_ia], api_key)
-            elif fuente == FUENTES[1]:
+            elif fuente == FUENTE_TABLA:
                 if not archivo_orden:
                     raise ValueError("Primero sube un Excel o CSV.")
                 tmp = Path(tempfile.mkdtemp()) / archivo_orden.name
@@ -1496,7 +1518,7 @@ def pedido_ui():
             st.error(f"No pude leer el pedido: {exc}")
             filas = []
         if not filas:
-            if fuente == FUENTES[3] and E.get("_mercado_publico_detalle"):
+            if fuente == FUENTE_MERCADO_PUBLICO and E.get("_mercado_publico_detalle"):
                 st.warning("La plataforma no entregó productos en el listado normal. Descarga un adjunto y súbelo arriba para extraer los productos.")
             else:
                 st.warning("No encontré productos. Revisa el pedido e inténtalo de nuevo.")
@@ -1543,7 +1565,7 @@ def pedido_ui():
                 )
             if E.get("_error_match_ia"):
                 st.info("No pude consultar la IA esta vez; puedes continuar y revisar los productos sin coincidencia.")
-            if fuente == FUENTES[3] and not E.get("_mercado_publico_detalle", {}).get("productos"):
+            if fuente == FUENTE_MERCADO_PUBLICO and not E.get("_mercado_publico_detalle", {}).get("productos"):
                 st.warning("La plataforma no entregó productos en el listado normal. Revisa los adjuntos de arriba: puedes descargar los archivos del portal y cargarlos aquí para extraer y agregar sus productos.")
 
     st.subheader("Datos de la cotización")
@@ -1573,7 +1595,7 @@ def pedido_ui():
     st.divider()
     st.subheader("Productos y precios")
     st.caption("Puedes cambiar cantidades, nombres y precios, agregar filas y dejar precios pendientes. Los totales se actualizan antes de avanzar.")
-    if fuente == FUENTES[3] and E.get("_mercado_publico_detalle"):
+    if fuente == FUENTE_MERCADO_PUBLICO and E.get("_mercado_publico_detalle"):
         st.info("Las líneas del listado y de cada adjunto se mantienen separadas y muestran su origen. Si describen el mismo producto con datos distintos, contrástalas y edita la versión que corresponda antes de continuar.")
     orden_base = E.get("orden_df_base")
     if not isinstance(orden_base, pd.DataFrame):
@@ -1755,35 +1777,33 @@ def cotizacion_ui():
 
 
 def paso_1():
-    st.title("Prepara tu cotización", icon=":material/receipt_long:")
-    st.caption("Inicia con un pedido, una solicitud de Mercado Público o una cotización en Excel.")
-    if not api_key:
-        st.info(
-            "Configura la clave de OpenAI en Ajustes para leer pedidos en PDF o imagen y mejorar la identificación de productos.",
-            icon=":material/description:",
-        )
-    E.setdefault("tipo_entrada_cotizacion", "Pedido nuevo")
-    opcion_inicio = st.segmented_control(
-        "Punto de partida",
-        ["Pedido nuevo", "Cotización en Excel"],
-        key="tipo_entrada_cotizacion",
-        format_func=lambda valor: (
-            ":material/playlist_add: Pedido nuevo"
-            if valor == "Pedido nuevo" else ":material/description: Cotización en Excel"
-        ),
+    st.title("Pedido")
+    st.caption("Elige cómo cargar los productos de la cotización.")
+    if E.get("fuente_pedido") not in ETIQUETAS_FUENTES:
+        E["fuente_pedido"] = FUENTE_TEXTO
+    fuente = st.segmented_control(
+        "Origen del pedido",
+        list(ETIQUETAS_FUENTES),
+        key="fuente_pedido",
+        format_func=ETIQUETAS_FUENTES.__getitem__,
         required=True,
         width="stretch",
+        wrap=True,
         persist_state="session",
     )
-    if opcion_inicio == "Pedido nuevo":
-        pedido_ui()
-    else:
+    if fuente == FUENTE_COTIZACION:
         cotizacion_ui()
+    else:
+        pedido_ui(fuente)
 
 
 def agregar_desde_catalogo():
     """Permite buscar un producto conocido e incorporarlo a la cotización actual."""
-    with st.expander("Agregar producto desde mi catálogo", expanded=False):
+    catalogo = st.expander("Agregar desde la biblioteca", icon=":material/library_add:",
+                           key="agregar_desde_catalogo", on_change="rerun")
+    if not catalogo.open:
+        return
+    with catalogo:
         filas = bib.filas_catalogo()
         if not filas:
             st.info("Todavía no hay productos en el catálogo. Puedes agregarlos aquí o desde una cotización.")
@@ -1847,28 +1867,28 @@ def agregar_desde_catalogo():
 
 
 # ============================================================== PASO 2: PRODUCTOS
-def revisar_asociaciones_catalogo():
+def revisar_asociaciones_catalogo(pendientes: list[str]):
     """Permite vincular manualmente las líneas que no tuvieron una coincidencia suficiente."""
-    pendientes = productos_pendientes_de_asociar(E.get("lineas", []))
     E["_productos_catalogo_revision"] = pendientes
     if not pendientes:
         return
 
-    st.warning(
-        f"{len(pendientes)} producto(s) aún no tienen un vínculo seguro. "
-        "Asócialos con la biblioteca para recuperar sus precios y archivos guardados.",
-        title="Revisar coincidencias de productos",
-        icon=":material/link_off:",
-    )
     productos = {
         f"{clave} · {_texto_seguro(ficha.get('nombre') or clave)}": clave
         for clave, ficha in sorted(bib.indice.items())
         if not ct.identidad_conflictiva(clave, ficha)
     }
     if not productos:
+        st.caption("Agrega productos a la biblioteca para poder vincularlos a esta cotización.")
         return
     opciones = ["Dejar pendiente"] + list(productos)
-    with st.expander("Vincular con productos guardados", icon=":material/link:", expanded=True):
+    panel = st.expander(
+        f"Revisar coincidencias ({len(pendientes)})", icon=":material/link:",
+        key="revisar_coincidencias", on_change="rerun",
+    )
+    if not panel.open:
+        return
+    with panel:
         st.caption("Elige el producto que corresponde a cada descripción del pedido.")
         for indice, descripcion in enumerate(pendientes):
             normalizada = ct.normalizar(descripcion)
@@ -1918,34 +1938,22 @@ def revisar_asociaciones_catalogo():
 
 
 def paso_2():
-    st.title("Productos y precios", icon=":material/inventory_2:")
-    st.caption("Revisa la descripción, vinculación con biblioteca, cantidades y precios antes de continuar.")
+    st.title("Productos y precios")
+    st.caption("Confirma cantidades, precios y coincidencias con la biblioteca.")
+    estado = st.container(horizontal=True)
+    editor_productos()
     lineas = [ln for ln in E.get("lineas", []) if ln.get("es_producto", True)]
     sin_vinculo = productos_pendientes_de_asociar(lineas)
-    vinculados = sum(bool(_texto_seguro(ln.get("clave_auto"))) for ln in lineas)
-    precio_pendiente = sum(
-        _esta_marcado(ln.get("incluir"), True)
-        and ln.get("unitario") is None and ln.get("precio_neto") is None
-        for ln in lineas
-    )
-    indicadores = st.columns(4)
-    indicadores[0].metric("Productos del pedido", len(lineas), border=True)
-    indicadores[1].metric("Vinculados a biblioteca", vinculados, border=True)
-    indicadores[2].metric("Sin vínculo", len(sin_vinculo), border=True)
-    indicadores[3].metric("Precio por completar", precio_pendiente, border=True)
-    if lineas and not sin_vinculo:
-        st.caption("Los vínculos guardados permiten recuperar los precios, fotos y fichas de cada producto.")
-    if not api_key:
-        st.info(
-            "La clave de OpenAI mejora la identificación de marca, modelo y código.",
-            icon=":material/description:",
-        )
-
-    agregar_desde_catalogo()
-    editor_productos()
-    revisar_asociaciones_catalogo()
+    with estado:
+        if sin_vinculo:
+            etiqueta = "producto sin vínculo" if len(sin_vinculo) == 1 else "productos sin vínculo"
+            st.badge(f"{len(sin_vinculo)} {etiqueta}", icon=":material/link_off:", color="orange")
+        elif lineas:
+            st.badge("Productos vinculados", icon=":material/link:", color="green")
     boton_actualizar_totales()
     mostrar_totales()
+    agregar_desde_catalogo()
+    revisar_asociaciones_catalogo(sin_vinculo)
     mostrar_resumen_lineas()
     editar_cabecera()
     panel_revision()
@@ -2039,9 +2047,24 @@ def guardar_candidato(clave: str, tipo: str, c: dict):
     st.rerun()
 
 
-def tarjeta(clave: str, desc: str):
+def guardar_anexo_subido(clave: str, tipo: str):
+    """Guarda el archivo una vez, al recibirlo desde el selector."""
+    llave = f"{tipo}_{clave}"
+    E.pop(f"error_{llave}", None)
+    subido = E.get(llave)
+    if subido:
+        try:
+            bib.guardar_archivo(clave, tipo, subido.name, subido.getvalue())
+        except (OSError, ValueError) as exc:
+            E[f"error_{llave}"] = f"No pude guardar {subido.name}. {exc}"
+
+
+def estado_anexos(clave: str):
     foto, ficha = bib.archivos(clave)
-    ficha_no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+    return foto, ficha, bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+
+
+def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool):
     aviso_ficha = ""
     if ficha:
         n = menciones_guardada(str(ficha), ficha.stat().st_mtime, clave) if bs.es_codigo(clave) else -2
@@ -2073,8 +2096,13 @@ def tarjeta(clave: str, desc: str):
                 st.badge(
                     f"Ficha: {estado_ficha}",
                     icon=":material/description:",
-                    color="green" if ficha or ficha_no_requerida else "orange",
+                    color="green" if estado_ficha == "Disponible" else (
+                        "gray" if estado_ficha == "No requerida" else "orange"
+                    ),
                 )
+            for tipo in ("foto", "ficha"):
+                if aviso := E.get(f"error_{tipo}_{clave}"):
+                    st.error(aviso)
             nueva_no_requerida = st.checkbox(
                 "Este producto no requiere ficha técnica",
                 value=ficha_no_requerida,
@@ -2087,17 +2115,21 @@ def tarjeta(clave: str, desc: str):
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
-            if b1.button("Buscar archivos faltantes", key=f"b_{clave}", width="stretch"):
+            buscar_ficha = not ficha and not ficha_no_requerida
+            if b1.button("Buscar archivos faltantes", key=f"b_{clave}", width="stretch",
+                         disabled=bool(foto) and not buscar_ficha):
                 with st.spinner("Buscando…"):
-                    for aviso in buscar_para(clave, q_foto, q_ficha, fotos=not bool(foto), fichas=not bool(ficha)):
+                    for aviso in buscar_para(clave, q_foto, q_ficha, fotos=not foto, fichas=buscar_ficha):
                         st.warning(aviso)
             with b2.popover("Más opciones", width="stretch"):
                 st.text_input("Buscar la foto como", value=sug_foto, key=f"qf_{clave}")
                 st.text_input("Buscar la ficha como", value=sug_ficha, key=f"qd_{clave}")
                 if ficha and st.button("Sacar la foto desde la ficha", key=f"xf_{clave}"):
                     E[f"cand_foto_{clave}"] = bs.fotos_de_ficha(ficha.read_bytes())
-                st.file_uploader("Subir mi propia foto", type=["jpg", "jpeg", "png", "webp"], key=f"foto_{clave}")
-                st.file_uploader("Subir mi propia ficha (PDF)", type=["pdf"], key=f"ficha_{clave}")
+                st.file_uploader("Subir mi propia foto", type=["jpg", "jpeg", "png", "webp"], key=f"foto_{clave}",
+                                 on_change=guardar_anexo_subido, args=(clave, "foto"))
+                st.file_uploader("Subir mi propia ficha (PDF)", type=["pdf"], key=f"ficha_{clave}",
+                                 on_change=guardar_anexo_subido, args=(clave, "ficha"))
                 url_foto = st.text_input("…o pegar el enlace de una imagen", key=f"urlf_{clave}")
                 if st.button("Usar ese enlace de imagen", key=f"dlf_{clave}") and url_foto:
                     try:
@@ -2173,28 +2205,13 @@ def paso_3():
         if st.button("← Volver"):
             ir_a(2)
         return
-    for clave in claves:
-        for tipo in ("foto", "ficha"):
-            subido = E.get(f"{tipo}_{clave}")
-            if subido:
-                bib.guardar_archivo(clave, tipo, subido.name, subido.getvalue())
-
-    def archivos_necesarios(clave):
-        foto, ficha = bib.archivos(clave)
-        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
-        return bool(foto and (ficha or no_requerida))
-
-    listos = sum(1 for clave in claves if archivos_necesarios(clave))
+    anexos = {clave: estado_anexos(clave) for clave in claves}
+    faltan = [clave for clave, (foto, ficha, opcional) in anexos.items() if not foto or not (ficha or opcional)]
+    listos = len(claves) - len(faltan)
     st.progress(
         listos / len(claves),
         text=f"{listos} de {len(claves)} productos listos · foto y ficha, o ficha marcada como no requerida",
     )
-    faltan = []
-    for clave in claves:
-        foto, ficha = bib.archivos(clave)
-        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
-        if not foto or (not ficha and not no_requerida):
-            faltan.append(clave)
     if faltan:
         st.caption("Primero se buscan los archivos que faltan; después puedes revisar cada resultado y confirmar si corresponde.")
         if st.button(f"Buscar fotos y fichas pendientes ({len(faltan)})", icon=":material/search:", type="primary", width="stretch"):
@@ -2204,8 +2221,7 @@ def paso_3():
             estado_busqueda.caption("Buscando…")
             hubo_error = False
             for i, clave in enumerate(faltan):
-                foto, ficha = bib.archivos(clave)
-                no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+                foto, ficha, no_requerida = anexos[clave]
                 sug_foto, sug_ficha = consultas_sugeridas(clave, descripciones[clave])
                 hubo_error |= bool(buscar_para(
                     clave, E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha),
@@ -2231,7 +2247,7 @@ def paso_3():
         "Buscar producto", key="filtro_anexos_texto",
         placeholder="Código, marca o descripción",
     )
-    estado_anexos = c_estado.selectbox(
+    filtro_anexos = c_estado.selectbox(
         "Mostrar",
         ["Todos", "Incompletos", "Sin foto", "Sin ficha pendiente", "Ficha no requerida", "Completos"],
         key="filtro_anexos_estado",
@@ -2239,26 +2255,25 @@ def paso_3():
     consulta_anexos = busqueda_anexos.strip().casefold()
     visibles = []
     for clave in claves:
-        foto, ficha = bib.archivos(clave)
-        no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+        foto, ficha, no_requerida = anexos[clave]
         completo = bool(foto and (ficha or no_requerida))
         if consulta_anexos and consulta_anexos not in (clave + " " + descripciones[clave]).casefold():
             continue
-        if estado_anexos == "Incompletos" and completo:
+        if filtro_anexos == "Incompletos" and completo:
             continue
-        if estado_anexos == "Sin foto" and foto:
+        if filtro_anexos == "Sin foto" and foto:
             continue
-        if estado_anexos == "Sin ficha pendiente" and (ficha or no_requerida):
+        if filtro_anexos == "Sin ficha pendiente" and (ficha or no_requerida):
             continue
-        if estado_anexos == "Ficha no requerida" and not no_requerida:
+        if filtro_anexos == "Ficha no requerida" and not no_requerida:
             continue
-        if estado_anexos == "Completos" and not completo:
+        if filtro_anexos == "Completos" and not completo:
             continue
         visibles.append(clave)
     st.caption(f"Mostrando {len(visibles)} de {len(claves)} productos. El filtro solo cambia la vista; no excluye productos de la cotización.")
     if visibles:
         for clave in visibles:
-            tarjeta(clave, descripciones[clave])
+            tarjeta(clave, descripciones[clave], *anexos[clave])
     else:
         st.info("No hay productos que coincidan con este filtro.")
 
@@ -2580,7 +2595,7 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
 
 def historial_cotizaciones():
     E.setdefault("h_ver", 0)
-    todos = hist.listar()
+    todos = hist.listar(incluir_datos=False)
     if not todos:
         st.info("Todavía no hay cotizaciones. Cada vez que crees una, quedará guardada aquí con su número.")
         return
@@ -2599,7 +2614,7 @@ def historial_cotizaciones():
         "Período", ["Todas las fechas", "Últimos 30 días", "Últimos 90 días", "Este año"],
         key="h_periodo",
     )
-    regs = hist.listar(texto, estado)
+    regs = hist.listar(texto, estado, incluir_datos=False) if texto.strip() or estado != "Todos" else todos
     hoy = date.today()
     if periodo == "Últimos 30 días":
         minimo = hoy - timedelta(days=30)
@@ -2721,7 +2736,7 @@ def clientes_ui():
 
 
 def vista_historial():
-    st.title("Cotizaciones", icon=":material/receipt_long:")
+    st.title("Historial de cotizaciones")
     if GIOVAL_REQUIRE_ACCESS:
         st.caption(
             "Biblioteca compartida: se sincronizan los productos y el historial comercial "
@@ -2753,6 +2768,11 @@ def borrar_producto(clave: str):
     E["p_msg"] = ("ok", f"Eliminé {clave}.")
 
 
+def abrir_producto_desde_catalogo(clave: str):
+    E.update(vista=VISTAS[2], p_sel=clave, p_texto="", p_filtro_estado="Todos")
+    st.rerun()
+
+
 def vista_productos():
     E.setdefault("p_ver", 0)
     st.title("Biblioteca de productos", icon=":material/inventory_2:")
@@ -2768,10 +2788,14 @@ def vista_productos():
         if st.button("Agregar producto", icon=":material/add:", disabled=not nuevo_cod.strip(),
                      key="cat_agregar_producto"):
             clave_nueva = nuevo_cod.strip().upper()
-            bib.registrar(clave_nueva, nombre=nuevo_nom.strip() or clave_nueva)
-            E["p_ver"] += 1
-            st.success(f"Producto {clave_nueva} agregado al catálogo.")
-            st.rerun()
+            try:
+                bib.registrar(clave_nueva, nombre=nuevo_nom.strip() or clave_nueva)
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                E["p_ver"] += 1
+                E["p_msg"] = ("ok", f"Producto {clave_nueva} agregado al catálogo.")
+                st.rerun()
 
     todas = bib.filas_catalogo()
     if not todas:
@@ -2922,7 +2946,8 @@ def vista_productos():
     codigos = [f["clave"] for f in filas]
     elegido = st.selectbox("Selecciona un producto", codigos, key="p_sel")
     producto_elegido = next(f for f in filas if f["clave"] == elegido)
-    tarjeta(elegido, producto_elegido["nombre"])
+    tarjeta(elegido, producto_elegido["nombre"], *estado_anexos(elegido))
+    editar_ficha(bib, elegido)
     with st.expander("Acciones avanzadas: cambiar código o eliminar"):
         st.text_input("Nuevo código", key=f"ren_{elegido}")
         st.checkbox("Combinar si ese código ya existe", key=f"comb_{elegido}")
@@ -2938,275 +2963,211 @@ def vista_productos():
 
 
 def configuracion_compacta():
-    """Muestra opciones secundarias bajo demanda y devuelve los servicios activos de la app."""
+    """Resuelve los servicios de sesión y carga Ajustes solo cuando se abre."""
     carpeta_compartida = str((APP_DIR / "biblioteca").resolve())
-    if not GIOVAL_REQUIRE_ACCESS:
-        E.setdefault("config_carpeta", carpeta_compartida)
-    api_key, origen_key = li.buscar_api_key(APP_DIR)
-    ticket_mp, origen_ticket_mp = mp.buscar_ticket(APP_DIR)
-    if not ticket_mp:
-        ticket_mp = str(
-            E.get("_mercado_publico_ticket")
-            or E.get("config_ticket_mercado_publico", "")
-        ).strip()
-        if ticket_mp:
-            origen_ticket_mp = "esta sesión"
+    carpeta = carpeta_compartida if GIOVAL_REQUIRE_ACCESS else E.get("config_carpeta", carpeta_compartida)
+    ruta = str(Path(carpeta).resolve())
+    servicios = E.get("_servicios_sesion")
+    if not isinstance(servicios, dict) or servicios.get("carpeta") != ruta:
+        servicios = {"carpeta": ruta, "biblioteca": ct.Biblioteca(ruta), "historial": hs.Historial(ruta)}
+        E["_servicios_sesion"] = servicios
+    else:
+        servicios["biblioteca"].refrescar_si_cambio()
 
-    with st.popover(
-        "Ajustes",
-        icon=":material/settings:",
-        type="secondary",
-        width="content",
-        key="settings-popover",
-        help="Preferencias, conexión de IA, numeración y copia de seguridad.",
-    ):
-        st.markdown("### Preferencias")
-        st.caption("Las opciones avanzadas están aquí para mantener despejada la pantalla de trabajo.")
+    conexion_ia = li.buscar_api_key(APP_DIR)
+    conexion_mp = mp.buscar_ticket(APP_DIR)
+    ajustes = st.popover("Ajustes", icon=":material/settings:", key="settings-popover", on_change="rerun")
+    if ajustes.open:
+        with ajustes:
+            mostrar_preferencias(carpeta_compartida, servicios, conexion_ia, conexion_mp)
 
+    api_key = str(conexion_ia[0] or E.get("config_api_key", "")).strip()
+    usar_lo = bool(E.get("config_usar_lo", False))
+    ticket_mp = str(conexion_mp[0] or E.get("_mercado_publico_ticket", "")).strip()
+    return carpeta, servicios["biblioteca"], servicios["historial"], api_key, usar_lo, ticket_mp
+
+
+def mostrar_preferencias(carpeta_compartida, servicios, conexion_ia, conexion_mp):
+    """Muestra conexiones, numeración y respaldo de la biblioteca activa."""
+    bib_panel, hist_panel = servicios["biblioteca"], servicios["historial"]
+    api_key, origen_key = conexion_ia
+    ticket_mp, origen_ticket_mp = conexion_mp
+    st.markdown("### Preferencias")
+
+    if GIOVAL_REQUIRE_ACCESS:
+        st.text_input(
+            "Biblioteca compartida",
+            value=carpeta_compartida,
+            disabled=True,
+            help="Todos los usuarios autorizados trabajan sobre estos mismos datos.",
+            key="config_carpeta_compartida",
+        )
+        st.caption("Los cambios quedan guardados en el servidor central y se ven en las demás instalaciones.")
+    else:
+        st.text_input(
+            "Carpeta de datos y productos",
+            value=carpeta_compartida,
+            key="config_carpeta",
+            persist_state="session",
+            help="Normalmente puedes dejar la biblioteca de este computador como está.",
+        )
+    st.divider()
+    st.markdown("**Conexión de inteligencia artificial**")
+    if api_key:
+        st.caption(f"Conectada · Clave encontrada en {origen_key}")
+    elif GIOVAL_REQUIRE_ACCESS:
+        st.caption(
+            "La IA no está configurada en el servidor. El administrador puede definir "
+            "OPENAI_API_KEY en las variables del servicio Render; no se guardan claves "
+            "personales desde una sesión compartida."
+        )
+    else:
+        api_key = st.text_input(
+            "Clave de OpenAI",
+            type="password",
+            key="config_api_key",
+            persist_state="session",
+            help="Se usa para interpretar pedidos en PDF o foto y mejorar la identificación de productos.",
+        )
+        if api_key and st.button(
+            "Guardar clave",
+            icon=":material/save:",
+            key="config_guardar_api",
+            width="stretch",
+        ):
+            try:
+                li.guardar_api_key(APP_DIR, api_key)
+                st.success("Clave guardada en este computador.")
+            except (OSError, ValueError) as exc:
+                st.error(f"No pude guardar la clave en el archivo .env. Comprueba los permisos de esta carpeta. Detalle: {exc}")
+
+    st.divider()
+    st.markdown("**Conexión a Mercado Público**")
+    if ticket_mp:
+        st.caption(f"Conectada · Ticket encontrado en {origen_ticket_mp}")
+    elif GIOVAL_REQUIRE_ACCESS:
+        st.caption(
+            "El administrador debe definir MERCADO_PUBLICO_TICKET en los secretos de Streamlit "
+            "o como variable privada del servidor."
+        )
+    else:
+        if "_mercado_publico_ticket" in E and "config_ticket_mercado_publico" not in E:
+            E["config_ticket_mercado_publico"] = E["_mercado_publico_ticket"]
+        ticket_mp = st.text_input(
+            "Ticket API de Mercado Público",
+            type="password",
+            key="config_ticket_mercado_publico",
+            on_change=guardar_ticket_mp_sesion,
+            help="Se usa para consultar solicitudes Compra Ágil y órdenes por código. No se incluye en las cotizaciones.",
+        )
+        st.caption("Se conserva solo en la sesión actual. También puedes definir MERCADO_PUBLICO_TICKET en los secretos privados del servidor.")
+
+    with st.expander("Opciones para crear el PDF", expanded=False):
+        st.checkbox(
+            "Usar LibreOffice para convertir a PDF",
+            value=False,
+            key="config_usar_lo",
+            persist_state="session",
+            help="Déjalo desmarcado salvo que necesites conservar exactamente el formato de Excel.",
+        )
+        st.caption("La opción normal genera el PDF sin abrir LibreOffice.")
+
+    with st.expander("Numeración de cotizaciones", expanded=False):
+        if "config_formato_numero" not in E:
+            E["config_formato_numero"] = hist_panel.config("formato_numero", hs.FORMATO_DEFECTO)
+        if "config_siguiente_numero" not in E:
+            E["config_siguiente_numero"] = hist_panel.siguiente_correlativo()
+        fmt = st.text_input(
+            "Formato del número",
+            key="config_formato_numero",
+            help="{n} = correlativo, {aa} = año de 2 cifras, {aaaa} = año completo. Ej.: {n:04d}-COT{aa}",
+        )
+        sig = st.number_input(
+            "Próximo número",
+            min_value=1,
+            step=1,
+            key="config_siguiente_numero",
+        )
+        st.caption(f"Vista previa: {hist_panel.formatear(int(sig), date.today(), fmt)}")
+        if st.button("Guardar numeración", icon=":material/save:", key="config_guardar_num", width="stretch"):
+            hist_panel.set_config("formato_numero", fmt)
+            hist_panel.set_config("siguiente_correlativo", int(sig))
+            st.success("Numeración guardada.")
+
+    with st.expander("Copia de seguridad", expanded=False):
         if GIOVAL_REQUIRE_ACCESS:
-            carpeta = carpeta_compartida
-            st.text_input(
-                "Biblioteca compartida",
-                value=carpeta,
-                disabled=True,
-                help="Todos los usuarios autorizados trabajan sobre estos mismos datos.",
-                key="config_carpeta_compartida",
-            )
-            st.caption("Los cambios quedan guardados en el servidor central y se ven en las demás instalaciones.")
-        else:
-            carpeta = st.text_input(
-                "Carpeta de datos y productos",
-                key="config_carpeta",
-                help="Normalmente puedes dejar la biblioteca de este computador como está.",
-            )
-        servicios = E.get("_servicios_sesion")
-        if not isinstance(servicios, dict) or servicios.get("carpeta") != str(Path(carpeta).resolve()):
-            bib_panel = ct.Biblioteca(carpeta)
-            hist_panel = hs.Historial(carpeta)
-            E["_servicios_sesion"] = {
-                "carpeta": str(Path(carpeta).resolve()), "biblioteca": bib_panel, "historial": hist_panel,
-            }
-        else:
-            bib_panel = servicios["biblioteca"]
-            hist_panel = servicios["historial"]
-            bib_panel.refrescar_si_cambio()
-        st.caption(f"{len(bib_panel.indice)} productos en el catálogo")
-
-        with st.expander("Resumen comercial", expanded=False):
-            registros = hist_panel.listar()
-            borradores_resumen = []
-            for registro in registros:
-                if registro.get("estado") != "Borrador":
-                    continue
-                pdf_registro = Path(registro["pdf"]) if registro.get("pdf") else None
-                if not pdf_registro or not pdf_registro.exists():
-                    borradores_resumen.append(registro)
-
-            st.caption("Indicadores y actividad reciente. El resumen queda aquí para mantener despejada la pantalla principal.")
-            col_r1, col_r2 = st.columns(2)
-            col_r1.metric("Cotizaciones registradas", len(registros))
-            col_r2.metric("Borradores pendientes", len(borradores_resumen))
-            col_r3, col_r4 = st.columns(2)
-            col_r3.metric(
-                "Monto aceptado",
-                rv.clp(sum(float(registro.get("total") or 0) for registro in registros
-                           if registro.get("estado") == "Aceptada")),
-            )
-            col_r4.metric("Productos en catálogo", len(bib_panel.indice))
-
-            if registros:
-                recientes = sorted(
-                    registros,
-                    key=lambda registro: str(
-                        registro.get("actualizado") or registro.get("creado") or registro.get("fecha") or ""
-                    ),
-                    reverse=True,
-                )[:5]
-                datos_recientes = {
-                    "N° cotización": [registro.get("numero", "") for registro in recientes],
-                    "Fecha": [fecha_corta(registro.get("fecha") or "") for registro in recientes],
-                    "Total": [registro.get("total") or 0 for registro in recientes],
-                    "Estado": [registro.get("estado") or "Borrador" for registro in recientes],
-                }
-                if not GIOVAL_REQUIRE_ACCESS:
-                    datos_recientes["Cliente"] = [
-                        registro.get("cliente") or "Sin cliente" for registro in recientes
-                    ]
-                df_recientes = pd.DataFrame(datos_recientes)
-                montos.tabla(
-                    df_recientes,
-                    hide_index=True,
-                    width="stretch",
-                    column_config={"Total": st.column_config.NumberColumn(format="$ %d")},
-                )
-            else:
-                st.caption("Todavía no hay cotizaciones registradas.")
-
-        st.divider()
-        st.markdown("**Conexión de inteligencia artificial**")
-        if api_key:
-            st.caption(f"Conectada · Clave encontrada en {origen_key}")
-        elif GIOVAL_REQUIRE_ACCESS:
             st.caption(
-                "La IA no está configurada en el servidor. El administrador puede definir "
-                "OPENAI_API_KEY en las variables del servicio Render; no se guardan claves "
-                "personales desde una sesión compartida."
+                "El ZIP incluye productos, fotos, fichas y el historial comercial compartido; "
+                "no incluye la libreta de clientes ni PDF/Excel finales con datos personales."
             )
         else:
-            api_key = st.text_input(
-                "Clave de OpenAI",
-                type="password",
-                key="config_api_key",
-                help="Se usa para interpretar pedidos en PDF o foto y mejorar la identificación de productos.",
+            st.caption("El ZIP incluye la base de datos, catálogo, fotos, fichas y archivos de cotizaciones.")
+        ultimo_respaldo = hist_panel.config("ultimo_respaldo_preparado")
+        if ultimo_respaldo:
+            try:
+                fecha_respaldo = datetime.fromisoformat(ultimo_respaldo).strftime("%d/%m/%Y a las %H:%M")
+            except (TypeError, ValueError):
+                fecha_respaldo = str(ultimo_respaldo)
+            st.caption(f"Último ZIP preparado: {fecha_respaldo}.")
+        else:
+            st.caption("Todavía no se ha preparado un respaldo desde este equipo.")
+        if st.button("Preparar respaldo", icon=":material/archive:", key="preparar_respaldo", width="stretch"):
+            try:
+                E["_respaldo_zip"] = crear_respaldo_biblioteca(bib_panel.dir)
+                ahora_respaldo = datetime.now()
+                E["_respaldo_nombre"] = f"respaldo_giovalia_{ahora_respaldo:%Y%m%d_%H%M%S}.zip"
+                hist_panel.set_config("ultimo_respaldo_preparado", ahora_respaldo.isoformat(timespec="seconds"))
+                st.success("ZIP preparado. Descárgalo y guarda una copia fuera del computador central.")
+            except Exception as exc:
+                E.pop("_respaldo_zip", None)
+                st.error(f"No pude preparar el respaldo: {exc}")
+        if E.get("_respaldo_zip"):
+            st.download_button(
+                "Descargar respaldo ZIP",
+                E["_respaldo_zip"],
+                icon=":material/download:",
+                file_name=E.get("_respaldo_nombre", "respaldo_giovalia.zip"),
+                mime="application/zip",
+                width="stretch",
+                key="descargar_respaldo",
             )
-            if api_key and st.button(
-                "Guardar clave",
-                icon=":material/save:",
-                key="config_guardar_api",
+            st.caption(
+                "La fecha indica cuándo se generó el ZIP, no confirma que lo hayas descargado. "
+                "Guárdalo también en otro disco o ubicación segura."
+            )
+
+        if GIOVAL_REQUIRE_ACCESS and GIOVAL_ALLOW_INITIAL_IMPORT:
+            st.divider()
+            st.markdown("**Importar respaldo inicial al espacio compartido**")
+            st.caption("Solo debe usarse cuando la biblioteca central está vacía, antes de que el equipo empiece a trabajar.")
+            archivo_inicial = st.file_uploader(
+                "Respaldo ZIP de otro computador",
+                type=["zip"],
+                key="respaldo_inicial_zip",
+                max_upload_size=500,
+            )
+            confirmar_importacion = st.checkbox(
+                "Confirmo que quiero cargar este respaldo en la biblioteca central vacía.",
+                key="confirmar_respaldo_inicial",
+            )
+            if st.button(
+                "Importar biblioteca inicial",
+                icon=":material/cloud_upload:",
+                disabled=not (archivo_inicial and confirmar_importacion),
+                key="importar_biblioteca_inicial",
                 width="stretch",
             ):
                 try:
-                    li.guardar_api_key(APP_DIR, api_key)
-                    E["config_api_key"] = api_key.strip()
-                    st.success("Clave guardada en este computador.")
-                except (OSError, ValueError) as exc:
-                    st.error(f"No pude guardar la clave en el archivo .env. Comprueba los permisos de esta carpeta. Detalle: {exc}")
-
-        st.divider()
-        st.markdown("**Conexión a Mercado Público**")
-        if ticket_mp:
-            st.caption(f"Conectada · Ticket encontrado en {origen_ticket_mp}")
-        elif GIOVAL_REQUIRE_ACCESS:
-            st.caption(
-                "El administrador debe definir MERCADO_PUBLICO_TICKET en los secretos de Streamlit "
-                "o como variable privada del servidor."
-            )
-        else:
-            if "_mercado_publico_ticket" in E and "config_ticket_mercado_publico" not in E:
-                E["config_ticket_mercado_publico"] = E["_mercado_publico_ticket"]
-            ticket_mp = st.text_input(
-                "Ticket API de Mercado Público",
-                type="password",
-                key="config_ticket_mercado_publico",
-                on_change=guardar_ticket_mp_sesion,
-                help="Se usa para consultar solicitudes Compra Ágil y órdenes por código. No se incluye en las cotizaciones.",
-            )
-            st.caption("Se conserva solo en la sesión actual. También puedes definir MERCADO_PUBLICO_TICKET en los secretos privados del servidor.")
-
-        with st.expander("Opciones para crear el PDF", expanded=False):
-            st.checkbox(
-                "Usar LibreOffice para convertir a PDF",
-                value=False,
-                key="config_usar_lo",
-                help="Déjalo desmarcado salvo que necesites conservar exactamente el formato de Excel.",
-            )
-            st.caption("La opción normal genera el PDF sin abrir LibreOffice.")
-
-        with st.expander("Numeración de cotizaciones", expanded=False):
-            E.setdefault("config_formato_numero", hist_panel.config("formato_numero", hs.FORMATO_DEFECTO))
-            E.setdefault("config_siguiente_numero", hist_panel.siguiente_correlativo())
-            fmt = st.text_input(
-                "Formato del número",
-                key="config_formato_numero",
-                help="{n} = correlativo, {aa} = año de 2 cifras, {aaaa} = año completo. Ej.: {n:04d}-COT{aa}",
-            )
-            sig = st.number_input(
-                "Próximo número",
-                min_value=1,
-                step=1,
-                key="config_siguiente_numero",
-            )
-            st.caption(f"Vista previa: {hist_panel.formatear(int(sig), date.today(), fmt)}")
-            if st.button("Guardar numeración", icon=":material/save:", key="config_guardar_num", width="stretch"):
-                hist_panel.set_config("formato_numero", fmt)
-                hist_panel.set_config("siguiente_correlativo", int(sig))
-                st.success("Numeración guardada.")
-
-        with st.expander("Copia de seguridad", expanded=False):
-            if GIOVAL_REQUIRE_ACCESS:
-                st.caption(
-                    "El ZIP incluye productos, fotos, fichas y el historial comercial compartido; "
-                    "no incluye la libreta de clientes ni PDF/Excel finales con datos personales."
-                )
-            else:
-                st.caption("El ZIP incluye la base de datos, catálogo, fotos, fichas y archivos de cotizaciones.")
-            ultimo_respaldo = hist_panel.config("ultimo_respaldo_preparado")
-            if ultimo_respaldo:
-                try:
-                    fecha_respaldo = datetime.fromisoformat(ultimo_respaldo).strftime("%d/%m/%Y a las %H:%M")
-                except (TypeError, ValueError):
-                    fecha_respaldo = str(ultimo_respaldo)
-                st.caption(f"Último ZIP preparado: {fecha_respaldo}.")
-            else:
-                st.caption("Todavía no se ha preparado un respaldo desde este equipo.")
-            if st.button("Preparar respaldo", icon=":material/archive:", key="preparar_respaldo", width="stretch"):
-                try:
-                    E["_respaldo_zip"] = crear_respaldo_biblioteca(bib_panel.dir)
-                    ahora_respaldo = datetime.now()
-                    E["_respaldo_nombre"] = f"respaldo_giovalia_{ahora_respaldo:%Y%m%d_%H%M%S}.zip"
-                    hist_panel.set_config("ultimo_respaldo_preparado", ahora_respaldo.isoformat(timespec="seconds"))
-                    st.success("ZIP preparado. Descárgalo y guarda una copia fuera del computador central.")
+                    cantidad_cot, cantidad_prod = restaurar_respaldo_inicial(
+                        bib_panel.dir, archivo_inicial.getvalue()
+                    )
+                    st.success(
+                        f"Biblioteca inicial importada: {cantidad_cot} cotizaciones y "
+                        f"{cantidad_prod} productos. Desactiva GIOVAL_ALLOW_INITIAL_IMPORT en el servidor."
+                    )
+                    st.rerun()
                 except Exception as exc:
-                    E.pop("_respaldo_zip", None)
-                    st.error(f"No pude preparar el respaldo: {exc}")
-            if E.get("_respaldo_zip"):
-                st.download_button(
-                    "Descargar respaldo ZIP",
-                    E["_respaldo_zip"],
-                    icon=":material/download:",
-                    file_name=E.get("_respaldo_nombre", "respaldo_giovalia.zip"),
-                    mime="application/zip",
-                    width="stretch",
-                    key="descargar_respaldo",
-                )
-                st.caption(
-                    "La fecha indica cuándo se generó el ZIP, no confirma que lo hayas descargado. "
-                    "Guárdalo también en otro disco o ubicación segura."
-                )
-
-            if GIOVAL_REQUIRE_ACCESS and GIOVAL_ALLOW_INITIAL_IMPORT:
-                st.divider()
-                st.markdown("**Importar respaldo inicial al espacio compartido**")
-                st.caption("Solo debe usarse cuando la biblioteca central está vacía, antes de que el equipo empiece a trabajar.")
-                archivo_inicial = st.file_uploader(
-                    "Respaldo ZIP de otro computador",
-                    type=["zip"],
-                    key="respaldo_inicial_zip",
-                    max_upload_size=500,
-                )
-                confirmar_importacion = st.checkbox(
-                    "Confirmo que quiero cargar este respaldo en la biblioteca central vacía.",
-                    key="confirmar_respaldo_inicial",
-                )
-                if st.button(
-                    "Importar biblioteca inicial",
-                    icon=":material/cloud_upload:",
-                    disabled=not (archivo_inicial and confirmar_importacion),
-                    key="importar_biblioteca_inicial",
-                    width="stretch",
-                ):
-                    try:
-                        cantidad_cot, cantidad_prod = restaurar_respaldo_inicial(
-                            bib_panel.dir, archivo_inicial.getvalue()
-                        )
-                        st.success(
-                            f"Biblioteca inicial importada: {cantidad_cot} cotizaciones y "
-                            f"{cantidad_prod} productos. Desactiva GIOVAL_ALLOW_INITIAL_IMPORT en el servidor."
-                        )
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"No pude importar el respaldo: {exc}")
-
-        st.divider()
-        st.button("Volver a los borradores", icon=":material/home:", key="settings_volver_inicio", width="stretch", on_click=limpiar_estado_trabajo)
-
-    # El contenido del popover se calcula también cuando está cerrado; reutilizamos sus servicios
-    # para evitar abrir dos instancias del catálogo y del historial en cada ejecución.
-    api_key_actual = str(api_key or E.get("config_api_key", "")).strip()
-    usar_lo = bool(E.get("config_usar_lo", False))
-    ticket_mp_actual = str(ticket_mp or E.get("_mercado_publico_ticket")
-                           or E.get("config_ticket_mercado_publico", "")).strip()
-    return carpeta, bib_panel, hist_panel, api_key_actual, usar_lo, ticket_mp_actual
+                    st.error(f"No pude importar el respaldo: {exc}")
 
 
 def guardar_conflicto_como_nueva():
@@ -3235,7 +3196,7 @@ def guardar_conflicto_como_nueva():
 
 
 # ============================================================== PANTALLA
-# Marca y navegación compactas para priorizar el trabajo del cotizador.
+# La cabecera identifica el espacio de trabajo activo.
 if GIOVAL_REQUIRE_ACCESS:
     col_marca, col_estado, col_salir, col_ajustes = st.columns(
         [3.5, 2, 1, 1], vertical_alignment="center"
@@ -3243,11 +3204,10 @@ if GIOVAL_REQUIRE_ACCESS:
 else:
     col_marca, col_estado, col_ajustes = st.columns([4, 2, 1], vertical_alignment="center")
 with col_marca:
-    st.markdown("## Gioval")
-    st.caption("Tintas, tóners y artículos de oficina · Arica, Chile")
+    st.markdown("### Giovalia")
 with col_estado:
     st.badge(
-        "Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Cotizador comercial",
+        "Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Biblioteca local",
         icon=":material/verified_user:" if GIOVAL_REQUIRE_ACCESS else ":material/receipt_long:",
         color="blue",
     )
@@ -3256,7 +3216,7 @@ with col_ajustes:
 if GIOVAL_REQUIRE_ACCESS:
     with col_salir:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
-            E.pop("gioval_autenticado", None)
+            E.clear()
             st.rerun()
 
 if E.get("_conflicto_guardado"):
@@ -3292,6 +3252,7 @@ etiquetas_vista = {
     VISTAS[0]: ":material/edit_document: Cotizar",
     VISTAS[1]: ":material/history: Historial",
     VISTAS[2]: ":material/inventory_2: Biblioteca",
+    VISTAS[3]: ":material/menu_book: Catálogo PDF",
 }
 vista = st.segmented_control(
     "Secciones",
@@ -3300,12 +3261,15 @@ vista = st.segmented_control(
     format_func=lambda valor: etiquetas_vista[valor],
     required=True,
     width="stretch",
+    wrap=True,
     label_visibility="collapsed",
 )
 if vista == VISTAS[1]:
     vista_historial()
 elif vista == VISTAS[2]:
     vista_productos()
+elif vista == VISTAS[3]:
+    cc.render_ui(st, bib, abrir_producto=abrir_producto_desde_catalogo)
 elif not E.get("cot_id"):
     selector_borradores()
 else:

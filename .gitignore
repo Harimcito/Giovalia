@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+.streamlit/secrets.toml
+/biblioteca/
+/tmp/
+.venv/
 
 # Archivos temporales y Python
 __pycache__/

@@ -11,6 +11,8 @@ from xml.etree import ElementTree
 
 import requests
 
+from compra_agil import API_LIST_URL, APICompraAgilError, obtener_detalle_compra_agil, _request_json
+
 
 API_ORDEN_COMPRA = "https://api.mercadopublico.cl/servicios/v1/publico/ordenesdecompra.json"
 _CODIGO_CA = re.compile(r"^\d{1,12}-\d{1,8}-COT\d{2}$", re.I)
@@ -232,7 +234,6 @@ def consultar_codigo(codigo: str, ticket: str) -> dict:
     if not ticket:
         raise ErrorMercadoPublico("Configura tu ticket en Ajustes antes de consultar Mercado Público.")
     if tipo == "compra_agil":
-        from radar_comercial.servicio import APICompraAgilError, obtener_detalle_compra_agil, _request_json, API_LIST_URL
         try:
             respuesta = obtener_detalle_compra_agil(ticket, codigo)
         except APICompraAgilError as exc:

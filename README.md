@@ -11,21 +11,12 @@ Dos formas de usarlo:
 
 El instalador de Windows abre Gioval en una ventana independiente y se conecta a un servidor central. La opción sin costo mensual está descrita en [GIOVAL_GRATIS.md](GIOVAL_GRATIS.md): un computador Windows existente guarda la biblioteca y los demás equipos se conectan por red local o, opcionalmente, mediante un túnel HTTPS gratuito. No sincronices la base SQLite en tiempo real mediante carpetas de Google Drive/OneDrive.
 
-Para la alternativa alojada, consulta [SHARED_LIBRARY.md](SHARED_LIBRARY.md). No necesitas contratar Render para usar la modalidad gratuita.
+Para el funcionamiento de los accesos y los datos compartidos, consulta [SHARED_LIBRARY.md](SHARED_LIBRARY.md).
 
 
 ### Actualización automática del servidor
 
 Para un servidor Windows que se actualice desde GitHub, consulta la sección de [actualizaciones automáticas](GIOVAL_GRATIS.md#11-actualizaciones-automaticas-desde-github-windows). El instalador `instalar_actualizaciones_servidor_gioval.bat` configura una tarea al iniciar sesión y actualiza la rama `main` cada cinco minutos. Los datos compartidos permanecen fuera del repositorio.
-
-## Radar Comercial (aplicación independiente)
-
-Gioval incluye una segunda aplicación para detectar oportunidades de Compra Ágil y estimar rentabilidad a partir del catálogo comercial del cotizador. Consulta [RADAR_COMERCIAL.md](RADAR_COMERCIAL.md) para instalación y uso.
-
-- En el computador central ejecuta `iniciar_radar_gioval.bat`; el cotizador permanece en el puerto 8501 y Radar corre por separado en el puerto 8502.
-- Abre `http://localhost:8502` en el servidor o `http://IP-DEL-COMPUTADOR-CENTRAL:8502` desde otro equipo de la misma red.
-- Radar lee el catálogo y el historial del cotizador, pero guarda las oportunidades y las evaluaciones en `radar_comercial.db`, sin modificar las cotizaciones existentes.
-- La consulta directa a la API requiere un ticket propio de ChileCompra. También se pueden importar resultados desde Excel/CSV o registrar una oportunidad manualmente.
 
 ## Instalación en Windows (una vez)
 1. Python 3.10 o superior desde python.org (marca "Add python.exe to PATH" al instalar).
@@ -70,6 +61,8 @@ búsqueda, pega el enlace directo de una imagen o PDF, o usa los botones de Goog
 - **Mis productos:** catálogo con foto, ficha, último precio, costo y margen. Precio sugerido = costo × (1 + margen);
   al armar un pedido esos productos aparecen con su precio ya puesto. Aquí también se cambia el código,
   se combinan duplicados y se eliminan productos.
+- **Catálogo PDF:** guarda selecciones de la Biblioteca y emite un PDF A4 vertical para clientes. Incluye precios netos más IVA y permite usar ilustraciones marcadas como referenciales cuando falta una foto. Los PDFs y su registro se guardan dentro de la biblioteca seleccionada.
+- **SEO y GEO:** edita datos verificables en la ficha de producto y descarga JSON y JSON-LD desde Catálogo PDF → SEO y GEO. Consulta [los criterios de Gioval](SEO_GEO_GIOVAL.md) para preparar una futura publicación.
 - **Biblioteca compartida:** el servidor central comparte productos, fotos, fichas y el historial comercial de cotizaciones (líneas, cantidades, precios, totales y estado). Los datos del cliente y los PDF/Excel finales no se guardan en el historial común; los documentos se descargan desde la sesión que los genera.
 - Para respaldar el modo local, copia la biblioteca. Para el modo compartido, usa Ajustes → Copia de seguridad y conserva los ZIP fuera del computador central.
 
