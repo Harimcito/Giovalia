@@ -39,6 +39,7 @@ import flujo_cotizacion as flujo
 import stock_catalogo
 import edicion_lineas as edicion
 import interfaz_giovalia as interfaz
+import experiencia_giovalia as experiencia
 from vista_precios import vista_precios
 import catalogo_clientes as cc
 from productos_ui import editar_ficha
@@ -293,7 +294,7 @@ def limpiar_estado_trabajo():
         "_respaldo_zip",
         "_respaldo_nombre",
         "_servicios_sesion",
-        "_filtros_historial", "_historial_seleccion", "_ambito_historial", "pref_densidad",
+        "_filtros_historial", "_historial_seleccion", "_ambito_historial", "pref_densidad", "_preferencias_ux",
     )
     valores = {clave: E[clave] for clave in conservar if clave in E}
     E.clear()
@@ -318,10 +319,11 @@ def ir_a(paso: int):
 
 
 def mostrar_pasos(actual: int):
-    nombres = ["Pedido", "Productos", "Fotos y fichas", "PDF"]
+    nombres = ["Cargar pedido", "Editar productos", "Revisar fotos y fichas", "Revisar y emitir PDF"]
     with st.container(border=True):
         with st.container(horizontal=True, vertical_alignment="center"):
-            st.markdown(f"**Cotización {E.get('cot_numero', '')}**")
+            numero = E.get('cot_numero') or E.get('informe', {}).get('resumen', {}).get('numero', '')
+            st.markdown(f"**Cotización {numero}**")
             if E.get("_ultima_guarda") and not E.get("_conflicto_guardado"):
                 st.badge(f"Guardada · {E['_ultima_guarda']}", icon=":material/cloud_done:", color="green")
             st.button("Borradores", icon=":material/arrow_back:", type="tertiary",
@@ -337,7 +339,16 @@ def mostrar_pasos(actual: int):
                 elif i == actual:
                     st.badge(f"{i}. {nombre}", icon=":material/edit_note:", color="blue", help="Etapa actual")
                 else:
-                    st.badge(f"{i}. {nombre}", color="gray")
+                    st.badge(f"{i}. {nombre} · Pendiente", icon=":material/schedule:", color="gray")
+        lineas = [ln for ln in E.get("lineas", []) if ln.get("incluir", True)]
+        if lineas:
+            pendientes = sum(ln.get("unitario") is None and ln.get("precio_neto") is None for ln in lineas)
+            if pendientes:
+                st.badge(f"{pendientes} líneas por revisar · Falta precio", icon=":material/info:", color="orange")
+            else:
+                st.badge("Precios registrados", icon=":material/check_circle:", color="green")
+        if not cliente_actual()["nombre"]:
+            st.badge("Requiere revisión · Falta el nombre del cliente", icon=":material/edit_note:", color="orange")
 
 
 def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
@@ -1303,11 +1314,12 @@ def selector_borradores():
             on_click=iniciar_borrador, args=(FUENTE_MERCADO_PUBLICO,), key="inicio_mercado_publico",
         )
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Cotizaciones", len(registros), border=True)
-    m2.metric("Borradores activos", len(borradores), border=True)
-    m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas), border=True)
-    m4.metric("Productos en biblioteca", len(bib.indice), border=True)
+    if not opciones_ux["mostrador"]:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Cotizaciones", len(registros), border=True)
+        m2.metric("Borradores activos", len(borradores), border=True)
+        m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas), border=True)
+        m4.metric("Productos en biblioteca", len(bib.indice), border=True)
 
     izq, der = st.columns([1, 1.35])
     with izq:
@@ -1597,6 +1609,7 @@ def pedido_ui(fuente: str):
     marcar_cambios_cabecera()
 
     if "orden_df" not in E:
+        sigue_cotizacion.button("Siguiente", disabled=True, key="siguiente_sin_pedido", width="stretch")
         st.info("Escribe o carga un pedido para comenzar. Tus datos de cliente y el número se guardan en el borrador.")
         persistir_borrador()
         return
@@ -1648,7 +1661,7 @@ def pedido_ui(fuente: str):
             key=f"verificar_importacion_{firma_revision}",
         )
         continuar_igual = continuar_igual and revisado
-    if st.button("Guardar pedido y continuar →", type="primary", width="stretch",
+    if sigue_cotizacion.button("Guardar pedido y continuar →", type="primary", width="stretch",
                  disabled=not any(ln.get("incluir", True) for ln in lineas_orden) or not continuar_igual):
         cliente = cliente_actual()
         totales = rv.totales_de([
@@ -1783,7 +1796,7 @@ def pedido_ui(fuente: str):
 def cotizacion_ui():
     st.write("Si ya tienes la cotización armada en Excel, súbela y yo le agrego las fotos y fichas.")
     archivo = st.file_uploader("Sube la cotización en Excel", type=["xlsx"], key="cot_archivo")
-    if archivo and st.button("Continuar →", type="primary", width="stretch", key="cot_continuar"):
+    if sigue_cotizacion.button("Continuar →", type="primary", width="stretch", key="cot_continuar", disabled=not archivo):
         ruta = Path(tempfile.mkdtemp()) / archivo.name
         ruta.write_bytes(archivo.getvalue())
         try:
@@ -1797,6 +1810,7 @@ def cotizacion_ui():
 def paso_1():
     st.title("Pedido")
     st.caption("Elige cómo cargar los productos de la cotización.")
+    atras_cotizacion.button("Volver", key="inicio_desde_pedido", width="stretch", on_click=limpiar_estado_trabajo)
     if E.get("fuente_pedido") not in ETIQUETAS_FUENTES:
         E["fuente_pedido"] = FUENTE_TEXTO
     fuente = st.segmented_control(
@@ -2042,6 +2056,10 @@ def detalle_linea_editor():
     acuse = E.get("_acuse_linea", 0)
     revision = E.get("_revision_campos_linea", 0)
     clave_widget = f"precio_linea_{E['cot_id']}_{E.get('editor_version', 0)}_{indice}_{mostrado}_{estado}_{dias}_{revision}"
+    experiencia.ayuda("Cómo ingresar precio y entrega",
+                     "Si elegiste precios netos, escribe el monto sin IVA. "
+                     "En stock significa disponible. A pedido indica que hay que reponer. "
+                     "En plazo, 0 indica entrega inmediata. Si el plazo está vacío, queda por confirmar salvo que haya stock.")
     with st.form("form_precio_linea", border=False):
         st.text_input("Producto de la línea seleccionada", value=linea["descripcion"], key=f"{clave_widget}_descripcion")
         codigo, cantidad = st.columns(2)
@@ -2174,10 +2192,6 @@ def paso_2():
             st.rerun()
         mostrar_tabla_lineas(densidad == "Compacta")
         estado = st.container(horizontal=True)
-        if st.button("Guardar borrador", key="guardar_editor", icon=":material/save:"):
-            persistir_borrador()
-            if not E.get("_conflicto_guardado"):
-                st.toast("Borrador guardado")
         mostrar_deshacer_lineas()
     with detalle, st.expander("Detalle de la línea", expanded=True):
         detalle_linea_editor()
@@ -2205,8 +2219,7 @@ def paso_2():
     editar_cabecera()
     panel_revision()
 
-    atras, sigue = st.columns(2)
-    if atras.button("← Volver", key="editor_volver_pedido", width="stretch"):
+    if atras_cotizacion.button("← Volver", key="editor_volver_pedido", width="stretch"):
         E.pop("_deshacer_lineas", None)
         con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
         E["orden_df"] = pd.DataFrame({
@@ -2224,7 +2237,7 @@ def paso_2():
         E["_orden_coincidencias"] = referencias_lineas_guardadas(E["lineas"])
         E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
         ir_a(1)
-    if sigue.button("Siguiente: fotos y fichas →", key="editor_ir_fotos", type="primary", width="stretch"):
+    if sigue_cotizacion.button("Siguiente: fotos y fichas →", key="editor_ir_fotos", type="primary", width="stretch"):
         claves, _ = datos_productos()
         if not claves:
             st.error("Marca al menos un producto en la columna **Incluir** para buscar sus fotos y fichas.")
@@ -2369,7 +2382,9 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_
                         "gray" if estado_ficha == "No requerida" else "orange"
                     ),
                 )
-            for tipo in ("foto", "ficha"):
+            for tipo, anexo in (("foto", foto), ("ficha", ficha)):
+                if anexo and st.button(f"Ampliar {tipo}", key=f"ampliar_{tipo}_{clave}", icon=":material/zoom_in:"):
+                    experiencia.mostrar_anexo(anexo, f"{desc} · {clave}", tipo)
                 if aviso := E.get(f"error_{tipo}_{clave}"):
                     st.error(aviso)
             nueva_no_requerida = st.checkbox(
@@ -2504,8 +2519,9 @@ def paso_3():
     claves, descripciones = datos_productos()
     if not claves:
         st.warning("No hay productos seleccionados. Marca al menos uno en el paso anterior.")
-        if st.button("← Volver"):
+        if atras_cotizacion.button("← Volver", key="anexos_volver_sin_productos", width="stretch"):
             ir_a(2)
+        sigue_cotizacion.button("Siguiente", disabled=True, key="anexos_sin_productos", width="stretch")
         return
     anexos = {clave: estado_anexos(clave, True) for clave in claves}
     faltan = [clave for clave, (foto, ficha, opcional) in anexos.items() if not foto or not (ficha or opcional)]
@@ -2580,18 +2596,17 @@ def paso_3():
         st.info("No hay productos que coincidan con este filtro.")
 
     st.divider()
-    atras, sigue = st.columns(2)
-    if atras.button("← Volver", width="stretch"):
+    if atras_cotizacion.button("← Volver", width="stretch"):
         ir_a(2)
-    if sigue.button("Siguiente: revisar y crear el PDF →", type="primary", width="stretch"):
+    if sigue_cotizacion.button("Siguiente: revisar y crear el PDF →", type="primary", width="stretch"):
         persistir_borrador()
         ir_a(4)
 
 
 # ============================================================== PASO 4: PDF
 # ============================================================== REVISIÓN DE LA COTIZACIÓN
-def hallazgos() -> list[dict]:
-    d = pc.leer_para_pdf(E["ruta"])
+def hallazgos(d=None) -> list[dict]:
+    d = pc.leer_para_pdf(E["ruta"]) if d is None else d
     claves = ["" if str(c) == "nan" else str(c or "").strip().upper() for c in E["tabla_edit"][COL_COD]]
     return rv.revisar(d, claves if len(claves) == len(d["lineas"]) else None, bib)
 
@@ -2690,8 +2705,28 @@ def congelar_anexos_cotizacion():
         raise hs.ConflictoActualizacion("Recarga la cotización antes de generar una versión.")
 
 
-def generar_pdf():
+def resumen_pdf(documento):
+    cabecera_pdf = {ct.normalizar(etiqueta): valor for etiqueta, valor in documento["izquierda"] + documento["derecha"]}
+    montos_pdf = {ct.normalizar(etiqueta): valor for etiqueta, valor in documento["totales"]}
+    entregas = {
+        flujo.plazo_efectivo(ln) for ln in E["lineas"]
+        if ln.get("incluir", True) and ln.get("es_producto", True)
+    }
+    plazos = [flujo.texto_plazo(dias) for dias in sorted(entregas, key=lambda v: (v is None, v or 0))]
+    return {
+        "cliente": cabecera_pdf.get("NOMBRE") or "Pendiente",
+        "numero": (hist.obtener(E["cot_id"]) or {}).get("numero") or E.get("cot_numero") or "Pendiente",
+        "total": montos_pdf.get("TOTAL"),
+        "entrega": " · ".join(plazos) or "Por confirmar",
+    }
+
+
+def generar_pdf(estado=None):
     """Prepara un PDF y su Excel para revisar, sin confirmar la emisión."""
+    def progreso(etapa):
+        if estado is not None:
+            estado.update(label=etapa)
+    progreso("Preparando cotización")
     refrescar_excel_actual(archivar=False)
     congelar_anexos_cotizacion()
     finales = [
@@ -2700,15 +2735,19 @@ def generar_pdf():
         if _esta_marcado(ln.get("incluir", True), True) and ln.get("es_producto", True)
     ]
     ruta = Path(E["ruta"])
-    with tempfile.TemporaryDirectory() as temporal, st.spinner("Preparando la vista previa."):
+    with tempfile.TemporaryDirectory() as temporal:
         salida = Path(temporal) / "vista_previa.pdf"
         informe = ct.generar_pdf_final(
             ruta, finales, bib, salida, motor="libreoffice" if usar_lo else "nativo",
             resolver_anexos=lambda clave: estado_anexos(clave, True),
+            progreso=progreso,
         )
         pdf_bytes = salida.read_bytes()
+    progreso("Comprobando la vista previa")
     informe["paginas_revisar"] = revision_doc.revisar_paginas(pdf_bytes, informe["paginas_cotizacion"])
-    informe["validacion_excel"] = hallazgos()
+    documento = pc.leer_para_pdf(ruta)
+    informe["validacion_excel"] = hallazgos(documento)
+    informe["resumen"] = resumen_pdf(documento)
     numero = re.sub(r"[^A-Za-z0-9._-]", "_", E.get("cot_numero") or "cotizacion")
     E.update(pdf_bytes=pdf_bytes, pdf_nombre=f"{numero}.pdf", informe=informe,
              xlsx_vista_previa=ruta.read_bytes(), pdf_confirmado=False,
@@ -2745,14 +2784,16 @@ def paso_4():
                 st.error(str(error))
             else:
                 st.success("Versión disponible en el Historial.")
-        if st.button("Crear el PDF para revisar", type="primary", disabled=bool(E.get("error_numero"))):
+        if sigue_cotizacion.button("Crear el PDF para revisar", type="primary", width="stretch", disabled=bool(E.get("error_numero"))):
             try:
-                generar_pdf()
+                with st.status("Preparando cotización", expanded=False) as estado:
+                    generar_pdf(estado)
+                    estado.update(label="PDF listo para revisar", state="complete")
             except Exception as error:
                 st.error(f"No pude preparar el PDF. {error}")
             else:
                 st.rerun()
-        if st.button("← Volver a fotos y fichas", width="stretch"):
+        if atras_cotizacion.button("← Volver a fotos y fichas", width="stretch"):
             ir_a(3)
     else:
         informe = E["informe"]
@@ -2780,6 +2821,15 @@ def paso_4():
 def acciones_vista_pdf(informe):
     with st.container(border=True):
         st.subheader("Revisar y aprobar")
+        if resumen := informe.get("resumen"):
+            st.caption("Cliente")
+            st.text(resumen["cliente"])
+            st.caption("Número de cotización")
+            st.text(resumen["numero"])
+            total = resumen["total"]
+            st.metric("Total con IVA", rv.clp(total) if total is not None else "Por revisar")
+            st.caption("Plazo de entrega")
+            st.text(resumen["entrega"])
         etiquetas = (
             ("sin_clave", "Productos sin código"), ("sin_foto", "Fotos faltantes"),
             ("sin_ficha", "Fichas técnicas faltantes"), ("ficha_dudosa", "Fichas con código por verificar"),
@@ -2806,7 +2856,7 @@ def acciones_vista_pdf(informe):
                                      or any(item["nivel"] == "error" for item in informe["validacion_excel"]))
             acepto = not requiere_revision or st.checkbox("Revisé las alertas y quiero aprobar esta versión",
                                                           key="ok_revision_pdf")
-            if st.button("Confirmar versión y habilitar descarga", type="primary", disabled=not acepto):
+            if sigue_cotizacion.button("Confirmar versión y habilitar descarga", type="primary", width="stretch", disabled=not acepto):
                 try:
                     confirmar_pdf()
                 except (OSError, hs.ConflictoActualizacion) as error:
@@ -2814,12 +2864,13 @@ def acciones_vista_pdf(informe):
                 else:
                     st.rerun()
         else:
+            sigue_cotizacion.badge("PDF aprobado", icon=":material/task_alt:", color="green")
             st.success("Versión registrada en el historial.")
             st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"],
                                mime="application/pdf", type="primary", on_click="ignore")
             st.download_button("Descargar la cotización en Excel", E["xlsx_vista_previa"],
                                file_name=Path(E["pdf_nombre"]).with_suffix(".xlsx").name, on_click="ignore")
-        if st.button("Volver a editar", key="salir_vista_previa"):
+        if atras_cotizacion.button("Volver a editar", key="salir_vista_previa", width="stretch"):
             for campo in ("pdf_bytes", "xlsx_vista_previa", "pdf_nombre", "informe", "pdf_confirmado"):
                 E.pop(campo, None)
             E["editado_manual"] = True
@@ -3904,9 +3955,19 @@ etiquetas_vista = {
 }
 if codigo := E.pop("_abrir_producto_catalogo", None):
     abrir_producto_desde_catalogo(codigo)
+with cabecera:
+    opciones_ux = experiencia.preferencias(E, identidad, acceso)
+vistas_visibles = VISTAS
+if opciones_ux["mostrador"]:
+    if E.get("vista") in VISTAS[:3]:
+        vistas_visibles = VISTAS[:3]
+    with st.popover("Gestión", icon=":material/settings:"):
+        for avanzada in VISTAS[3:]:
+            st.button(avanzada, key=f"ux_gestion_{VISTAS.index(avanzada)}", width="stretch",
+                      on_click=lambda vista_destino=avanzada: E.update(vista=vista_destino))
 vista = st.segmented_control(
     "Secciones",
-    VISTAS,
+    vistas_visibles,
     key="vista",
     format_func=lambda valor: etiquetas_vista[valor],
     required=True,
@@ -3937,7 +3998,17 @@ else:
     if E["paso"] > 1 and "lineas" not in E:
         E["paso"] = 1
     mostrar_pasos(E["paso"])
+    barra = st.container(key="barra_cotizacion")
+    atras_cotizacion, guardar_cotizacion, sigue_cotizacion, total_cotizacion = barra.columns(
+        [1.05, 1.05, 1.45, 0.95], vertical_alignment="center"
+    )
     {1: paso_1, 2: paso_2, 3: paso_3, 4: paso_4}[E["paso"]]()
+    if guardar_cotizacion.button("Guardar borrador", key="guardar_editor", icon=":material/save:", width="stretch",
+                                 disabled=bool(E.get("_conflicto_guardado") or E.get("pdf_bytes"))):
+        persistir_borrador()
+        if not E.get("_conflicto_guardado"):
+            st.toast("Borrador guardado")
+    total_cotizacion.markdown(f"Total con IVA  \n**{rv.clp(totales_actuales()['total'])}**")
 
 if destino := E.pop("_destino_visual", None):
     selectores = {

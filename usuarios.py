@@ -6,6 +6,7 @@ No hay cuentas ni contraseñas por defecto. El aprovisionamiento es una acción 
 from __future__ import annotations
 
 import hashlib
+import json
 import hmac
 import re
 import secrets
@@ -48,6 +49,8 @@ class Usuarios:
                     cambiar INTEGER NOT NULL DEFAULT 1, correo TEXT NOT NULL DEFAULT '',
                     correo_verificado INTEGER NOT NULL DEFAULT 0,
                     registro_pendiente INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS preferencias_ux (
+                    usuario TEXT PRIMARY KEY, datos TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS sesiones (
                     token TEXT PRIMARY KEY, usuario TEXT NOT NULL,
                     vence REAL NOT NULL, ultimo REAL NOT NULL);
@@ -86,6 +89,16 @@ class Usuarios:
             raise
         finally:
             c.close()
+
+    def leer_preferencias_ux(self, usuario):
+        with self.con() as c:
+            fila = c.execute("SELECT datos FROM preferencias_ux WHERE usuario=?", (usuario,)).fetchone()
+        return json.loads(fila["datos"]) if fila else None
+
+    def guardar_preferencias_ux(self, usuario, datos):
+        with self.con() as c:
+            c.execute("INSERT INTO preferencias_ux(usuario,datos) VALUES (?,?) "
+                      "ON CONFLICT(usuario) DO UPDATE SET datos=excluded.datos", (usuario, json.dumps(datos)))
 
     @staticmethod
     def _auditar(c, usuario, evento, objetivo=""):
