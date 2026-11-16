@@ -71,10 +71,13 @@ foreach ($configPrivada in @('.env', 'configuracion.py', '.streamlitsecrets.toml
         Copy-Item -LiteralPath $configAnterior -Destination $configNueva -Force
     }
 }
-& $python -m compileall -q $preparada
-if ($LASTEXITCODE -ne 0) { throw 'La comprobación de sintaxis del paquete falló.' }
-& $python (Join-Path $preparada 'respaldo_servidor.py') $base (Join-Path $base 'Backups\Actualizacion')
-if ($LASTEXITCODE -ne 0) { throw 'No se pudo verificar el respaldo previo.' }
+$compilar = Start-Process -FilePath $python -ArgumentList ('-m compileall -q "' + $preparada + '"') -WindowStyle Hidden -Wait -PassThru
+if ($compilar.ExitCode -ne 0) { throw 'La comprobación de sintaxis del paquete falló.' }
+$scriptRespaldo = Join-Path $preparada 'respaldo_servidor.py'
+$destinoRespaldo = Join-Path $base 'Backups\Actualizacion'
+$argsRespaldo = '"' + $scriptRespaldo + '" "' + $base + '" "' + $destinoRespaldo + '"'
+$respaldo = Start-Process -FilePath $python -ArgumentList $argsRespaldo -WindowStyle Hidden -Wait -PassThru
+if ($respaldo.ExitCode -ne 0) { throw 'No se pudo verificar el respaldo previo.' }
 
 $archivosVersion = @('app.py', 'giovalia.css', 'interfaz_giovalia.css', 'experiencia_giovalia.css', '.streamlit/config.toml')
 $huellas = foreach ($archivoVersion in $archivosVersion) {
