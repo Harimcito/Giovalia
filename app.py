@@ -322,7 +322,8 @@ def mostrar_pasos(actual: int):
     nombres = ["Cargar pedido", "Editar productos", "Revisar fotos y fichas", "Revisar y emitir PDF"]
     with st.container(border=True):
         with st.container(horizontal=True, vertical_alignment="center"):
-            st.markdown(f"**Cotización {E.get('cot_numero', '')}**")
+            numero = E.get('cot_numero') or E.get('informe', {}).get('resumen', {}).get('numero', '')
+            st.markdown(f"**Cotización {numero}**")
             if E.get("_ultima_guarda") and not E.get("_conflicto_guardado"):
                 st.badge(f"Guardada · {E['_ultima_guarda']}", icon=":material/cloud_done:", color="green")
             st.button("Borradores", icon=":material/arrow_back:", type="tertiary",
@@ -2714,7 +2715,7 @@ def resumen_pdf(documento):
     plazos = [flujo.texto_plazo(dias) for dias in sorted(entregas, key=lambda v: (v is None, v or 0))]
     return {
         "cliente": cabecera_pdf.get("NOMBRE") or "Pendiente",
-        "numero": E.get("cot_numero") or "Pendiente",
+        "numero": (hist.obtener(E["cot_id"]) or {}).get("numero") or E.get("cot_numero") or "Pendiente",
         "total": montos_pdf.get("TOTAL"),
         "entrega": " · ".join(plazos) or "Por confirmar",
     }
