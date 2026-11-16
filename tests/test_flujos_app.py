@@ -83,7 +83,8 @@ class FlujosAppTests(unittest.TestCase):
         resumen = app.session_state["informe"]["resumen"]
         self.assertEqual(resumen["total"], 7140)
         self.assertEqual(resumen["entrega"], "5 días")
-        self.assertEqual(resumen["numero"], app.session_state["cot_numero"])
+        guardada = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])
+        self.assertEqual(resumen["numero"], guardada["numero"])
         secciones = app.session_state["informe"]["secciones"]
         self.assertEqual([s[0] for s in secciones], ["Cotización", "Fotografías"])
         _, desde, hasta = secciones[1]
