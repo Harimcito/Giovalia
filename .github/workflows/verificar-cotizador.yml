@@ -83,3 +83,11 @@ jobs:
 
       - name: Ejecutar pruebas del cotizador
         run: python -m unittest discover -s tests -v
+
+      - name: Instalar Chromium para la prueba de interfaz
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Probar la interfaz en Chromium
+        run: python -m tests.smoke_interfaz

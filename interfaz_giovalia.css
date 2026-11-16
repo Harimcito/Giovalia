@@ -1,0 +1,32 @@
+.gv-lista{--fondo:#fff;--activa:#e7efff;--borde:#cad7ea;color:#14213d;background:var(--fondo);border:1px solid var(--borde);border-radius:.8rem;max-height:29rem;overflow:auto}
+.gv-lista table{border-collapse:separate;border-spacing:0;width:100%}
+.gv-lista :is(th,td){padding:.55rem .7rem;border-bottom:1px solid #dae4f0;text-align:left}
+.gv-lista th{position:sticky;top:0;z-index:2;background:#eaf0fc}
+.gv-lista td{background:var(--fondo)}
+.gv-lista tbody tr{cursor:pointer}
+.gv-lista tbody tr:hover td,.gv-lista .gv-activa td{background:var(--activa)}
+.gv-lista .gv-activa td:first-child{box-shadow:inset 4px 0 #274bcc}
+.gv-lista.gv-fijar :is(th,td):first-child{position:sticky;left:0;min-width:12rem;width:12rem;max-width:12rem}
+.gv-lista.gv-fijar :is(th,td):nth-child(2){position:sticky;left:12rem;min-width:5.5rem}
+.gv-lista.gv-fijar td:nth-child(-n+2){z-index:1}
+.gv-lista.gv-fijar th:nth-child(-n+2){z-index:3}
+.gv-lista .gv-monto{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.gv-lista .gv-etiqueta{display:none}
+.gv-lista button{width:100%;min-height:44px;border:0;background:transparent;color:#173785;text-align:left;font:inherit;font-weight:650;text-decoration:underline;text-underline-offset:.18em;overflow-wrap:anywhere}
+.gv-lista.gv-compacta :is(th,td){padding-block:.22rem}
+.gv-lista :is(button,[tabindex]):focus-visible,.gv-destino{outline:3px solid #3155c7;outline-offset:2px}
+.st-key-cabecera_giovalia{padding:.8rem 1rem;border:1px solid #cad7ea;border-radius:.9rem;background:linear-gradient(120deg,#fff 35%,#e7efff)}
+.st-key-totales_editor_cotizacion{box-shadow:0 -6px 20px #263b6112}
+::highlight(gv-coincidencia){color:#14213d;background:#ffe69b}
+@media(max-width:640px){
+  .gv-lista{max-height:24rem}
+  .gv-lista table,.gv-lista tbody{display:block}
+  .gv-lista thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .gv-lista tr{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--borde)}
+  .gv-lista table td,.gv-lista.gv-fijar table td:nth-child(-n+2){position:static;min-width:0;max-width:none;width:auto;padding:.32rem .7rem;border:0;white-space:normal;text-align:left;overflow-wrap:anywhere}
+  .gv-lista td:first-child{grid-column:1/-1}
+  .gv-lista .gv-etiqueta{display:block;color:#405675;font-size:.87rem}
+  .gv-lista td:first-child .gv-etiqueta{display:none}
+  .st-key-totales_editor_cotizacion [data-testid="stHorizontalBlock"]{flex-wrap:nowrap}
+  .st-key-totales_editor_cotizacion [data-testid="stMetricValue"]{font-size:clamp(1rem,4vw,1.5rem)}
+}

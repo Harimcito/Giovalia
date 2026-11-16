@@ -847,17 +847,24 @@ def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="
         informe["paginas_cotizacion"] = len(PdfReader(cot).pages)
         escritor = PdfWriter()
         escritor.append(str(cot), outline_item="Cotización")
+        secciones = [("Cotización", 0, len(escritor.pages))]
         if items:
+            inicio = len(escritor.pages)
             escritor.append(str(anexo_fotos(items, Path(tmp) / "fotos.pdf")),
                             outline_item="Anexo 1 · Fotografías")
+            secciones.append(("Fotografías", inicio, len(escritor.pages)))
         for clave, ficha in fichas:
             try:
+                inicio = len(escritor.pages)
                 escritor.append(str(ficha), outline_item=f"Ficha técnica · {clave}")
+                if len(escritor.pages) > inicio:
+                    secciones.append((f"Ficha técnica · {clave}", inicio, len(escritor.pages)))
             except Exception:
                 informe["ficha_ilegible"].append(clave)
         with open(salida, "wb") as f:
             escritor.write(f)
     informe["paginas"] = len(PdfReader(str(salida)).pages)
+    informe["secciones"] = secciones
     return informe
 
 

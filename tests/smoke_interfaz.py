@@ -1,0 +1,115 @@
+"""Prueba de navegación real con Chromium y datos temporales."""
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.error import URLError
+from urllib.request import urlopen
+
+from cotizador import Biblioteca
+from historial import Historial
+
+from playwright.sync_api import sync_playwright, expect
+def comprobar_interfaz(numero, numero_otro):
+    with sync_playwright() as p:
+        browser=p.chromium.launch(executable_path=os.getenv('GIOVAL_TEST_CHROMIUM'))
+        page=browser.new_page(viewport={'width':1440,'height':930})
+        page.set_default_timeout(12000)
+        errores=[]
+        page.on('pageerror', lambda error: errores.append(str(error)))
+        page.goto('http://127.0.0.1:8610/')
+        expect(page.get_by_role('table',name='Cotizaciones recientes')).to_be_visible()
+        page.keyboard.press('Control+k')
+        consulta=page.get_by_role('textbox',name='Buscar en Giovalia')
+        consulta.fill('TN1060')
+        consulta.press('Enter')
+        page.get_by_role('button',name=f"Abrir {numero}").wait_for()
+        page.wait_for_function("CSS.highlights.has('gv-coincidencia')")
+        consulta.press('ArrowDown')
+        page.keyboard.press('ArrowDown')
+        expect(page.get_by_role('button',name=f"Abrir {numero}")).to_be_focused()
+        page.keyboard.press('Enter')
+        tabla=page.get_by_role('table',name='Productos de la cotización')
+        expect(tabla).to_be_visible()
+        page.keyboard.press('Escape')
+        tabla.get_by_role('button',name='Resma oficio').click()
+        expect(tabla.get_by_role('button',name='Resma oficio')).to_have_attribute('aria-current','true')
+        page.get_by_role('textbox',name='Precio de la línea seleccionada').fill('2380')
+        tabla.get_by_role('button',name='Toner Brother TN1060').click()
+        expect(page.get_by_role('dialog')).to_be_visible()
+        page.get_by_role('button',name='Guardar y continuar').click()
+        expect(tabla.get_by_role('button',name='Toner Brother TN1060')).to_have_attribute('aria-current','true')
+        page.get_by_role('button',name='Ir al campo').first.click()
+        expect(page.get_by_role('textbox',name='Nombre o razón social')).to_be_focused()
+        page.set_viewport_size({'width':390,'height':850})
+        page.wait_for_function("getComputedStyle(document.querySelector('.gv-lista tbody tr')).display === 'grid'")
+        assert tabla.bounding_box()['width']<=390
+        page.set_viewport_size({'width':1440,'height':930})
+        page.locator('.st-key-vista').get_by_text('Historial',exact=True).click()
+        historial=page.get_by_role('table',name='Cotizaciones del historial')
+        expect(historial).to_be_visible()
+        historial.get_by_role('button',name=numero).click()
+        expect(historial.get_by_role('button',name=numero)).to_have_attribute('aria-current','true')
+        page.get_by_role('textbox',name='Buscar',exact=True).fill(numero)
+        page.get_by_role('textbox',name='Buscar',exact=True).press('Enter')
+        expect(historial.get_by_role('button',name=numero_otro)).to_have_count(0)
+        page.get_by_role('button',name='Seguir editando esta cotización').click()
+        page.get_by_role('button',name='Volver al historial').click()
+        expect(page.get_by_role('textbox',name='Buscar',exact=True)).to_have_value(numero)
+        page.locator('.st-key-vista').get_by_text('Biblioteca',exact=True).click()
+        page.get_by_role('button',name='Sin foto · 1').click()
+        page.get_by_text('Galería',exact=True).click()
+        page.get_by_role('button',name='Ver producto').click()
+        expect(page.get_by_text('Detalle del producto',exact=True)).to_be_visible()
+        page.get_by_role('button',name='Limpiar búsqueda y filtros').click()
+        assert not errores, errores
+        print('Chrome: actividad, teclado, resaltado, filas, guardado, foco de alertas, móvil, historial y galería OK')
+
+
+def ejecutar():
+    with TemporaryDirectory() as temp:
+        carpeta = Path(temp) / "biblioteca"
+        bib = Biblioteca(carpeta)
+        bib.registrar("TN1060", "Toner Brother")
+        hist = Historial(carpeta)
+        primero = [
+            dict(cantidad=1, descripcion="Toner Brother TN1060", clave_auto="TN1060", unitario=1000),
+            dict(cantidad=2, descripcion="Resma oficio", clave_auto="RESMA", unitario=1000),
+        ]
+        segundo = [dict(cantidad=1, descripcion="Cartucho nuevo", clave_auto="NUEVO", unitario=2000)]
+        numeros = []
+        for lineas in (primero, segundo):
+            identificador, numero = hist.crear({}, lineas, {})
+            hist.actualizar(identificador, datos=dict(lineas=lineas, paso=2))
+            numeros.append(numero)
+        entorno = dict(os.environ, GIOVAL_DATA_DIR=temp, GIOVAL_REQUIRE_ACCESS="false", GIOVAL_PROFILES="false")
+        comando = [
+            sys.executable, "-m", "streamlit", "run", "app.py",
+            "--server.address", "127.0.0.1", "--server.port", "8610",
+            "--server.headless", "true", "--global.developmentMode", "false",
+            "--browser.gatherUsageStats", "false",
+        ]
+        with subprocess.Popen(comando, env=entorno) as servidor:
+            try:
+                for _ in range(60):
+                    try:
+                        with urlopen("http://127.0.0.1:8610/_stcore/health", timeout=1) as respuesta:
+                            if respuesta.status == 200:
+                                break
+                    except (OSError, URLError):
+                        if servidor.poll() is not None:
+                            raise RuntimeError("Streamlit se cerró al iniciar.")
+                        time.sleep(0.5)
+                else:
+                    raise RuntimeError("Streamlit no respondió a tiempo.")
+                comprobar_interfaz(*numeros)
+                assert hist.obtener(1)["datos"]["lineas"][1]["unitario"] == 2000
+            finally:
+                servidor.terminate()
+                servidor.wait(timeout=15)
+
+
+if __name__ == "__main__":
+    ejecutar()
