@@ -59,11 +59,14 @@ def comprobar_interfaz(numero, numero_otro):
         page.keyboard.press('Escape')
         tabla.get_by_role('button',name='Resma oficio').click()
         expect(tabla.get_by_role('button',name='Resma oficio')).to_have_attribute('aria-current','true')
+        expect(page.get_by_role("heading", name="Fila 2 · Resma oficio")).to_be_visible()
         page.get_by_role('textbox',name='Precio de la línea seleccionada').fill('2380')
+        expect(page.locator("#gv-estado-guardado")).to_have_text("Cambios pendientes")
         tabla.get_by_role('button',name='Toner Brother TN1060').click()
         expect(page.get_by_role('dialog')).to_be_visible()
         page.get_by_role('button',name='Guardar y continuar').click()
         expect(tabla.get_by_role('button',name='Toner Brother TN1060')).to_have_attribute('aria-current','true')
+        expect(page.locator("#gv-estado-guardado")).to_contain_text("Guardado a las")
         barra = page.locator(".st-key-barra_cotizacion")
         expect(barra.get_by_role("button", name="Guardar borrador")).to_be_visible()
         assert barra.evaluate("e => getComputedStyle(e).position") == "sticky"
@@ -76,6 +79,14 @@ def comprobar_interfaz(numero, numero_otro):
         page.wait_for_function("getComputedStyle(document.querySelector('.gv-lista tbody tr')).display === 'grid'")
         assert tabla.bounding_box()['width']<=390
         expect(page.locator(".st-key-gv_nav_movil")).to_be_visible()
+        tabla.get_by_role("button", name="Resma oficio").click()
+        panel = page.get_by_role("dialog", name="Fila 2 · Resma oficio")
+        expect(panel).to_be_visible()
+        expect(page.locator('[data-testid="stSidebar"]')).to_be_hidden()
+        assert panel.bounding_box()["width"] <= 390
+        panel.get_by_role("button", name="Volver a productos").click()
+        expect(panel).to_be_hidden()
+        expect(tabla.get_by_role("button", name="Resma oficio")).to_be_focused()
         ancho_cabecera = cabecera.bounding_box()
         for etiqueta in botones:
             posicion = acciones.get_by_role("button", name=etiqueta).bounding_box()
@@ -125,6 +136,11 @@ def comprobar_canastas_y_evidencia(browser, numero):
     page.get_by_role("button", name="Siguiente: revisar").click()
     page.get_by_role("button", name="Crear el PDF para revisar").click()
     expect(page.get_by_text("Requisito sin evidencia textual · Cartucho nuevo · 500 hojas")).to_be_visible()
+    seccion = page.get_by_role("combobox", name="Ir a una sección del PDF")
+    anterior = seccion.input_value()
+    page.locator(".st-key-ver_evidencia_revision_0").get_by_role("button").click()
+    expect(page.locator(".st-key-gv_inspeccion_pdf")).to_contain_text("Fila 1 · Cartucho nuevo")
+    expect(seccion).to_have_value(anterior)
     expect(page.get_by_role("button", name="Confirmar versión y habilitar descarga")).to_be_disabled()
     page.close()
 

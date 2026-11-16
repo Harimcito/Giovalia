@@ -1,13 +1,14 @@
 :root{
   --gv-ink:#f3f5fd;--gv-muted:#a8b7d0;--gv-canvas:#0a0d17;--gv-panel:#111a2a;
   --gv-panel-strong:#18253d;--gv-line:#2b3a56;--gv-indigo:#3f5bff;
+  --gv-seleccion:#21345a;--gv-foco:#abc0ff;--gv-ok:#8ce9bd;--gv-revisar:#ffd28a;--gv-error:#ff9ca8;
   --gv-link:#a8bcff;--gv-signal:#2cd9ff;--gv-teal:#61dfc0;
 }
 [data-testid="stAppViewContainer"]{
   background:
-    radial-gradient(ellipse at 85% 0%,#17316a38,transparent 30rem),
-    linear-gradient(#698dff0a 1px,transparent 1px),
-    linear-gradient(90deg,#698dff0a 1px,transparent 1px),
+    radial-gradient(ellipse at 85% 0%,#17316a20,transparent 28rem),
+    linear-gradient(#698dff04 1px,transparent 1px),
+    linear-gradient(90deg,#698dff04 1px,transparent 1px),
     var(--gv-canvas);
   background-size:auto,40px 40px,40px 40px,auto;
 }

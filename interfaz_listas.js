@@ -27,7 +27,13 @@ export default function render({parentElement, data, setTriggerValue}) {
       label.className = "gv-etiqueta";
       cell.append(label);
       if (i !== 0) {
-        cell.append(node("span", valor));
+        const contenido = node("span", valor);
+        if (data.columnas[i] === "Entrega" && typeof valor === "string") {
+          if (valor.startsWith("En stock")) contenido.className = "gv-entrega-lista gv-entrega-confirmada";
+          else if (valor.startsWith("A pedido") || valor.startsWith("Por confirmar"))
+            contenido.className = "gv-entrega-lista gv-entrega-pendiente";
+        }
+        cell.append(contenido);
         return;
       }
       const button = node("button", valor);
@@ -35,7 +41,10 @@ export default function render({parentElement, data, setTriggerValue}) {
       button.dataset.fila = id;
       if (id === data.activa) button.setAttribute("aria-current", "true");
       button.onclick = () => {
-        const abrir = () => setTriggerValue("fila", id);
+        const abrir = () => {
+          if (data.proteger) window.giovaliaAbrirLinea?.(id === data.activa);
+          setTriggerValue("fila", id);
+        };
         if (!data.proteger || !window.giovaliaSolicitarNavegacion?.(abrir)) abrir();
       };
       row.onclick = (event) => {

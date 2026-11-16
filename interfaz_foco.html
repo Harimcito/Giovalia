@@ -28,20 +28,69 @@
     if (resaltado && resaltado !== e.target) resaltado.classList.remove("gv-destino");
   });
   let atendido;
+  const estrecha = matchMedia("(max-width:1100px)");
+  const detalle = () => document.querySelector(".st-key-gv_detalle_linea");
+  const editar = () => document.querySelector('[data-testid="stMain"]');
+  const filaActiva = () => document.querySelector('.st-key-gv_area_edicion .gv-lista button[aria-current="true"]');
+  let desplazamiento = 0;
+  window.giovaliaAbrirLinea = (enfocar = true) => {
+    const panel = detalle();
+    if (!panel || !estrecha.matches) return;
+    if (!document.documentElement.hasAttribute("data-gv-linea-abierta")) desplazamiento = editar()?.scrollTop || 0;
+    document.documentElement.setAttribute("data-gv-linea-abierta", "");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-labelledby", "gv-titulo-linea");
+    if (enfocar) panel.querySelector("[data-gv-cerrar-linea]")?.focus({preventScroll:true});
+  };
+  function cerrarLinea(devolverFoco = true) {
+    document.documentElement.removeAttribute("data-gv-linea-abierta");
+    for (const atributo of ["role", "aria-modal", "aria-labelledby"]) detalle()?.removeAttribute(atributo);
+    if (!devolverFoco) return;
+    editar()?.scrollTo({top: desplazamiento, behavior:"instant"});
+    filaActiva()?.focus({preventScroll:true});
+  }
+  estrecha.addEventListener("change", () => cerrarLinea(false));
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest?.("[data-gv-cerrar-linea]")) return;
+    if (!window.giovaliaSolicitarNavegacion?.(cerrarLinea)) cerrarLinea();
+  });
+  document.addEventListener("keydown", (e) => {
+    const panel = detalle();
+    if (!panel || !document.documentElement.hasAttribute("data-gv-linea-abierta") ||
+        document.querySelector("dialog[open], [data-testid=stDialog]")) return;
+    if (e.key === "Escape" && !document.querySelector('[role="listbox"]')) {
+      e.preventDefault();
+      if (!window.giovaliaSolicitarNavegacion?.(cerrarLinea)) cerrarLinea();
+    }
+    if (e.key !== "Tab" || document.querySelector('[role="listbox"]')) return;
+    const controles = [...panel.querySelectorAll('button, input, [tabindex]')]
+      .filter(c => c.getClientRects().length && !c.disabled && c.tabIndex >= 0);
+    const indice = controles.indexOf(document.activeElement);
+    if (controles.length && (indice < 0 || (e.shiftKey ? indice === 0 : indice === controles.length - 1))) {
+      e.preventDefault();
+      controles[e.shiftKey ? controles.length - 1 : 0].focus();
+    }
+  });
   function simplificar(texto) {
     return texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
   }
   function actualizar() {
+    if (!detalle() && document.documentElement.hasAttribute("data-gv-linea-abierta")) cerrarLinea(false);
+    if (document.documentElement.hasAttribute("data-gv-linea-abierta") && detalle()?.getAttribute("role") !== "dialog")
+      window.giovaliaAbrirLinea(false);
     const destino = document.getElementById("gv-destino");
     if (destino && destino !== atendido) {
+      if (destino.dataset.linea === "1") window.giovaliaAbrirLinea(false);
       const campo = document.querySelector(destino.dataset.selector);
       campo?.closest("details")?.setAttribute("open", "");
       if (campo?.getClientRects().length) {
         atendido = destino;
-        if (destino.dataset.movil !== "1" || matchMedia("(max-width:800px)").matches) {
+        if (destino.dataset.movil !== "1" || estrecha.matches) {
           campo.classList.add("gv-destino");
           campo.scrollIntoView({block:"center"});
-          campo.focus({preventScroll:true});
+          if (destino.dataset.movil === "1" && estrecha.matches) window.giovaliaAbrirLinea();
+          else campo.focus({preventScroll:true});
         }
       }
     }

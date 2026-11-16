@@ -330,8 +330,7 @@ def mostrar_pasos(actual: int):
         with st.container(horizontal=True, vertical_alignment="center"):
             numero = E.get('cot_numero') or E.get('informe', {}).get('resumen', {}).get('numero', '')
             st.markdown(f"**Cotización {numero}**")
-            if E.get("_ultima_guarda") and not E.get("_conflicto_guardado"):
-                st.badge(f"Guardada · {E['_ultima_guarda']}", icon=":material/cloud_done:", color="green")
+            estado_guardado = st.empty()
             st.button("Borradores", icon=":material/arrow_back:", type="tertiary",
                       key="cotizacion_volver_borradores", on_click=limpiar_estado_trabajo,
                       disabled=bool(E.get("_conflicto_guardado")))
@@ -348,6 +347,25 @@ def mostrar_pasos(actual: int):
                 st.badge("Precios registrados", icon=":material/check_circle:", color="green")
         if not cliente_actual()["nombre"]:
             st.badge("Requiere revisión · Falta el nombre del cliente", icon=":material/edit_note:", color="orange")
+    return estado_guardado
+
+
+def mostrar_estado_guardado(contenedor):
+    version = E.get("_cotizacion_version") or ""
+    nivel, texto = "pendiente", "Cambios pendientes"
+    if E.get("_conflicto_guardado"):
+        nivel, texto = "error", "Conflicto de guardado · conserva tus cambios"
+    elif E.get("_error_guardado"):
+        nivel, texto = "error", "No se pudo guardar · vuelve a intentarlo"
+    elif version:
+        nivel = "listo"
+        hora = version[11:19]
+        texto = f"Guardado a las {hora}" if hora else "Guardado"
+    contenedor.html(
+        f'<span id="gv-estado-guardado" role="status" aria-live="polite" data-nivel="{nivel}" '
+        f'data-acuse="{E.get("_acuse_guardado", 0)}:{E.get("_acuse_linea", 0)}" '
+        f'data-texto="{html.escape(texto)}">{html.escape(texto)}</span>'
+    )
 
 
 def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
@@ -863,23 +881,27 @@ def persistir_borrador():
         sort_keys=True, ensure_ascii=False, default=str,
     )
     if E.get("_snapshot_guardado_id") == cot_id and E.get("_snapshot_guardado") == huella:
-        return
-    registro = hist.obtener(cot_id)
-    if not registro:
+        E.pop("_error_guardado", None)
         return
     try:
+        if not hist.obtener(cot_id):
+            E["_error_guardado"] = True
+            return
         hist.actualizar_si_version(cot_id, E.get("_cotizacion_version"), datos=datos, **campos_guardado)
     except hs.ConflictoActualizacion as exc:
         E["_conflicto_guardado"] = True
         E["_conflicto_guardado_id"] = cot_id
         E["_conflicto_guardado_mensaje"] = str(exc)
         return
+    except (OSError, sqlite3.Error):
+        E["_error_guardado"] = True
+        return
+    E.pop("_error_guardado", None)
     registro_actual = hist.obtener(cot_id)
     if registro_actual:
         E["_cotizacion_version"] = registro_actual.get("actualizado")
     E["_snapshot_guardado_id"] = cot_id
     E["_snapshot_guardado"] = huella
-    E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
 
 def widget_numero_cotizacion():
@@ -1117,8 +1139,8 @@ def boton_actualizar_totales():
                 refrescar_excel_actual()
         except Exception as exc:
             st.warning(f"El cálculo está actualizado, pero el Excel intermedio no se regeneró: {exc}")
-        E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        st.success("Totales recalculados y borrador guardado.")
+        if not E.get("_error_guardado"):
+            st.success("Totales recalculados y borrador guardado.")
 
 
 def refrescar_excel_actual(*, archivar=True):
@@ -1633,7 +1655,7 @@ def pedido_ui(fuente: str):
     marcar_cambios_cabecera()
 
     if "orden_df" not in E:
-        sigue_cotizacion.button("Siguiente", disabled=True, key="siguiente_sin_pedido", width="stretch")
+        sigue_cotizacion.button("Siguiente", type="primary", disabled=True, key="siguiente_sin_pedido", width="stretch")
         st.info("Escribe o carga un pedido para comenzar. Tus datos de cliente y el número se guardan en el borrador.")
         persistir_borrador()
         return
@@ -1833,7 +1855,7 @@ def cotizacion_ui():
 
 def paso_1():
     visual.titulo("Pedido", "Elige cómo cargar los productos de la cotización.", "Cotización", "")
-    atras_cotizacion.button("Volver", key="inicio_desde_pedido", width="stretch", on_click=limpiar_estado_trabajo)
+    atras_cotizacion.button("Volver", key="inicio_desde_pedido", type="tertiary", width="stretch", on_click=limpiar_estado_trabajo)
     if E.get("fuente_pedido") not in ETIQUETAS_FUENTES:
         E["fuente_pedido"] = FUENTE_TEXTO
     fuente = st.segmented_control(
@@ -2070,7 +2092,11 @@ def detalle_linea_editor():
     indice = E["linea_editor"]
     linea = lineas[indice]
     st.html('<span id="giovalia-detalle-linea" tabindex="-1"></span>')
-    st.subheader(f"{indice + 1}. {linea['descripcion']}")
+    st.html(
+        '<div class="gv-identidad-linea">'
+        f'<h3 id="gv-titulo-linea">Fila {indice + 1} · {html.escape(linea["descripcion"])}</h3>'
+        '<button type="button" data-gv-cerrar-linea>Volver a productos</button></div>'
+    )
     con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
     previo = linea.get("unitario")
     mostrado = None if previo is None else ct.precio_para_mostrar(previo, con_iva)
@@ -2222,7 +2248,7 @@ def mostrar_faltantes_cotizacion():
 def paso_2():
     visual.titulo("Editar cotización", "Edita las líneas que irán en la propuesta.", "Cotización", "")
     st.caption("Ctrl+K buscar · Alt+N agregar línea y Enter · Alt+P siguiente precio · Ctrl+S guardar")
-    trabajo = st.container()
+    trabajo = st.container(key="gv_area_edicion")
     resumen = st.container(key="totales_editor_cotizacion")
     tabla, detalle = trabajo.columns([2.5, 1.3], border=True)
     with tabla:
@@ -2259,7 +2285,7 @@ def paso_2():
                         campos["origen"] = "descripcion"
                     lineas[indice] = {**lineas[indice], **campos, "unitario": neto, "precio_neto": neto}
                     aplicar_lineas_editor(lineas)
-                if not E.get("_conflicto_guardado"):
+                if not (E.get("_conflicto_guardado") or E.get("_error_guardado")):
                     E["_estado_acuse_linea"] = "aplicado"
                     E["_revision_campos_linea"] = E.get("_revision_campos_linea", 0) + 1
                     st.toast("Borrador guardado")
@@ -2281,7 +2307,7 @@ def paso_2():
         mostrar_tabla_lineas(densidad == "Compacta")
         estado = st.container(horizontal=True)
         mostrar_deshacer_lineas()
-    with detalle, st.expander("Detalle de la línea", expanded=True):
+    with detalle, st.container(key="gv_detalle_linea"):
         detalle_linea_editor()
     with resumen:
         mostrar_totales()
@@ -2312,7 +2338,7 @@ def paso_2():
     editar_cabecera()
     panel_revision()
 
-    if atras_cotizacion.button("← Volver", key="editor_volver_pedido", width="stretch"):
+    if atras_cotizacion.button("← Volver", key="editor_volver_pedido", type="tertiary", width="stretch"):
         E.pop("_deshacer_lineas", None)
         con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
         E["orden_df"] = pd.DataFrame({
@@ -2330,11 +2356,14 @@ def paso_2():
         E["_orden_coincidencias"] = referencias_lineas_guardadas(E["lineas"])
         E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
         ir_a(1)
-    if sigue_cotizacion.button("Siguiente: fotos y fichas →", key="editor_ir_fotos", type="primary", width="stretch"):
-        claves, _ = datos_productos()
-        if not claves:
-            st.error("Marca al menos un producto en la columna **Incluir** para buscar sus fotos y fichas.")
-            return
+    claves, _ = datos_productos()
+    if not claves:
+        sigue_cotizacion.caption("Incluye al menos un producto en la tabla.")
+    elif any(ln.get("incluir", True) and ln.get("unitario") is None and ln.get("precio_neto") is None
+             for ln in E["lineas"]):
+        sigue_cotizacion.caption("Faltan precios. Puedes completarlos antes de emitir.")
+    if sigue_cotizacion.button("Siguiente: fotos y fichas", key="editor_ir_fotos", type="primary",
+                               width="stretch", disabled=not claves):
         persistir_borrador()
         ir_a(3)
 
@@ -2615,9 +2644,9 @@ def paso_3():
     claves, descripciones = datos_productos()
     if not claves:
         st.warning("No hay productos seleccionados. Marca al menos uno en el paso anterior.")
-        if atras_cotizacion.button("← Volver", key="anexos_volver_sin_productos", width="stretch"):
+        if atras_cotizacion.button("← Volver", key="anexos_volver_sin_productos", type="tertiary", width="stretch"):
             ir_a(2)
-        sigue_cotizacion.button("Siguiente", disabled=True, key="anexos_sin_productos", width="stretch")
+        sigue_cotizacion.button("Siguiente", type="primary", disabled=True, key="anexos_sin_productos", width="stretch")
         return
     anexos = {clave: estado_anexos(clave, True) for clave in claves}
     faltan = [clave for clave, (foto, ficha, opcional) in anexos.items() if not foto or not (ficha or opcional)]
@@ -2692,7 +2721,7 @@ def paso_3():
         st.info("No hay productos que coincidan con este filtro.")
 
     st.divider()
-    if atras_cotizacion.button("← Volver", width="stretch"):
+    if atras_cotizacion.button("← Volver", type="tertiary", width="stretch"):
         ir_a(2)
     if sigue_cotizacion.button("Siguiente: revisar y crear el PDF →", type="primary", width="stretch"):
         persistir_borrador()
@@ -2799,6 +2828,8 @@ def congelar_anexos_cotizacion():
     persistir_borrador()
     if E.get("_conflicto_guardado"):
         raise hs.ConflictoActualizacion("Recarga la cotización antes de generar una versión.")
+    if E.get("_error_guardado"):
+        raise OSError("Vuelve a guardar el borrador antes de generar una versión.")
 
 
 def resumen_pdf(documento):
@@ -2819,6 +2850,7 @@ def resumen_pdf(documento):
 
 def generar_pdf(estado=None):
     """Prepara un PDF y su Excel para revisar, sin confirmar la emisión."""
+    E.pop("_inspeccion_pdf", None)
     def progreso(etapa):
         if estado is not None:
             estado.update(label=etapa)
@@ -2895,12 +2927,12 @@ def paso_4():
                 st.error(f"No pude preparar el PDF. {error}")
             else:
                 st.rerun()
-        if atras_cotizacion.button("← Volver a fotos y fichas", width="stretch"):
+        if atras_cotizacion.button("← Volver a fotos y fichas", type="tertiary", width="stretch"):
             ir_a(3)
     else:
         informe = E["informe"]
         st.subheader(f"Vista previa · {informe['paginas']} páginas")
-        visor, acciones = st.columns([2.1, 1])
+        visor, acciones = st.container(key="gv_revision_pdf").columns([2.2, 1])
         with visor:
             secciones = informe.get("secciones", [])
             rotulos = ["Documento completo", *(f"{nombre} · pág. {inicio + 1}" for nombre, inicio, _ in secciones)]
@@ -2922,7 +2954,7 @@ def paso_4():
 
 
 def acciones_vista_pdf(informe):
-    with st.container(border=True):
+    with st.container(border=True, key="gv_resumen_pdf"):
         st.subheader("Revisar y aprobar")
         if resumen := informe.get("resumen"):
             st.caption("Cliente")
@@ -2940,27 +2972,45 @@ def acciones_vista_pdf(informe):
         )
         alertas = [f"{texto} · " + ", ".join(informe[campo]) for campo, texto in etiquetas if informe.get(campo)]
         alertas += informe["paginas_revisar"]
-        alertas += informe.get("alertas_evidencia", [])
         revision = informe["validacion_excel"]
-        if alertas or revision:
-            with st.expander(f"Alertas de revisión ({len(alertas) + len(revision)})", expanded=True):
-                for alerta in alertas:
+        evidencia = informe.get("alertas_evidencia", [])
+        if alertas or revision or evidencia:
+            with st.expander(f"Pendientes ({len(alertas) + len(revision) + len(evidencia)})", expanded=True):
+                for i, alerta in enumerate(alertas):
                     st.text(alerta)
+                    if pagina := re.match(r"Página (\d+):", alerta):
+                        st.button(f"Ver página {pagina[1]}", key=f"ver_pagina_revision_{i}",
+                                  on_click=lambda n=int(pagina[1]): E.update(_inspeccion_pdf=("pagina", n)))
                 indices = [i for i, ln in enumerate(E["lineas"]) if ln.get("incluir", True)]
+                productos = [i for i in indices if E["lineas"][i].get("es_producto", True)]
+                for i, (linea, texto) in enumerate(evidencia):
+                    st.text(texto)
+                    if linea < len(productos):
+                        indice = productos[linea]
+                        st.button(f"Ver fila {indice + 1}", key=f"ver_evidencia_revision_{i}",
+                                  on_click=lambda n=indice: E.update(_inspeccion_pdf=("linea", n)))
                 for i, hallazgo in enumerate(revision):
                     linea = hallazgo.get("linea")
                     if linea is None:
                         mostrar_hallazgo(hallazgo, f"pdf_campo_{i}")
                     elif linea < len(indices):
-                        mostrar_hallazgo({**hallazgo, "linea": indices[linea]}, f"pdf_campo_{i}")
+                        indice = indices[linea]
+                        mostrar_hallazgo({**hallazgo, "linea": indice}, f"pdf_campo_{i}")
+                        st.button(f"Ver fila {indice + 1}", key=f"ver_linea_revision_{i}",
+                                  on_click=lambda n=indice: E.update(_inspeccion_pdf=("linea", n)))
                     else:
                         st.text(hallazgo["texto"])
+        else:
+            st.badge("Sin pendientes", icon=":material/check_circle:", color="green")
+        mostrar_inspeccion_pdf()
         if not E.get("pdf_confirmado"):
             requiere_revision = bool(informe["paginas_revisar"] or informe["ficha_ilegible"]
                                      or informe.get("alertas_evidencia")
                                      or any(item["nivel"] == "error" for item in informe["validacion_excel"]))
             acepto = not requiere_revision or st.checkbox("Revisé las alertas y quiero aprobar esta versión",
                                                           key="ok_revision_pdf")
+            if not acepto:
+                sigue_cotizacion.caption("Marca la casilla de revisión para aprobar.")
             if sigue_cotizacion.button("Confirmar versión y habilitar descarga", type="primary", width="stretch", disabled=not acepto):
                 try:
                     confirmar_pdf()
@@ -2975,11 +3025,36 @@ def acciones_vista_pdf(informe):
                                mime="application/pdf", type="primary", on_click="ignore")
             st.download_button("Descargar la cotización en Excel", E["xlsx_vista_previa"],
                                file_name=Path(E["pdf_nombre"]).with_suffix(".xlsx").name, on_click="ignore")
-        if atras_cotizacion.button("Volver a editar", key="salir_vista_previa", width="stretch"):
+        if atras_cotizacion.button("Volver a editar", key="salir_vista_previa", type="tertiary", width="stretch"):
             for campo in ("pdf_bytes", "xlsx_vista_previa", "pdf_nombre", "informe", "pdf_confirmado"):
                 E.pop(campo, None)
             E["editado_manual"] = True
             st.rerun()
+
+
+def mostrar_inspeccion_pdf():
+    destino = E.get("_inspeccion_pdf")
+    if destino is None:
+        return
+    tipo, numero = destino
+    with st.container(border=True, key="gv_inspeccion_pdf"):
+        st.button("Cerrar detalle", type="tertiary", key="cerrar_inspeccion_pdf",
+                  on_click=lambda: E.pop("_inspeccion_pdf", None))
+        if tipo == "pagina":
+            contenido = interfaz.fragmento_pdf(E["pdf_bytes"], numero - 1, numero)
+            try:
+                st.pdf(contenido, height=340, key=f"alerta_pagina_{numero}", alt=f"Página {numero} para revisar")
+            except Exception:
+                st.download_button("Descargar página", contenido, file_name=f"pagina-{numero}.pdf",
+                                   mime="application/pdf", on_click="ignore")
+        elif 0 <= numero < len(E["lineas"]):
+            linea = E["lineas"][numero]
+            st.text(f"Fila {numero + 1} · {linea['descripcion']}")
+            st.caption(f"Cantidad · {linea['cantidad']:g}")
+            precio = linea.get("unitario")
+            if precio is None:
+                precio = linea.get("precio_neto")
+            st.caption(f"Precio neto unitario · {rv.clp(precio) if precio is not None else 'Pendiente'}")
 
 
 # ============================================================== HISTORIAL
@@ -4227,7 +4302,7 @@ else:
     E.setdefault("paso", 1)
     if E["paso"] > 1 and "lineas" not in E:
         E["paso"] = 1
-    mostrar_pasos(E["paso"])
+    estado_guardado = mostrar_pasos(E["paso"])
     barra = st.container(key="barra_cotizacion")
     atras_cotizacion, guardar_cotizacion, sigue_cotizacion, total_cotizacion = barra.columns(
         [1.05, 1.05, 1.45, 0.95], vertical_alignment="center"
@@ -4235,9 +4310,11 @@ else:
     {1: paso_1, 2: paso_2, 3: paso_3, 4: paso_4}[E["paso"]]()
     if guardar_cotizacion.button("Guardar borrador", key="guardar_editor", icon=":material/save:", width="stretch",
                                  disabled=bool(E.get("_conflicto_guardado") or E.get("pdf_bytes"))):
+        E["_acuse_guardado"] = E.get("_acuse_guardado", 0) + 1
         persistir_borrador()
-        if not E.get("_conflicto_guardado"):
+        if not (E.get("_conflicto_guardado") or E.get("_error_guardado")):
             st.toast("Borrador guardado")
+    mostrar_estado_guardado(estado_guardado)
     total_cotizacion.markdown(f"Total con IVA  \n**{rv.clp(totales_actuales()['total'])}**")
 
 if destino := E.pop("_destino_visual", None):
@@ -4248,4 +4325,5 @@ if destino := E.pop("_destino_visual", None):
         "cantidad": '[aria-label="Cantidad de la línea seleccionada"]',
     }
     selector = html.escape(selectores[destino])
-    st.html(f'<span id="gv-destino" hidden data-selector="{selector}" data-movil="{int(destino == "linea")}"></span>')
+    st.html(f'<span id="gv-destino" hidden data-selector="{selector}" data-movil="{int(destino == "linea")}" '
+            f'data-linea="{int(destino in ("linea", "precio", "cantidad"))}"></span>')

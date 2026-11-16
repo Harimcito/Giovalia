@@ -152,13 +152,13 @@ def revisar_ficha(linea, resolver):
 
 def alertas_evidencia(lineas, resolver):
     alertas = []
-    for linea in lineas:
+    for indice, linea in enumerate(lineas):
         if linea.get(evidencia.CAMPO) and linea.get("incluir", True) and linea.get("es_producto", True):
             _, aviso, resultados = revisar_ficha(linea, resolver)
-            alertas.extend(f"Requisito sin evidencia textual · {linea['descripcion']} · {requisito}"
+            alertas.extend((indice, f"Requisito sin evidencia textual · {linea['descripcion']} · {requisito}")
                            for requisito, paginas in resultados.items() if not paginas)
             if aviso:
-                alertas.append(f"{linea['descripcion']} · {aviso}")
+                alertas.append((indice, f"{linea['descripcion']} · {aviso}"))
     return alertas
 
 
