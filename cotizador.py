@@ -294,7 +294,8 @@ class Biblioteca:
                 for clave in indice_actual.keys() | combinado.keys():
                     antes, despues = indice_actual.get(clave, {}), combinado.get(clave, {})
                     for campo in ("nombre", "costo_neto", "precio_neto", "margen_pct", "precio_recomendado_neto",
-                                  "estado_stock", "stock_confirmado_el", "stock_fuente"):
+                                  "estado_stock", "stock_confirmado_el", "stock_fuente", "stock_cantidad",
+                                  "reposicion_dias", "tipo_insumo"):
                         if antes.get(campo) != despues.get(campo):
                             self.registrar_cambio("Biblioteca", clave, campo, antes.get(campo), despues.get(campo))
 
@@ -465,7 +466,7 @@ class Biblioteca:
     CAMPOS_EDITABLES = (
         "nombre", "descripcion", "costo_neto", "margen_pct", "notas", "precio_neto", "ficha_no_requerida", "estado_stock",
         "precio_recomendado_neto", "precio_recomendado_fuente", "precio_recomendado_fecha",
-        "stock_confirmado_el", "stock_fuente",
+        "stock_confirmado_el", "stock_fuente", "stock_cantidad", "reposicion_dias", "tipo_insumo",
         "marca", "modelo", "gtin", "mpn", "unidad_venta", "compatibilidad", "atributos_tecnicos",
         "seo_titulo", "seo_descripcion", "seo_slug", "seo_url_publica", "seo_imagen_url", "seo_imagen_alt",
         "seo_precio_publico", "seo_disponibilidad", "seo_condicion", "geo_resumen", "geo_faq",
@@ -511,8 +512,10 @@ class Biblioteca:
                 ficha[k] = deepcopy(v)
             elif k == "ficha_no_requerida":
                 ficha[k] = bool(v)
+            elif k == "reposicion_dias":
+                ficha[k] = int(v)
             else:
-                ficha[k] = float(v) if k in ("costo_neto", "margen_pct", "precio_neto",
+                ficha[k] = float(v) if k in ("stock_cantidad", "costo_neto", "margen_pct", "precio_neto",
                                              "precio_recomendado_neto", "seo_precio_publico") else str(v).strip()
         return ficha
 

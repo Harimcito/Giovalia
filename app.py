@@ -37,6 +37,8 @@ import operacion_comercial as op
 import operacion_comercial_ui as gestion
 import flujo_cotizacion as flujo
 import stock_catalogo
+import cotizacion_opciones as opciones_cot
+import cotizacion_opciones_ui as opciones_ui
 import edicion_lineas as edicion
 import interfaz_giovalia as interfaz
 import identidad_visual as visual
@@ -1024,6 +1026,10 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
             "incluir": _esta_marcado(fila.get(COL_INCLUIR), es_producto),
             **flujo.datos_entrega(fila.get(flujo.COL_STOCK), fila.get(flujo.COL_PLAZO)),
         })
+    normalizadas = opciones_cot.normalizar_alternativas(nuevas)
+    if normalizadas != nuevas:
+        aplicar_lineas_editor(normalizadas)
+        st.rerun()
     E["tabla_edit"] = editada
     E["lineas"] = nuevas
     if cambio:
@@ -1318,6 +1324,8 @@ def selector_borradores():
         m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas), border=True)
         m4.metric("Productos en biblioteca", len(bib.indice), border=True)
 
+    st.caption("Vistas guardadas")
+    mostrar_vistas_guardadas()
     der, izq = st.columns([2.2, 1])
     with izq:
         with st.container(border=True, key="gv_inicio_retomar"):
@@ -1981,7 +1989,7 @@ def registrar_deshacer(anteriores, nuevas):
 
 
 def aplicar_lineas_editor(lineas, *, registrar=True):
-    lineas = edicion.identificar(lineas)
+    lineas = opciones_cot.normalizar_alternativas(edicion.identificar(lineas))
     if registrar:
         registrar_deshacer(E.get("lineas", []), lineas)
     tabla = tabla_desde_lineas(lineas)
@@ -2131,7 +2139,7 @@ def mostrar_tabla_lineas(compacta):
         [ln[edicion.ID], ln["descripcion"], ln.get("clave_auto") or "—", str(ln["cantidad"]),
          montos.clp(ct.precio_para_mostrar(ln["unitario"], con_iva)) if ln.get("unitario") is not None else "Sin precio",
          f"{ln.get('disponibilidad') or flujo.POR_CONFIRMAR} · {flujo.texto_plazo(flujo.plazo_efectivo(ln))}"
-         if ln.get("incluir", True) else "No incluido"]
+         if ln.get("incluir", True) else "Alternativa" if ln.get(opciones_cot.GRUPO) else "No incluido"]
         for ln in lineas
     ]
     elegida = interfaz.lista(
@@ -2158,6 +2166,58 @@ def mostrar_entregas(lineas):
                 st.write(" · ".join(productos))
 
 
+def editar_alternativas():
+    lineas = E["lineas"]
+    candidatas = {ln[edicion.ID]: f"{i}. {ln['descripcion']}" for i, ln in enumerate(lineas, 1)
+                  if ln.get("es_producto", True) and not ln.get(opciones_cot.GRUPO)}
+    grupos = opciones_cot.grupos(lineas)
+    if len(candidatas) < 2 and not grupos:
+        return
+    with st.expander("Alternativas de productos"):
+        st.caption("En cada grupo se suma solo la opción seleccionada. El PDF incluye el detalle de las alternativas.")
+        if len(candidatas) >= 2:
+            seleccion = st.multiselect("Líneas del nuevo grupo", candidatas, format_func=candidatas.__getitem__,
+                                       key=f"nuevas_opciones_{E['cot_id']}_{E.get('editor_version', 0)}")
+            if st.button("Agrupar como alternativas", disabled=len(seleccion) < 2):
+                grupo = uuid4().hex
+                activa = next((ln[edicion.ID] for ln in lineas
+                              if ln[edicion.ID] in seleccion and ln.get("incluir", True)), seleccion[0])
+                aplicar_lineas_editor([
+                    {**ln, opciones_cot.GRUPO: grupo, "incluir": ln[edicion.ID] == activa}
+                    if ln[edicion.ID] in seleccion else ln for ln in lineas
+                ])
+                st.rerun()
+        for numero, (grupo, opciones) in enumerate(grupos.items(), 1):
+            nombres = {ln[edicion.ID]: f"{ln['descripcion']} · {i}" for i, ln in enumerate(opciones, 1)}
+            actual = next((ln[edicion.ID] for ln in opciones if ln.get("incluir", True)), None)
+            elegida = st.selectbox(f"Opción que suma al total · Grupo {numero}", nombres,
+                                  index=list(nombres).index(actual) if actual else None,
+                                  format_func=nombres.__getitem__, key=f"alternativa_{grupo}_{actual}")
+            if elegida != actual:
+                aplicar_lineas_editor([
+                    {**ln, "incluir": ln[edicion.ID] == elegida} if ln.get(opciones_cot.GRUPO) == grupo else ln
+                    for ln in lineas
+                ])
+                st.rerun()
+            if st.button(f"Desagrupar opciones {numero}", key=f"desagrupar_{grupo}"):
+                aplicar_lineas_editor([
+                    {k: v for k, v in ln.items() if k != opciones_cot.GRUPO}
+                    if ln.get(opciones_cot.GRUPO) == grupo else ln for ln in lineas
+                ])
+                st.rerun()
+
+
+def mostrar_faltantes_cotizacion():
+    with st.expander("Stock y faltantes de la cotización", icon=":material/inventory:"):
+        st.caption("Suma las cantidades repetidas por código y usa la última confirmación de la biblioteca.")
+        faltantes = opciones_cot.faltantes(E["lineas"], bib)
+        if faltantes:
+            st.dataframe(faltantes, hide_index=True, width="stretch")
+            st.caption("Las cantidades vacías requieren confirmación en la biblioteca.")
+        else:
+            st.caption("La biblioteca cubre las cantidades de los productos incluidos.")
+
+
 def paso_2():
     visual.titulo("Editar cotización", "Edita las líneas que irán en la propuesta.", "Cotización", "")
     st.caption("Ctrl+K buscar · Alt+N agregar línea y Enter · Alt+P siguiente precio · Ctrl+S guardar")
@@ -2165,6 +2225,19 @@ def paso_2():
     resumen = st.container(key="totales_editor_cotizacion")
     tabla, detalle = trabajo.columns([2.5, 1.3], border=True)
     with tabla:
+        if codigo := opciones_ui.buscar_impresora(bib, "cotizacion"):
+            ficha = bib.indice[codigo]
+            precio = ficha.get("precio_neto")
+            stock = stock_catalogo.datos_stock(ficha)
+            disponibilidad = stock["estado_stock"] if stock["stock_confirmado_el"] else flujo.POR_CONFIRMAR
+            aplicar_lineas_editor([*E["lineas"], {
+                "descripcion": ficha.get("nombre") or codigo, "cantidad": 1, "clave_auto": codigo,
+                "es_producto": True, "incluir": True, "origen": "descripcion",
+                "precio_neto": precio, "unitario": precio,
+                **flujo.datos_entrega(disponibilidad, ficha.get("reposicion_dias")
+                                      if disponibilidad == flujo.A_PEDIDO else None),
+            }])
+            st.rerun()
         nueva = st.text_input("Nueva línea", key="linea_nueva", placeholder="Descripción del producto y Enter")
         densidad = st.segmented_control("Vista de la tabla", ["Cómoda", "Compacta"],
                                        default=E.get("pref_densidad", "Cómoda"), key="densidad_editor",
@@ -2212,6 +2285,8 @@ def paso_2():
     with resumen:
         mostrar_totales()
     lineas = [ln for ln in E.get("lineas", []) if ln.get("es_producto", True)]
+    editar_alternativas()
+    mostrar_faltantes_cotizacion()
     mostrar_entregas(lineas)
     sin_vinculo = productos_pendientes_de_asociar(lineas)
     with estado:
@@ -2756,7 +2831,11 @@ def generar_pdf(estado=None):
             resolver_anexos=lambda clave: estado_anexos(clave, True),
             progreso=progreso,
         )
-        pdf_bytes = salida.read_bytes()
+        pdf_bytes, extra = opciones_cot.anexar_opciones(salida.read_bytes(), E.get("lineas", []))
+        if extra:
+            inicio_opciones = informe["paginas"]
+            informe["paginas"] += extra
+            informe["secciones"].append(("Opciones de productos", inicio_opciones, informe["paginas"]))
     progreso("Comprobando la vista previa")
     informe["paginas_revisar"] = revision_doc.revisar_paginas(pdf_bytes, informe["paginas_cotizacion"])
     documento = pc.leer_para_pdf(ruta)
@@ -3049,6 +3128,52 @@ def lista_cotizaciones(titulo, registros, *, key, activa=None, memoria=None):
     return elegida if elegida in {r["id"] for r in registros} else None
 
 
+def mostrar_vistas_guardadas(filtros=None):
+    cuenta = identidad["usuario"] if identidad else None
+    clave, original, vistas = opciones_ui.cargar_vistas(hist, cuenta)
+    contexto = "historial" if filtros is not None else "inicio"
+    acciones = st.container(horizontal=True)
+    for nombre, vista in vistas.items():
+        if not isinstance(vista, (list, tuple)) or len(vista) != 4:
+            continue
+        acciones.button(nombre, key=f"vista_{contexto}_{nombre}", on_click=aplicar_vista_guardada,
+                        args=(tuple(vista),))
+    if filtros is None:
+        return
+    personalizadas = {k: v for k, v in vistas.items() if k not in opciones_ui.VISTAS_INICIALES}
+    with st.form("administrar_vistas_guardadas"):
+        nombre = st.text_input("Nombre para guardar los filtros actuales", max_chars=45, key="nombre_vista_cotizaciones")
+        borrar = st.selectbox("Vista personal a eliminar", personalizadas, index=None, key="borrar_vista_cotizaciones")
+        guardar = st.form_submit_button("Guardar vista")
+        eliminar = st.form_submit_button("Eliminar vista", disabled=not personalizadas)
+    nombre = nombre.strip()
+    if guardar and (not nombre or nombre in opciones_ui.VISTAS_INICIALES):
+        st.warning("Escribe un nombre distinto de las vistas incluidas.")
+        return
+    if guardar and len(personalizadas) >= 8 and nombre not in personalizadas:
+        st.warning("Puedes tener hasta ocho vistas personales.")
+        return
+    if guardar or (eliminar and borrar):
+        if guardar:
+            personalizadas[nombre] = list(filtros)
+        else:
+            personalizadas.pop(borrar)
+        try:
+            hist.set_config(clave, json.dumps(personalizadas, ensure_ascii=False), anterior=original)
+        except hs.ConflictoActualizacion as exc:
+            st.warning(str(exc))
+        else:
+            st.rerun()
+
+
+def aplicar_vista_guardada(filtros):
+    texto, estado, periodo, vencen = filtros
+    navegar_vista(VISTAS[1])
+    E.update(h_texto=texto, h_estado=estado, h_periodo=periodo, h_vence_hoy=vencen,
+             _filtros_historial=(texto, estado, periodo), _filtro_vence_hoy=vencen)
+    E.pop("_historial_seleccion", None)
+
+
 def historial_cotizaciones():
     E.setdefault("h_ver", 0)
     todos = hist.listar(incluir_datos=False)
@@ -3063,16 +3188,21 @@ def historial_cotizaciones():
     estados = ["Todos", *hs.ESTADOS]
     periodos = ["Todas las fechas", "Últimos 30 días", "Últimos 90 días", "Este año"]
     filtros = E.get("_filtros_historial", ("", estados[0], periodos[0]))
+    for clave, valor in zip(("h_texto", "h_estado", "h_periodo"), filtros):
+        E.setdefault(clave, valor)
+    E.setdefault("h_vence_hoy", E.get("_filtro_vence_hoy", False))
     texto = f1.text_input(
         "Buscar",
         placeholder="Número de cotización" if GIOVAL_REQUIRE_ACCESS else "Número, cliente, RUT o notas",
-        key="h_texto", value=filtros[0],
+        key="h_texto",
     )
-    estado = f2.selectbox("Estado", estados, index=estados.index(filtros[1]), key="h_estado")
-    periodo = f3.selectbox(
-        "Período", periodos, index=periodos.index(filtros[2]), key="h_periodo",
-    )
+    estado = f2.selectbox("Estado", estados, key="h_estado")
+    periodo = f3.selectbox("Período", periodos, key="h_periodo")
+    vencen = st.checkbox("Vencen hoy", key="h_vence_hoy")
+    E["_filtro_vence_hoy"] = vencen
     E["_filtros_historial"] = (texto, estado, periodo)
+    with st.expander("Vistas guardadas"):
+        mostrar_vistas_guardadas((texto, estado, periodo, vencen))
     regs = hist.listar(texto, estado, incluir_datos=False) if texto.strip() or estado != "Todos" else todos
     hoy = date.today()
     if periodo == "Últimos 30 días":
@@ -3083,6 +3213,10 @@ def historial_cotizaciones():
         regs = [r for r in regs if str(r.get("fecha") or "")[:10] >= minimo.isoformat()]
     elif periodo == "Este año":
         regs = [r for r in regs if str(r.get("fecha") or "")[:4] == str(hoy.year)]
+    if vencen:
+        seguimientos = hist.seguimientos()
+        regs = [r for r in regs if r["estado"] in ("Borrador", "Enviada")
+                and seguimientos.get(r["id"], {}).get("vence") == hoy.isoformat()]
     st.caption(f"Mostrando {len(regs)} cotización(es) con los filtros seleccionados.")
     if not regs:
         st.info("No encontré cotizaciones con esos filtros. Cambia el estado, período o búsqueda.")
@@ -3092,7 +3226,7 @@ def historial_cotizaciones():
     if vigente not in {r["id"] for r in regs}:
         vigente = regs[0]["id"]
     ambito = E.setdefault("_ambito_historial", uuid4().hex)
-    huella = sha256(repr((ambito, texto, estado, periodo)).encode()).hexdigest()[:20]
+    huella = sha256(repr((ambito, texto, estado, periodo, vencen)).encode()).hexdigest()[:20]
     with lista:
         elegido = lista_cotizaciones("Cotizaciones del historial", regs, key=f"historial_lista_{huella}",
                                      activa=vigente, memoria=f"giovalia:historial:{huella}")
@@ -3255,7 +3389,8 @@ def abrir_producto_catalogo_ui(clave: str):
 
 def abrir_cliente_desde_busqueda(cliente):
     E.update(vista=VISTAS[1], h_texto=cliente["rut"] or cliente["nombre"],
-             h_estado="Todos", h_periodo="Todas las fechas", _cliente_busqueda=cliente)
+             h_estado="Todos", h_periodo="Todas las fechas", h_vence_hoy=False, _filtro_vence_hoy=False,
+             _cliente_busqueda=cliente)
 
 
 def mostrar_busqueda_global():
@@ -3322,6 +3457,7 @@ def editar_stock_masivo(visibles, filtro):
                 return
             try:
                 campos = stock_catalogo.campos_stock(estado, fecha, fuente)
+                campos["stock_cantidad"] = None
                 cantidad = bib.actualizar_varios(codigos, campos, bases)
             except (ValueError, OSError) as exc:
                 E.pop("_base_stock_masivo", None)
@@ -3356,9 +3492,15 @@ def editar_stock_individual(clave, seccion, *, incluye_costo=False):
         )
         fecha = c1.date_input("Fecha de confirmación", fecha_anterior or date.today(), max_value=date.today())
         fuente = c2.text_input("Proveedor o sucursal", confirmacion["stock_fuente"], max_chars=120)
+        cantidad_stock = base.get("stock_cantidad")
+        cantidad = c1.number_input("Cantidad disponible confirmada", min_value=0.0, step=1.0,
+                                   value=None if cantidad_stock is None else float(cantidad_stock))
+        reposicion = c2.number_input("Reposición (días)", min_value=0, step=1, value=base.get("reposicion_dias"))
         if st.form_submit_button("Guardar costo y stock" if incluye_costo else "Guardar stock", type="primary"):
             try:
                 campos = stock_catalogo.campos_stock(disponibilidad, fecha, fuente)
+                campos.update(stock_cantidad=cantidad if disponibilidad == flujo.EN_STOCK else None,
+                              reposicion_dias=reposicion)
                 if incluye_costo:
                     campos["costo_neto"] = costo
                 bib.actualizar(clave, version_esperada=base, **campos)
@@ -3437,6 +3579,8 @@ def vista_productos():
                 E["p_msg"] = ("ok", f"Producto {clave_nueva} agregado al catálogo.")
                 st.rerun()
 
+    if codigo := opciones_ui.buscar_impresora(bib, "biblioteca"):
+        abrir_producto_catalogo_ui(codigo)
     todas = bib.filas_catalogo()
     if not todas:
         st.info("Todavía no hay productos. Agrega uno aquí o se irán incorporando al preparar cotizaciones.")
@@ -3916,7 +4060,7 @@ def navegar_vista(seccion):
 def mostrar_cotizacion_historial(cot_id):
     navegar_vista(VISTAS[1])
     E.update(_historial_seleccion=cot_id, _filtros_historial=("", "Todos", "Todas las fechas"),
-             h_texto="", h_estado="Todos", h_periodo="Todas las fechas")
+             h_texto="", h_estado="Todos", h_periodo="Todas las fechas", h_vence_hoy=False, _filtro_vence_hoy=False)
 
 
 def abrir_enlace_guardado():

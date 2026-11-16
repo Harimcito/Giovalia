@@ -1,4 +1,5 @@
 import os
+from datetime import date
 import unittest
 from io import BytesIO
 from pathlib import Path
@@ -11,6 +12,7 @@ from pypdf import PdfReader
 from streamlit.testing.v1 import AppTest
 
 from cotizador import Biblioteca
+from cotizacion_opciones import GRUPO
 from flujo_cotizacion import buscar
 from historial import Historial
 from interfaz_giovalia import fragmento_pdf
@@ -46,6 +48,61 @@ class FlujosAppTests(unittest.TestCase):
     def pulsar(self, app, etiqueta):
         next(b for b in app.button if b.label.startswith(etiqueta)).click()
         self.recargar(app)
+
+    def test_pantalla_modelos_opciones_y_pdf(self):
+        biblioteca = Biblioteca(self.raiz / "biblioteca")
+        for codigo, nombre, precio in [("OEM", "Tóner original", 100), ("ALT", "Tóner compatible", 50)]:
+            biblioteca.registrar(codigo, nombre)
+            biblioteca.actualizar(codigo, compatibilidad="Brother HL-1212W",
+                                  tipo_insumo="Original" if codigo == "OEM" else "Alternativo",
+                                  precio_neto=precio, stock_cantidad=2, stock_confirmado_el=date.today().isoformat(),
+                                  estado_stock="En stock")
+        app = self.iniciar()
+        app.button(key="inicio_nueva_cotizacion").click()
+        self.recargar(app)
+        app.text_area(key="orden_texto").set_value("1 Tóner original\n1 Tóner compatible")
+        self.pulsar(app, "Leer el pedido")
+        self.pulsar(app, "Guardar pedido")
+        app.text_input(key="impresora_cotizacion").set_value("Brother HL-1212W")
+        self.recargar(app)
+        app.selectbox(key="compatible_cotizacion").select("OEM")
+        self.pulsar(app, "Agregar a la cotización")
+        self.assertEqual(app.session_state["lineas"][-1]["clave_auto"], "OEM")
+        grupo = next(w for w in app.multiselect if w.label == "Líneas del nuevo grupo")
+        ids = [ln["_editor_id"] for ln in app.session_state["lineas"][:2]]
+        grupo.set_value(ids)
+        self.recargar(app)
+        self.pulsar(app, "Agrupar como alternativas")
+        alternativas = next(w for w in app.selectbox if w.label.startswith("Opción que suma"))
+        alternativas.select(ids[1])
+        self.recargar(app)
+        seleccion = app.session_state["lineas"]
+        self.assertFalse(seleccion[0]["incluir"])
+        self.assertTrue(seleccion[1]["incluir"])
+        self.assertEqual(seleccion[0][GRUPO], seleccion[1][GRUPO])
+        datos = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])["datos"]
+        self.assertFalse(datos["lineas"][0]["incluir"])
+        self.pulsar(app, "Siguiente: fotos")
+        self.pulsar(app, "Siguiente: revisar")
+        self.pulsar(app, "Crear el PDF")
+        pdf = PdfReader(BytesIO(app.session_state["pdf_bytes"]))
+        self.assertIn("Opciones de productos", pdf.pages[-1].extract_text())
+
+    def test_vista_guardada_se_abre_desde_inicio(self):
+        app = self.iniciar()
+        app.button(key="inicio_nueva_cotizacion").click()
+        self.recargar(app)
+        self.pulsar(app, "Historial")
+        app.selectbox(key="h_estado").select("Borrador")
+        self.recargar(app)
+        app.text_input(key="nombre_vista_cotizaciones").set_value("Seguimiento local")
+        self.pulsar(app, "Guardar vista")
+        guardadas = Historial(self.raiz / "biblioteca").config("vistas_cotizaciones:local")
+        self.assertIsNotNone(guardadas)
+        self.assertIn("Seguimiento local", guardadas)
+        app = self.iniciar()
+        self.pulsar(app, "Seguimiento local")
+        self.assertEqual(app.selectbox(key="h_estado").value, "Borrador")
 
     def test_preferencias_ux_se_guardan_por_perfil(self):
         usuarios = Usuarios(self.raiz / "usuarios.db")

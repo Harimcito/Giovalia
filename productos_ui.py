@@ -7,6 +7,7 @@ import streamlit as st
 
 import catalogo_publico
 import seo_geo
+from cotizacion_opciones import TIPOS
 
 
 def editar_ficha(bib, clave):
@@ -46,6 +47,8 @@ def editar_ficha(bib, clave):
                                      max_chars=100, placeholder="Ej.: unidad, resma de 500 hojas")
         compatibilidad = st.text_area("Compatibilidad verificada", value=base.get("compatibilidad", ""),
                                       max_chars=600, height=75)
+        tipo = base.get("tipo_insumo")
+        tipo_insumo = st.selectbox("Tipo de insumo", TIPOS, index=TIPOS.index(tipo) if tipo in TIPOS else 0)
         atributos_tecnicos = st.text_area(
             "Atributos técnicos (una línea por atributo: Nombre: valor)",
             value=base.get("atributos_tecnicos", ""), max_chars=2000, height=100,
@@ -146,7 +149,7 @@ def editar_ficha(bib, clave):
                 bib.actualizar(clave, version_esperada=base, nombre=nombre.strip(), descripcion=descripcion.strip(),
                                marca=marca.strip(), modelo=modelo.strip(), gtin=gtin.strip(), mpn=mpn.strip(),
                                unidad_venta=unidad_venta.strip(), compatibilidad=compatibilidad.strip(),
-                               atributos_tecnicos=atributos_tecnicos.strip(), seo_titulo=seo_titulo.strip(),
+                               tipo_insumo=tipo_insumo, atributos_tecnicos=atributos_tecnicos.strip(), seo_titulo=seo_titulo.strip(),
                                seo_descripcion=seo_descripcion.strip(), seo_slug=seo_slug.strip(),
                                seo_url_publica=seo_url_publica.strip(), seo_imagen_url=seo_imagen_url.strip(),
                                seo_imagen_alt=seo_imagen_alt.strip(),
