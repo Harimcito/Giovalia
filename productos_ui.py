@@ -5,6 +5,7 @@ import json
 
 import streamlit as st
 
+import catalogo_publico
 import seo_geo
 
 
@@ -98,6 +99,9 @@ def editar_ficha(bib, clave):
             "Estado del producto", condiciones,
             index=condiciones.index(base.get("seo_condicion"))
             if base.get("seo_condicion") in condiciones else 0)
+        derechos = st.selectbox("Derechos de la imagen pública", ["Sin confirmar", "propia", "licenciada"],
+                                key=f"derechos_publicacion_{clave}")
+        aprobar = st.checkbox("Aprobar ficha para la exportación pública")
         if st.form_submit_button("Guardar producto", icon=":material/save:", type="primary"):
             if not nombre.strip():
                 st.warning("Escribe un nombre para el producto.")
@@ -116,6 +120,28 @@ def editar_ficha(bib, clave):
                 except ValueError:
                     st.warning("La fecha de verificación debe tener formato AAAA-MM-DD.")
                     return
+            publicacion = dict(base.get("publicacion") or {})
+            if aprobar:
+                evidencia = [
+                    {"campo": campo, "referencia": geo_fuente.strip(), "verificado_el": geo_verificado.strip()}
+                    for campo in ("nombre", "descripcion")
+                ]
+                publicacion.update(
+                    estado="aprobado", nombre=nombre.strip(), descripcion=descripcion.strip(),
+                    marca=marca.strip(), gtin=gtin.strip(), codigo_fabricante=mpn.strip(),
+                    slug=seo_geo.slugify(seo_slug or nombre), fuentes=evidencia,
+                    imagenes=[{"url": seo_imagen_url.strip(), "alt": seo_imagen_alt.strip(),
+                              "aprobada": derechos != "Sin confirmar", "derechos": derechos}],
+                )
+                pendientes = []
+                if not catalogo_publico.crear_producto_jsonld(
+                    clave, {**base, "publicacion": publicacion}, "https://gioval.cl", pendientes,
+                ):
+                    st.warning("Para aprobar, asigna un identificador y completa nombre, descripción, fuente, "
+                               "fecha de verificación, imagen HTTPS, texto alternativo y derechos de uso.")
+                    return
+            elif publicacion.get("estado") == "aprobado":
+                publicacion["estado"] = "borrador"
             try:
                 bib.actualizar(clave, version_esperada=base, nombre=nombre.strip(), descripcion=descripcion.strip(),
                                marca=marca.strip(), modelo=modelo.strip(), gtin=gtin.strip(), mpn=mpn.strip(),
@@ -128,7 +154,8 @@ def editar_ficha(bib, clave):
                                seo_disponibilidad=(seo_disponibilidad if seo_disponibilidad != "No indicar" else None),
                                seo_condicion=(seo_condicion if seo_condicion != "No indicar" else None),
                                geo_resumen=geo_resumen.strip(), geo_faq=geo_faq.strip(),
-                               geo_fuente=geo_fuente.strip(), geo_verificado=geo_verificado.strip())
+                               geo_fuente=geo_fuente.strip(), geo_verificado=geo_verificado.strip(),
+                               publicacion=publicacion or None)
             except ValueError as error:
                 st.warning(str(error))
                 st.caption("Cierra y vuelve a abrir esta sección para cargar los datos actuales.")

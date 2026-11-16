@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,6 +9,7 @@ from pypdf import PdfReader
 from reportlab.lib.pagesizes import A4
 
 import catalogo_clientes as catalogo
+import catalogo_publico
 import seo_geo
 from cotizador import Biblioteca
 
@@ -73,6 +75,30 @@ class CatalogoTests(unittest.TestCase):
 
 
 class SeoTests(unittest.TestCase):
+    def test_exportacion_aprobada_preserva_uuid_y_excluye_datos_internos(self):
+        with TemporaryDirectory() as temporal:
+            biblioteca = Biblioteca(temporal)
+            biblioteca.registrar("TN1060", precio_neto=15000)
+            ficha = biblioteca.indice["TN1060"]
+            identificador = ficha["id_global"]
+            hoy = date.today().isoformat()
+            biblioteca.actualizar("TN1060", publicacion={
+                "estado": "aprobado", "slug": "toner-tn1060", "nombre": "Tóner TN1060",
+                "descripcion": "Cartucho negro TN1060",
+                "fuentes": [{"campo": campo, "referencia": "Referencia privada", "verificado_el": hoy}
+                            for campo in ("nombre", "descripcion")],
+                "imagenes": [{"url": "https://gioval.cl/tn1060.jpg", "alt": "Tóner",
+                              "aprobada": True, "derechos": "propia"}],
+            })
+            biblioteca.renombrar("TN1060", "TONER-TN1060")
+            self.assertEqual(biblioteca.indice["TONER-TN1060"]["id_global"], identificador)
+            biblioteca.registrar("PENDIENTE", precio_neto=20000)
+            exportacion, errores = catalogo_publico.exportar_catalogo(biblioteca.indice, "https://gioval.cl")
+            self.assertEqual(len(exportacion["@graph"]), 1)
+            self.assertEqual(errores, [])
+            self.assertNotIn("offers", exportacion["@graph"][0])
+            self.assertNotIn("Referencia privada", json.dumps(exportacion))
+
     def test_jsonld_solo_incluye_precio_explicito_y_enlaces_validos(self):
         ficha = {"clave": "TN1060", "nombre": "Tóner TN1060", "gtin": "4006381333931", "precio_neto": 10000,
                  "seo_disponibilidad": "En stock", "seo_url_publica": "https://localhost/tn1060",
