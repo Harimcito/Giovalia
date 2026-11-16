@@ -4020,7 +4020,7 @@ etiquetas_vista = {
 }
 if codigo := E.pop("_abrir_producto_catalogo", None):
     abrir_producto_desde_catalogo(codigo)
-with cabecera:
+with col_estado:
     opciones_ux = experiencia.preferencias(E, identidad, acceso)
 vistas_principales = [INICIO, VISTAS[0], PRECIOS, VISTAS[2], VISTAS[3], VISTAS[1], VISTAS[4], VISTAS[5]]
 vista_activa = E.get("vista", INICIO)
@@ -4059,12 +4059,14 @@ if E.get("_ruta_visual") != ruta_visual:
     E["_ruta_visual"] = ruta_visual
     E["_secuencia_visual"] = E.get("_secuencia_visual", 0) + 1
     if not E.get("_destino_visual"):
-        visual.inicio_de_seccion(E["_secuencia_visual"])
+        with st.container(key="gv_scroll_runtime"):
+            visual.inicio_de_seccion(E["_secuencia_visual"])
 E["_vista_renderizada"] = vista
-st.html(Path(__file__).with_name("atajos_cotizacion.html"), unsafe_allow_javascript=True)
-st.html(Path(__file__).with_name("cambios_linea.html"), unsafe_allow_javascript=True)
+with st.container(key="gv_scripts_runtime"):
+    st.html(Path(__file__).with_name("atajos_cotizacion.html"), unsafe_allow_javascript=True)
+    st.html(Path(__file__).with_name("cambios_linea.html"), unsafe_allow_javascript=True)
+    st.html(Path(__file__).with_name("interfaz_foco.html"), unsafe_allow_javascript=True)
 st.html(Path(__file__).with_name("interfaz_giovalia.css"))
-st.html(Path(__file__).with_name("interfaz_foco.html"), unsafe_allow_javascript=True)
 mostrar_busqueda_global()
 if vista == INICIO:
     with st.container(key="gv_inicio"):
