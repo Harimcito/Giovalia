@@ -44,6 +44,8 @@ class FlujosAppTests(unittest.TestCase):
         self.recargar(app)
 
     def test_editar_cotizacion_y_generar_pdf_excel(self):
+        biblioteca = Biblioteca(self.raiz / "biblioteca")
+        biblioteca.registrar("RESMA-CARTA", "Resma carta", precio_neto=500)
         app = self.iniciar()
         app.button(key="inicio_nueva_cotizacion").click()
         self.recargar(app)
@@ -64,16 +66,52 @@ class FlujosAppTests(unittest.TestCase):
             app.checkbox(key="ok_riesgo").check()
             self.recargar(app)
         self.pulsar(app, "Crear el PDF")
-        pdf = PdfReader(BytesIO(app.session_state["pdf_bytes"]))
+        previo = app.session_state["pdf_bytes"]
+        self.assertFalse(app.session_state["pdf_confirmado"])
+        sin_confirmar = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])
+        self.assertIsNone(sin_confirmar["pdf"])
+        if any(c.key == "ok_revision_pdf" for c in app.checkbox):
+            app.checkbox(key="ok_revision_pdf").check()
+            self.recargar(app)
+        self.pulsar(app, "Confirmar versión")
+        self.assertEqual(app.session_state["pdf_bytes"], previo)
+        pdf = PdfReader(BytesIO(previo))
         self.assertIn("Segunda descripción", " ".join(p.extract_text() for p in pdf.pages))
         registro = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])
+        self.assertEqual(Path(registro["pdf"]).read_bytes(), previo)
         self.assertEqual(registro["total"], 7140)
+        biblioteca.refrescar_si_cambio()
+        self.assertEqual(biblioteca.indice["RESMA-CARTA"]["precio_neto"], 500)
+        self.assertEqual(Historial(self.raiz / "biblioteca").versiones(registro["id"])[0]["etiqueta"],
+                         "PDF confirmado")
         with Path(registro["xlsx"]).open("rb") as archivo:
             wb = load_workbook(archivo, read_only=True)
             try:
                 self.assertTrue(any("Segunda descripción" in fila for fila in wb.active.values))
             finally:
                 wb.close()
+
+    def test_historial_compara_y_restaura_una_version(self):
+        hist = Historial(self.raiz / "biblioteca")
+        cot_id, numero = hist.crear({}, [], {})
+        base = {"lineas": [{"cantidad": 2, "descripcion": "Resma original", "unitario": 1000,
+                            "clave_auto": "RESMA", "es_producto": True, "incluir": True}]}
+        hist.actualizar(cot_id, datos=base, total=2380)
+        hist.guardar_version(cot_id, hist.obtener(cot_id)["actualizado"], "Original")
+        version = hist.versiones(cot_id)[0]["id"]
+        hist.actualizar(cot_id, datos={"lineas": [{**base["lineas"][0], "cantidad": 3}]}, total=3570)
+        app = self.iniciar()
+        app.session_state["vista"] = "Historial"
+        self.recargar(app)
+        app.session_state[f"versiones_{cot_id}"] = True
+        self.recargar(app)
+        app.checkbox(key=f"version_seguro_{cot_id}_{version}").check()
+        self.recargar(app)
+        app.button(key=f"restaurar_version_{cot_id}").click()
+        self.recargar(app)
+        self.assertEqual(app.session_state["cot_numero"], numero)
+        self.assertEqual(app.session_state["lineas"][0]["cantidad"], 2)
+        self.assertEqual(hist.versiones(cot_id)[0]["contenido"]["total"], 3570)
 
     def test_modo_compartido_pide_clave_y_cierra_sesion(self):
         with patch.dict(os.environ, {"GIOVAL_REQUIRE_ACCESS": "true", "GIOVAL_ACCESS_PASSWORD": "clave-de-prueba"}):

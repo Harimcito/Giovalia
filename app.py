@@ -17,8 +17,10 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from pypdf.errors import PdfReadError
 
 import acceso
+import anexos_cotizacion as anexos_doc
 import buscador as bs
 import cotizador as ct
 import historial as hs
@@ -27,6 +29,7 @@ import mercado_publico as mp
 import ui_montos as montos
 import pdf_cotizacion as pc
 import revisor as rv
+import revision_cotizacion as revision_doc
 import catalogo_clientes as cc
 from productos_ui import editar_ficha
 
@@ -178,22 +181,21 @@ def restaurar_respaldo_inicial(carpeta: Path, datos_zip: bytes) -> tuple[int, in
             # El respaldo puede venir de otro computador y contener rutas absolutas del disco
             # de origen. Al importar, reescribe esas rutas al destino central antes de moverlo.
             registros = conexion.execute(
-                "SELECT id, numero FROM cotizaciones ORDER BY id"
+                "SELECT id, xlsx, pdf FROM cotizaciones ORDER BY id"
             ).fetchall()
-            for registro_id, numero in registros:
-                numero_seguro = re.sub(r"[^A-Za-z0-9._-]", "_", str(numero))
-                carpeta_archivos = stage / "cotizaciones" / numero_seguro
-                xlsx_stage = carpeta_archivos / f"{numero_seguro}.xlsx"
-                pdf_stage = carpeta_archivos / f"{numero_seguro}.pdf"
-                xlsx_destino = carpeta / "cotizaciones" / numero_seguro / f"{numero_seguro}.xlsx"
-                pdf_destino = carpeta / "cotizaciones" / numero_seguro / f"{numero_seguro}.pdf"
+            for registro_id, xlsx, pdf in registros:
+                destinos = []
+                for ruta in (xlsx, pdf):
+                    partes = PurePosixPath((ruta or "").replace("\\", "/")).parts
+                    relativa = Path(*partes[-3:]) if len(partes) >= 3 and partes[-3] == "cotizaciones" else None
+                    if (relativa and (stage / relativa).resolve().is_relative_to(stage)
+                            and (stage / relativa).is_file()):
+                        destinos.append(str(carpeta / relativa))
+                    else:
+                        destinos.append(None)
                 conexion.execute(
                     "UPDATE cotizaciones SET xlsx=?, pdf=? WHERE id=?",
-                    (
-                        str(xlsx_destino) if xlsx_stage.is_file() else None,
-                        str(pdf_destino) if pdf_stage.is_file() else None,
-                        registro_id,
-                    ),
+                    (*destinos, registro_id),
                 )
             conexion.commit()
             integridad = conexion.execute("PRAGMA integrity_check").fetchone()[0]
@@ -360,76 +362,13 @@ def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
     return resultados
 
 
-def asociar_lineas_con_biblioteca(
-    lineas: list[dict], aplicar_precios_catalogo: bool = False
-) -> dict[str, dict]:
-    """Restaura vínculos guardados y agrega coincidencias altas o probables."""
-    pendientes = []
-    for linea in lineas:
-        descripcion = _texto_seguro(linea.get("descripcion"))
-        clave = _texto_seguro(linea.get("clave_auto")).upper()
-        ficha = bib.indice.get(clave, {})
-        valida = bool(clave in bib.indice and not ct.identidad_conflictiva(clave, ficha))
-        codigo_fuente = _texto_seguro(linea.get("codigo_fuente")).upper()
-        ficha_codigo = bib.indice.get(codigo_fuente, {})
-        codigo_catalogo = bool(codigo_fuente in bib.indice and not ct.identidad_conflictiva(codigo_fuente, ficha_codigo))
-        es_producto = bool(linea.get("es_producto", True))
-        if es_producto and descripcion and not valida and not codigo_catalogo:
-            pendientes.append(descripcion)
-
-    coincidencias = resolver_productos_catalogo(pendientes)
-    mapa_orden = {}
-    for linea in lineas:
-        descripcion = _texto_seguro(linea.get("descripcion"))
-        normalizada = ct.normalizar(descripcion)
-        if not descripcion or not linea.get("es_producto", True):
-            continue
-
-        clave = _texto_seguro(linea.get("clave_auto")).upper()
-        ficha = bib.indice.get(clave, {})
-        valida = bool(clave in bib.indice and not ct.identidad_conflictiva(clave, ficha))
-        match = coincidencias.get(normalizada, {})
-        if not valida:
-            clave = ""
-            codigo_fuente = _texto_seguro(linea.get("codigo_fuente")).upper()
-            ficha_codigo = bib.indice.get(codigo_fuente, {})
-            codigo_catalogo = bool(
-                codigo_fuente in bib.indice
-                and not ct.identidad_conflictiva(codigo_fuente, ficha_codigo)
-            )
-            if codigo_catalogo:
-                clave = codigo_fuente
-                linea["clave_auto"] = clave
-                linea["origen"] = "biblioteca"
-            # Coincidencias altas y probables se vinculan; las bajas quedan pendientes.
-            elif match.get("certeza") in {"alta", "media"}:
-                propuesta = _texto_seguro(match.get("clave")).upper()
-                ficha_propuesta = bib.indice.get(propuesta, {})
-                if propuesta in bib.indice and not ct.identidad_conflictiva(propuesta, ficha_propuesta):
-                    clave = propuesta
-                    linea["clave_auto"] = clave
-                    linea["origen"] = match.get("origen", "similitud")
-            if not clave:
-                linea["clave_auto"] = ""
-                linea["origen"] = "descripcion"
-        else:
-            linea["clave_auto"] = clave
-            linea["origen"] = linea.get("origen") or "biblioteca"
-
-        if clave and (aplicar_precios_catalogo or (linea.get("unitario") is None and linea.get("precio_neto") is None)):
-            precio = bib.precio_sugerido(clave)
-            if precio is None:
-                precio = bib.indice.get(clave, {}).get("precio_neto")
-            if precio is not None:
-                linea["unitario"] = precio
-                linea["precio_neto"] = precio
-
-        mapa_orden[normalizada] = {
-            "clave": clave,
-            "origen": linea.get("origen") or ("biblioteca" if clave else "descripcion"),
-            "certeza": match.get("certeza", "alta" if clave else "baja"),
+def referencias_lineas_guardadas(lineas):
+    return {
+        ct.normalizar(linea.get("descripcion")): {
+            "clave": linea.get("clave_auto") or "", "origen": linea.get("origen") or "descripcion",
         }
-    return mapa_orden
+        for linea in lineas if linea.get("es_producto", True)
+    }
 
 
 def productos_pendientes_de_asociar(lineas: list[dict]) -> list[str]:
@@ -793,7 +732,7 @@ def guardar_precios_inventario(lineas: list[dict]):
     cambio_indice = False
     for ln in lineas:
         precio_neto = ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")
-        if not ln.get("es_producto") or precio_neto is None:
+        if not ln.get("es_producto") or precio_neto is None or not ln.get("incluir", True):
             continue
         descripcion = _texto_seguro(ln.get("descripcion"))
         clave = _texto_seguro(ln.get("clave_auto")).upper()
@@ -809,6 +748,10 @@ def guardar_precios_inventario(lineas: list[dict]):
         except (TypeError, ValueError):
             continue
 
+        try:
+            bib.carpeta(clave)
+        except ValueError:
+            continue
         ficha = bib.indice.setdefault(clave, {"nombre": descripcion or clave, "aliases": [], "id_global": str(uuid4())})
         nombre = descripcion or clave
         if not ficha.get("nombre"):
@@ -857,6 +800,7 @@ def persistir_borrador():
             orden = None
     datos = {
         "lineas": lineas,
+        "anexos": anexos_doc.limpiar_referencias(E.get("anexos_cotizacion")),
         "cliente": cliente,
         "origen_pedido": E.get("origen_pedido", "pedido"),
         "fuente_pedido": E.get("fuente_pedido", E.get("fuente_orden", "")),
@@ -886,20 +830,7 @@ def persistir_borrador():
     if not registro:
         return
     try:
-        if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
-            version_esperada = E.get("_cotizacion_version")
-            if not version_esperada:
-                E["_conflicto_guardado"] = True
-                E["_conflicto_guardado_id"] = cot_id
-                E["_conflicto_guardado_mensaje"] = (
-                    "Esta sesión no tiene una versión base de la cotización. Recárgala antes de guardar."
-                )
-                return
-            hist.actualizar_si_version(
-                cot_id, version_esperada, datos=datos, **campos_guardado
-            )
-        else:
-            hist.actualizar(cot_id, datos=datos, **campos_guardado)
+        hist.actualizar_si_version(cot_id, E.get("_cotizacion_version"), datos=datos, **campos_guardado)
     except hs.ConflictoActualizacion as exc:
         E["_conflicto_guardado"] = True
         E["_conflicto_guardado_id"] = cot_id
@@ -908,7 +839,6 @@ def persistir_borrador():
     registro_actual = hist.obtener(cot_id)
     if registro_actual:
         E["_cotizacion_version"] = registro_actual.get("actualizado")
-    guardar_precios_inventario(lineas)
     E["_snapshot_guardado_id"] = cot_id
     E["_snapshot_guardado"] = huella
     E["_ultima_guarda"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -1032,6 +962,7 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
             "cantidad": ct._cantidad(cantidad),
             "descripcion": ct.limpiar_descripcion(descripcion),
             "unitario": precio_neto,
+            "precio_neto": precio_neto,
             "es_producto": es_producto,
             "clave_auto": clave,
             "origen": origen,
@@ -1043,7 +974,6 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
         E["editado_manual"] = True
         for k in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
             E.pop(k, None)
-        guardar_precios_inventario(nuevas)
         # El Excel se regenera al pulsar "Actualizar totales" o al crear el PDF.
         # Evita operaciones de disco pesadas durante la edición normal de cada celda.
         persistir_borrador()
@@ -1105,7 +1035,7 @@ def boton_actualizar_totales():
         st.success("Totales recalculados y borrador guardado.")
 
 
-def refrescar_excel_actual():
+def refrescar_excel_actual(*, archivar=True):
     """Genera una copia actualizada del Excel para que el PDF use la última edición."""
     cot_id = E.get("cot_id")
     if not cot_id or "lineas" not in E:
@@ -1128,7 +1058,7 @@ def refrescar_excel_actual():
     cliente["numero"] = registro["numero"]
     ruta_tmp = Path(tempfile.mkdtemp()) / "cotizacion_actualizada.xlsx"
     ct.crear_cotizacion_xlsx(lineas_excel, cliente, ruta_tmp)
-    if GIOVAL_REQUIRE_ACCESS:
+    if GIOVAL_REQUIRE_ACCESS or not archivar:
         # El Excel contiene los datos del cliente de esta sesión: queda temporal y solo se descarga.
         E["ruta"] = ruta_tmp
     else:
@@ -1176,9 +1106,7 @@ def restaurar_borrador(cot_id: int):
         ln.setdefault("incluir", True)
         ln.setdefault("clave_auto", "")
         ln.setdefault("origen", "descripcion")
-    orden_coincidencias = asociar_lineas_con_biblioteca(
-        lineas_restauradas, aplicar_precios_catalogo=es_mercado_publico
-    )
+    orden_coincidencias = referencias_lineas_guardadas(lineas_restauradas)
     limpiar_estado_trabajo()
     try:
         fecha = date.fromisoformat(str(registro.get("fecha") or "")[:10])
@@ -1194,6 +1122,7 @@ def restaurar_borrador(cot_id: int):
         precios_modo=datos.get("precios_modo", OPCIONES_PRECIO[0 if registro.get("con_iva", 1) else 1]),
         origen_pedido=datos.get("origen_pedido", registro.get("origen", "pedido")),
         paso=int(datos.get("paso", 1)), lineas=lineas_restauradas,
+        anexos_cotizacion=anexos_doc.limpiar_referencias(datos.get("anexos")),
         orden_texto=datos.get("orden_texto", ""), fuente_orden=datos.get("fuente_orden", ""),
         fuente_pedido="Mercado Público" if es_mercado_publico else fuente_guardada,
         mercado_publico_codigo=mp_codigo, _mercado_publico_codigo=mp_codigo,
@@ -1215,7 +1144,7 @@ def restaurar_borrador(cot_id: int):
             "url_portal": "https://www.mercadopublico.cl/",
         }
         completar_comprador_mercado_publico(E["_mercado_publico_detalle"])
-    if isinstance(datos.get("orden_df"), list):
+    if datos.get("paso", 1) == 1 and isinstance(datos.get("orden_df"), list):
         df = pd.DataFrame(datos["orden_df"])
         for columna, defecto in (("Incluir", True), ("Cantidad", None), ("Producto", ""), ("Precio unitario", None)):
             if columna not in df:
@@ -1242,14 +1171,7 @@ def restaurar_borrador(cot_id: int):
             ln = lineas_por_descripcion.get(ct.normalizar(fila.get("Producto")))
             if ln:
                 neto = ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")
-                clave = _texto_seguro(ln.get("clave_auto")).upper()
-                precio_catalogo = bib.precio_sugerido(clave) if clave in bib.indice else None
-                if precio_catalogo is None and clave in bib.indice:
-                    precio_catalogo = bib.indice[clave].get("precio_neto")
-                usar_catalogo = bool(es_mercado_publico and precio_catalogo is not None)
-                if neto is not None and (precio_vacio or usar_catalogo):
-                    if usar_catalogo:
-                        neto = precio_catalogo
+                if neto is not None and precio_vacio:
                     E["orden_df"].at[indice, "Precio unitario"] = ct.precio_para_mostrar(neto, con_iva_guardado)
         E["orden_df_base"] = E["orden_df"].copy()
     elif lineas_restauradas:
@@ -1738,6 +1660,7 @@ def pedido_ui(fuente: str):
             }
             datos_cotizacion = {
                 "lineas": lineas_orden, "cliente": cliente, "precios_modo": E["precios_modo"],
+                "anexos": anexos_doc.limpiar_referencias(E.get("anexos_cotizacion")),
                 "origen_pedido": "pedido", "paso": 2,
                 "fuente_pedido": E.get("fuente_pedido", E.get("fuente_orden", "")),
                 "fuente_orden": E.get("fuente_orden", ""),
@@ -1963,6 +1886,11 @@ def paso_2():
         elif lineas:
             st.badge("Productos vinculados", icon=":material/link:", color="green")
     boton_actualizar_totales()
+    with st.expander("Actualizar precios de la biblioteca"):
+        st.caption("Si confirmas, los precios de las líneas incluidas quedarán disponibles para futuras cotizaciones.")
+        if st.button("Guardar precios en la biblioteca", key="confirmar_precios_biblioteca"):
+            guardar_precios_inventario(E["lineas"])
+            st.success("Precios guardados en la biblioteca.")
     mostrar_totales()
     agregar_desde_catalogo()
     revisar_asociaciones_catalogo(sin_vinculo)
@@ -2053,31 +1981,49 @@ def buscar_para(clave: str, q_foto: str, q_ficha: str, fotos=True, fichas=True) 
     return avisos
 
 
-def guardar_candidato(clave: str, tipo: str, c: dict):
-    bib.guardar_archivo(clave, tipo, "x" + c["ext"] if tipo == "foto" else "f.pdf", c["datos"])
+def cambiar_anexo(clave, campo, valor):
+    E.setdefault("anexos_cotizacion", {}).setdefault(clave, {})[campo] = valor
+    for llave in ("pdf_bytes", "xlsx_vista_previa", "informe", "pdf_confirmado"):
+        E.pop(llave, None)
+    persistir_borrador()
+
+
+def aplicar_anexo(clave, tipo, nombre, contenido, de_cotizacion):
+    if de_cotizacion:
+        cambiar_anexo(clave, tipo, anexos_doc.guardar(bib, tipo, contenido))
+    else:
+        bib.guardar_archivo(clave, tipo, nombre, contenido)
+
+
+def guardar_candidato(clave: str, tipo: str, c: dict, de_cotizacion: bool):
+    try:
+        aplicar_anexo(clave, tipo, "x" + c.get("ext", "") if tipo == "foto" else "f.pdf",
+                      c["datos"], de_cotizacion)
+    except (OSError, ValueError, PdfReadError) as error:
+        st.error(str(error))
+        return
     E.pop(f"cand_{tipo}_{clave}", None)
     st.rerun()
 
 
 @acceso.proteger
-def guardar_anexo_subido(clave: str, tipo: str):
-    """Guarda el archivo una vez, al recibirlo desde el selector."""
+def guardar_anexo_subido(clave: str, tipo: str, de_cotizacion: bool):
     llave = f"{tipo}_{clave}"
     E.pop(f"error_{llave}", None)
     subido = E.get(llave)
     if subido:
         try:
-            bib.guardar_archivo(clave, tipo, subido.name, subido.getvalue())
-        except (OSError, ValueError) as exc:
+            aplicar_anexo(clave, tipo, subido.name, subido.getvalue(), de_cotizacion)
+        except (OSError, ValueError, PdfReadError) as exc:
             E[f"error_{llave}"] = f"No pude guardar {subido.name}. {exc}"
 
 
-def estado_anexos(clave: str):
-    foto, ficha = bib.archivos(clave)
-    return foto, ficha, bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
+def estado_anexos(clave: str, de_cotizacion: bool = False):
+    seleccion = E.get("anexos_cotizacion", {}).get(clave, {}) if de_cotizacion else {}
+    return anexos_doc.resolver(bib, clave, seleccion)
 
 
-def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool):
+def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_cotizacion=False):
     aviso_ficha = ""
     if ficha:
         n = menciones_guardada(str(ficha), ficha.stat().st_mtime, clave) if bs.es_codigo(clave) else -2
@@ -2123,7 +2069,10 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool):
                 help="Útil para artículos de librería u otros productos sin ficha técnica. Seguirá incluyendo la foto si existe.",
             )
             if nueva_no_requerida != ficha_no_requerida:
-                bib.actualizar(clave, ficha_no_requerida=nueva_no_requerida)
+                if de_cotizacion:
+                    cambiar_anexo(clave, "ficha_opcional", nueva_no_requerida)
+                else:
+                    bib.actualizar(clave, ficha_no_requerida=nueva_no_requerida)
                 st.rerun()
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
@@ -2135,19 +2084,43 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool):
                     for aviso in buscar_para(clave, q_foto, q_ficha, fotos=not foto, fichas=buscar_ficha):
                         st.warning(aviso)
             with b2.popover("Más opciones", width="stretch"):
+                if de_cotizacion:
+                    st.caption("Los cambios se aplican a esta cotización. Usa anexos de producto.")
+                    seleccion = E.get("anexos_cotizacion", {}).get(clave, {})
+                    for tipo in ("foto", "ficha"):
+                        if st.button(f"Quitar {tipo} de esta cotización", key=f"quitar_{tipo}_{clave}"):
+                            cambiar_anexo(clave, tipo, None)
+                            st.rerun()
+                        if tipo in seleccion and st.button(f"Volver a usar {tipo} de la biblioteca",
+                                                           key=f"heredar_{tipo}_{clave}"):
+                            seleccion.pop(tipo)
+                            persistir_borrador()
+                            st.rerun()
+                    personalizados = [(tipo, ruta) for tipo, ruta in (("foto", foto), ("ficha", ficha))
+                                      if seleccion.get(tipo) and ruta]
+                    if personalizados and st.button("Copiar anexos seleccionados a la biblioteca",
+                                                        key=f"copiar_anexos_bib_{clave}"):
+                        try:
+                            bib.registrar(clave, nombre=desc)
+                            for tipo, ruta in personalizados:
+                                bib.guardar_archivo(clave, tipo, ruta.name, ruta.read_bytes())
+                        except (ValueError, OSError) as error:
+                            st.error(str(error))
+                        else:
+                            st.success("Anexos copiados a la ficha maestra.")
                 st.text_input("Buscar la foto como", value=sug_foto, key=f"qf_{clave}")
                 st.text_input("Buscar la ficha como", value=sug_ficha, key=f"qd_{clave}")
                 if ficha and st.button("Sacar la foto desde la ficha", key=f"xf_{clave}"):
                     E[f"cand_foto_{clave}"] = bs.fotos_de_ficha(ficha.read_bytes())
                 st.file_uploader("Subir mi propia foto", type=["jpg", "jpeg", "png", "webp"], key=f"foto_{clave}",
-                                 on_change=guardar_anexo_subido, args=(clave, "foto"))
+                                 on_change=guardar_anexo_subido, args=(clave, "foto", de_cotizacion))
                 st.file_uploader("Subir mi propia ficha (PDF)", type=["pdf"], key=f"ficha_{clave}",
-                                 on_change=guardar_anexo_subido, args=(clave, "ficha"))
+                                 on_change=guardar_anexo_subido, args=(clave, "ficha", de_cotizacion))
                 url_foto = st.text_input("…o pegar el enlace de una imagen", key=f"urlf_{clave}")
                 if st.button("Usar ese enlace de imagen", key=f"dlf_{clave}") and url_foto:
                     try:
                         datos, ext, _, _ = bs.descargar_imagen(url_foto.strip())
-                        bib.guardar_archivo(clave, "foto", "x" + ext, datos)
+                        aplicar_anexo(clave, "foto", "x" + ext, datos, de_cotizacion)
                         st.rerun()
                     except Exception:
                         st.error("No pude usar ese enlace.")
@@ -2155,7 +2128,7 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool):
                 if st.button("Usar ese enlace de PDF", key=f"dlp_{clave}") and url_pdf:
                     try:
                         datos, _ = bs.descargar_pdf(url_pdf.strip())
-                        bib.guardar_archivo(clave, "ficha", "f.pdf", datos)
+                        aplicar_anexo(clave, "ficha", "f.pdf", datos, de_cotizacion)
                         st.rerun()
                     except Exception:
                         st.error("No pude usar ese enlace.")
@@ -2179,7 +2152,7 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool):
                         st.caption(("Coincide con el código" if c["verificada"] else "Sin confirmar")
                                    + (" · baja calidad" if c.get("baja_resolucion") else ""))
                         if st.button("Elegir esta foto", key=f"uf_{clave}_{i}", width="stretch"):
-                            guardar_candidato(clave, "foto", c)
+                            guardar_candidato(clave, "foto", c, de_cotizacion)
         fichas_c = E.get(f"cand_ficha_{clave}")
         if fichas_c is not None:
             if not fichas_c:
@@ -2201,7 +2174,7 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool):
                     k2.markdown(f"{estado}  \n{c['titulo'][:80]}  \n[Abrir el PDF]({c['url']})")
                     if k2.button("Elegir esta ficha" if c["nivel"] >= 2 else "Elegirla igual",
                                  key=f"ufi_{clave}_{i}"):
-                        guardar_candidato(clave, "ficha", c)
+                        guardar_candidato(clave, "ficha", c, de_cotizacion)
 
 
 def paso_3():
@@ -2218,7 +2191,7 @@ def paso_3():
         if st.button("← Volver"):
             ir_a(2)
         return
-    anexos = {clave: estado_anexos(clave) for clave in claves}
+    anexos = {clave: estado_anexos(clave, True) for clave in claves}
     faltan = [clave for clave, (foto, ficha, opcional) in anexos.items() if not foto or not (ficha or opcional)]
     listos = len(claves) - len(faltan)
     st.progress(
@@ -2286,7 +2259,7 @@ def paso_3():
     st.caption(f"Mostrando {len(visibles)} de {len(claves)} productos. El filtro solo cambia la vista; no excluye productos de la cotización.")
     if visibles:
         for clave in visibles:
-            tarjeta(clave, descripciones[clave], *anexos[clave])
+            tarjeta(clave, descripciones[clave], *anexos[clave], de_cotizacion=True)
     else:
         st.info("No hay productos que coincidan con este filtro.")
 
@@ -2358,165 +2331,125 @@ def archivar_cotizacion(cot_id, **archivos):
     if GIOVAL_PROFILES and cot_id != E.get("cot_id"):
         version = hist.obtener(cot_id)["actualizado"]
     hist.guardar_archivos(cot_id, version_esperada=version, **archivos)
-    if GIOVAL_PROFILES:
+    if GIOVAL_PROFILES or not GIOVAL_REQUIRE_ACCESS:
         E["_cotizacion_version"] = hist.obtener(cot_id)["actualizado"]
 
 
-def registrar_en_historial(pdf_bytes: bytes):
-    """Guarda el PDF en el historial (y registra la cotización si venía de un Excel ya hecho)."""
-    cot_id = E.get("cot_id")
-    if cot_id and hist.obtener(cot_id):
-        archivar_cotizacion(cot_id, pdf=pdf_bytes)
-        return
-    if E.get("origen_pedido") == "cotizacion":
-        d = pc.leer_para_pdf(E["ruta"])
-        cli = {ct.normalizar(e): v for e, v in d["izquierda"] + d["derecha"]}
-        tot = {ct.normalizar(e): v for e, v in d["totales"]}
-        numero = hist.numero_libre(str(cli.get("NCOTIZACION") or Path(E["ruta"]).stem))
-        lineas = [{"cantidad": ln["cantidad"], "descripcion": ln["descripcion"], "precio_neto": ln["unitario"]}
-                  for ln in d["lineas"]]
-        cot_id, _ = hist.crear({"nombre": cli.get("NOMBRE", ""), "rut": cli.get("RUT", "")}, lineas,
-                               {"neto": tot.get("TOTALNETO") or 0, "iva": tot.get("IVA") or 0,
-                                "total": tot.get("TOTAL") or 0},
-                               con_iva=False, origen="cotizacion", numero=numero)
-        archivar_cotizacion(cot_id, xlsx=E["ruta"], pdf=pdf_bytes)
-        E["cot_id"] = cot_id
-        registro_nuevo = hist.obtener(cot_id)
-        E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
+def congelar_anexos_cotizacion():
+    claves, _ = datos_productos()
+    E["anexos_cotizacion"] = anexos_doc.congelar(bib, claves, E.get("anexos_cotizacion", {}))
+    persistir_borrador()
+    if E.get("_conflicto_guardado"):
+        raise hs.ConflictoActualizacion("Recarga la cotización antes de generar una versión.")
 
 
 def generar_pdf():
-    """Regenera el Excel con los datos actuales y genera el PDF/anexos."""
-    refrescar_excel_actual()
-    lineas = E.get("lineas", [])
-    finales = []
-    for ln in lineas:
-        if not _esta_marcado(ln.get("incluir", True), True):
-            continue
-        if not ln.get("es_producto", True):
-            continue  # servicios/flete permanecen en el Excel, pero no llevan foto propia
-        clave = _texto_seguro(ln.get("clave_auto")).upper()
-        if clave and clave != "NAN":
-            bib.registrar(
-                clave, nombre=ln["descripcion"],
-                alias=ln["descripcion"] if ln.get("origen") != "biblioteca" else None,
-                precio_neto=(ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")),
-            )
-        else:
-            clave = ""
-        finales.append({**ln, "clave": clave})
+    """Prepara un PDF y su Excel para revisar, sin confirmar la emisión."""
+    refrescar_excel_actual(archivar=False)
+    congelar_anexos_cotizacion()
+    finales = [
+        {**ln, "clave": _texto_seguro(ln.get("clave_auto")).upper()}
+        for ln in E.get("lineas", [])
+        if _esta_marcado(ln.get("incluir", True), True) and ln.get("es_producto", True)
+    ]
+    ruta = Path(E["ruta"])
+    with tempfile.TemporaryDirectory() as temporal, st.spinner("Preparando la vista previa."):
+        salida = Path(temporal) / "vista_previa.pdf"
+        informe = ct.generar_pdf_final(
+            ruta, finales, bib, salida, motor="libreoffice" if usar_lo else "nativo",
+            resolver_anexos=lambda clave: estado_anexos(clave, True),
+        )
+        pdf_bytes = salida.read_bytes()
+    informe["paginas_revisar"] = revision_doc.revisar_paginas(pdf_bytes, informe["paginas_cotizacion"])
+    informe["validacion_excel"] = hallazgos()
+    numero = re.sub(r"[^A-Za-z0-9._-]", "_", E.get("cot_numero") or "cotizacion")
+    E.update(pdf_bytes=pdf_bytes, pdf_nombre=f"{numero}.pdf", informe=informe,
+             xlsx_vista_previa=ruta.read_bytes(), pdf_confirmado=False,
+             version_vista_previa=E.get("_cotizacion_version"))
 
-    ruta = E["ruta"]
-    salida = ruta.with_name(f"{ruta.stem}_con_anexos.pdf")
-    with st.spinner("Armando tu PDF…"):
-        informe = ct.generar_pdf_final(ruta, finales, bib, salida,
-                                       motor="libreoffice" if usar_lo else "nativo")
-    pdf_bytes = salida.read_bytes()
-    registrar_en_historial(pdf_bytes)
-    E.update(pdf_bytes=pdf_bytes, pdf_nombre=salida.name, informe=informe)
-    persistir_borrador()
+
+def confirmar_pdf():
+    with tempfile.TemporaryDirectory() as temporal:
+        xlsx = Path(temporal) / "cotizacion.xlsx"
+        xlsx.write_bytes(E["xlsx_vista_previa"])
+        hist.guardar_archivos(
+            E["cot_id"], xlsx=xlsx, pdf=E["pdf_bytes"], version_esperada=E["version_vista_previa"],
+            etiqueta_version="PDF confirmado",
+        )
+    E["_cotizacion_version"] = hist.obtener(E["cot_id"])["actualizado"]
+    E["pdf_confirmado"] = True
 
 
 def paso_4():
     st.title("Revisa y crea tu PDF", icon=":material/picture_as_pdf:")
-
     if "pdf_bytes" not in E:
-        st.write("Esta es la última oportunidad para corregir los productos, cantidades, códigos, precios y datos del cliente antes de crear el PDF.")
         editor_productos()
         boton_actualizar_totales()
         mostrar_totales()
         mostrar_resumen_lineas()
         editar_cabecera()
 
-        claves, _ = datos_productos()
-        con_foto = sum(1 for clave in claves if bib.archivos(clave)[0])
-        con_ficha = sum(1 for clave in claves if bib.archivos(clave)[1])
-        sin_ficha_requerida = sum(
-            1 for clave in claves
-            if not bib.archivos(clave)[1]
-            and not bib.indice.get(clave, {}).get("ficha_no_requerida", False)
-        )
-        ficha_no_requerida = sum(
-            1 for clave in claves if bib.indice.get(clave, {}).get("ficha_no_requerida", False)
-        )
-        st.write(
-            f"La cotización tiene **{len(E.get('lineas', []))} líneas**. "
-            f"Fotos: **{con_foto}** de {len(claves)} · "
-            f"Fichas disponibles: **{con_ficha}** · "
-            f"Fichas pendientes: **{sin_ficha_requerida}** · "
-            f"No requeridas: **{ficha_no_requerida}**."
-        )
-        n_errores = panel_revision(en_paso_4=True)
-        permitido = not bool(E.get("error_numero"))
-        if n_errores:
-            acepto = st.checkbox("Entiendo los problemas de arriba y quiero crear el PDF igual", key="ok_riesgo")
-            permitido = permitido and acepto
-        if E.get("error_numero"):
-            st.error("Corrige el número de cotización antes de generar el PDF.")
-        if st.button("Crear el PDF", icon=":material/picture_as_pdf:", type="primary", width="stretch", disabled=not permitido):
+        if st.button("Guardar versión de trabajo", key="guardar_version_cotizacion"):
             try:
-                refrescar_excel_actual()
+                congelar_anexos_cotizacion()
+                hist.guardar_version(E["cot_id"], E["_cotizacion_version"], "Versión de trabajo")
+            except (OSError, ValueError, hs.ConflictoActualizacion) as error:
+                st.error(str(error))
+            else:
+                st.success("Versión disponible en el Historial.")
+        if st.button("Crear el PDF para revisar", type="primary", disabled=bool(E.get("error_numero"))):
+            try:
                 generar_pdf()
-            except Exception as exc:
-                st.error(f"No pude crear el PDF: {exc}")
-    else:
-        st.success("El PDF ya está generado. Para evitar que el archivo y los datos se desincronicen, la edición está pausada.")
-        mostrar_totales()
-        if st.button("Volver a editar y regenerar el PDF", type="primary", width="stretch"):
-            for clave_estado in ("pdf_bytes", "pdf_nombre", "informe", "ok_riesgo"):
-                E.pop(clave_estado, None)
-            try:
-                if E.get("cot_id") and hist.obtener(E["cot_id"]):
-                    if GIOVAL_REQUIRE_ACCESS:
-                        hist.actualizar_si_version(
-                            E["cot_id"], E.get("_cotizacion_version"), estado="Borrador"
-                        )
-                    else:
-                        hist.actualizar(E["cot_id"], pdf=None, estado="Borrador")
-                    registro_actual = hist.obtener(E["cot_id"])
-                    if registro_actual:
-                        E["_cotizacion_version"] = registro_actual.get("actualizado")
-                E["editado_manual"] = True
-            except hs.ConflictoActualizacion as exc:
-                E["_conflicto_guardado"] = True
-                E["_conflicto_guardado_id"] = E.get("cot_id")
-                E["_conflicto_guardado_mensaje"] = str(exc)
-            st.rerun()
-
-    if "pdf_bytes" in E:
-        if GIOVAL_REQUIRE_ACCESS:
-            st.success(
-                f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas. La cotización comercial quedó en el historial compartido; "
-                "el PDF conserva los datos de cliente ingresados en esta sesión y no se almacena en la biblioteca común."
-            )
-        else:
-            st.success(f"¡Listo! Tu PDF tiene {E['informe']['paginas']} páginas y quedó guardado en el historial.")
-        st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"], icon=":material/download:",
-                           mime="application/pdf", type="primary", width="stretch")
-        if E.get("ruta") and Path(E["ruta"]).exists():
-            st.download_button("Descargar la cotización en Excel", Path(E["ruta"]).read_bytes(), icon=":material/download:",
-                               file_name=Path(E["ruta"]).name, width="stretch")
-        with st.expander("Vista previa del PDF completo", expanded=True):
-            try:
-                st.pdf(E["pdf_bytes"], height=760, key=f"pdf_preview_{E.get('cot_id', 'actual')}")
-            except Exception:
-                st.info("El visor integrado no está disponible en esta instalación. Usa el botón de descarga del PDF.")
-        textos = (("sin_clave", "Estos productos no tienen código, así que no llevan foto ni ficha"),
-                  ("sin_foto", "Les falta la foto"), ("sin_ficha", "Les falta la ficha técnica"),
-                  ("ficha_dudosa", "Revisa estas fichas: no mencionan el código del producto"),
-                  ("ficha_ilegible", "No pude leer estas fichas"))
-        for clave_info, texto in textos:
-            if E["informe"][clave_info]:
-                st.warning(f"{texto}: " + ", ".join(E["informe"][clave_info]))
-
-    st.divider()
-    if "pdf_bytes" not in E:
-        atras, nueva = st.columns(2)
-        if atras.button("← Volver a fotos y fichas", width="stretch"):
+            except Exception as error:
+                st.error(f"No pude preparar el PDF. {error}")
+            else:
+                st.rerun()
+        if st.button("← Volver a fotos y fichas", width="stretch"):
             ir_a(3)
-        nueva.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
     else:
-        nueva = st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
+        informe = E["informe"]
+        st.subheader(f"Vista previa · {informe['paginas']} páginas")
+        textos = (
+            ("sin_clave", "Productos sin código"), ("sin_foto", "Fotos faltantes"),
+            ("sin_ficha", "Fichas técnicas faltantes"), ("ficha_dudosa", "Fichas que requieren verificar el código"),
+            ("ficha_ilegible", "Fichas ilegibles excluidas del PDF"),
+        )
+        for campo, texto in textos:
+            if informe.get(campo):
+                st.warning(f"{texto}: " + ", ".join(informe[campo]))
+        for item in informe["validacion_excel"]:
+            st.warning(item["texto"])
+        for aviso in informe["paginas_revisar"]:
+            st.warning(aviso)
+        try:
+            st.pdf(E["pdf_bytes"], height=760, key=f"pdf_preview_{E['cot_id']}")
+        except Exception:
+            st.download_button("Abrir copia para revisar", E["pdf_bytes"], file_name=E["pdf_nombre"],
+                               mime="application/pdf", on_click="ignore")
+        if not E.get("pdf_confirmado"):
+            requiere_revision = bool(informe["paginas_revisar"] or informe["ficha_ilegible"]
+                                     or any(item["nivel"] == "error" for item in informe["validacion_excel"]))
+            acepto = not requiere_revision or st.checkbox("Revisé las alertas y quiero aprobar esta versión",
+                                                          key="ok_revision_pdf")
+            if st.button("Confirmar versión y habilitar descarga", type="primary", disabled=not acepto):
+                try:
+                    confirmar_pdf()
+                except (OSError, hs.ConflictoActualizacion) as error:
+                    st.error(str(error))
+                else:
+                    st.rerun()
+        else:
+            st.success("Versión registrada en el historial.")
+            st.download_button("Descargar el PDF", E["pdf_bytes"], file_name=E["pdf_nombre"],
+                               mime="application/pdf", type="primary", on_click="ignore")
+            st.download_button("Descargar la cotización en Excel", E["xlsx_vista_previa"],
+                               file_name=Path(E["pdf_nombre"]).with_suffix(".xlsx").name, on_click="ignore")
+        if st.button("Volver a editar", key="salir_vista_previa"):
+            for campo in ("pdf_bytes", "xlsx_vista_previa", "pdf_nombre", "informe", "pdf_confirmado"):
+                E.pop(campo, None)
+            E["editado_manual"] = True
+            st.rerun()
+    st.button("Hacer otra cotización", width="stretch", on_click=limpiar_estado_trabajo)
 
 
 # ============================================================== HISTORIAL
@@ -2540,9 +2473,7 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
     mp_codigo = _texto_seguro(mercado_publico.get("codigo"))
     fuente_guardada = datos.get("fuente_pedido", datos.get("fuente_orden", ""))
     es_mercado_publico = bool(mp_codigo or fuente_guardada == "Mercado Público")
-    orden_coincidencias = asociar_lineas_con_biblioteca(
-        lineas, aplicar_precios_catalogo=es_mercado_publico
-    )
+    orden_coincidencias = referencias_lineas_guardadas(lineas)
     for k in ("lineas", "ruta", "tabla", "tabla_edit", "tabla_base", "info_desc", "pdf_bytes", "pdf_nombre", "informe",
               "orden_df_base", "orden_editor_version", "orden_editor", "ok_riesgo", "ok_sin_precio", "cli_sel", "origen_pedido",
               "fuente_pedido", "mercado_publico_codigo", "_mercado_publico_codigo", "_mercado_publico_detalle"):
@@ -2609,11 +2540,55 @@ def cargar_en_pedido(cot_id: int, mantener: bool):
         nuevo_registro = hist.obtener(nuevo_id)
         E["_cotizacion_version"] = nuevo_registro.get("actualizado") if nuevo_registro else None
     E["lineas"] = lineas
+    E["anexos_cotizacion"] = anexos_doc.limpiar_referencias(datos.get("anexos"))
     E.pop("_conflicto_guardado", None)
     E.pop("_conflicto_guardado_id", None)
     E.pop("_conflicto_guardado_mensaje", None)
     E["paso"], E["vista"] = 1, VISTAS[0]
     persistir_borrador()
+
+
+@acceso.proteger
+def restaurar_version_interfaz(cot_id, origen, token):
+    try:
+        hist.restaurar_version(cot_id, origen, token)
+    except (ValueError, hs.ConflictoActualizacion) as error:
+        E["_error_restaurar_version"] = str(error)
+    else:
+        restaurar_borrador(cot_id)
+        E["_mensaje_guardado"] = "Versión restaurada. El estado anterior quedó guardado."
+
+
+def panel_versiones(registro):
+    cot_id = registro["id"]
+    with st.expander("Versiones de la cotización", key=f"versiones_{cot_id}", on_change="rerun") as panel:
+        if not panel.open:
+            return
+        if error := E.pop("_error_restaurar_version", None):
+            st.error(error)
+        versiones = hist.versiones(cot_id)
+        if not versiones:
+            st.caption("Las versiones guardadas y las confirmaciones de PDF aparecerán aquí.")
+            return
+        por_id = {v["id"]: v for v in versiones}
+        def etiqueta(identificador):
+            if identificador is None:
+                return "Cotización actual"
+            v = por_id[identificador]
+            return f"N.º {identificador} · {v['etiqueta']} · {v['fecha'][:19].replace('T', ' ')}"
+
+        antes, despues = st.columns(2)
+        origen = antes.selectbox("Versión de origen", por_id, format_func=etiqueta, key=f"version_origen_{cot_id}")
+        destino = despues.selectbox("Comparar con", [None, *por_id], format_func=etiqueta, key=f"version_destino_{cot_id}")
+        nuevo = registro if destino is None else por_id[destino]["contenido"]
+        diferencias = revision_doc.comparar(por_id[origen]["contenido"], nuevo)
+        if diferencias:
+            st.dataframe(diferencias, hide_index=True, width="stretch")
+        else:
+            st.caption("Sin diferencias en los datos comparados.")
+        confirmado = st.checkbox("Restaurar esta versión como borrador", key=f"version_seguro_{cot_id}_{origen}")
+        st.button("Restaurar versión", disabled=not confirmado, key=f"restaurar_version_{cot_id}",
+                  on_click=restaurar_version_interfaz, args=(cot_id, origen, registro["actualizado"]))
 
 
 def historial_cotizaciones():
@@ -2732,6 +2707,7 @@ def historial_cotizaciones():
                   on_click=cargar_en_pedido, args=(rec["id"], False))
         b2.button("Seguir editando esta cotización", width="stretch", key=f"edi_{rec['id']}",
                   on_click=cargar_en_pedido, args=(rec["id"], True))
+        panel_versiones(rec)
         with st.expander("Eliminar esta cotización"):
             seguro = st.checkbox("Sí, quiero eliminarla para siempre", key=f"del_{rec['id']}")
             if st.button("Eliminar", disabled=not seguro, key=f"delb_{rec['id']}"):

@@ -10,6 +10,8 @@ Gioval puede compartir una única biblioteca entre los usuarios. **Si no tienes 
 
 Los nombres, RUT, direcciones, teléfonos, correos y las notas de clientes no se guardan en el historial compartido. Cada trabajador escribe los datos del cliente en su sesión cuando genera su cotización. El PDF y el Excel resultantes se descargan desde la sesión, pero no se archivan en la biblioteca común. Por este motivo, al reabrir una cotización histórica será necesario volver a ingresar los datos de cliente y regenerar los documentos.
 
+Las versiones conservan los datos comerciales y las referencias de fotos y fichas técnicas. Carga en Fotos y fichas solo anexos de producto para que puedan recuperarse en la biblioteca compartida.
+
 Al activar este modo por primera vez, Gioval sanea los registros históricos existentes: borra identificadores y notas de clientes, elimina los registros guardados de clientes y borra los antiguos PDF/Excel de la carpeta compartida porque podrían contener datos personales. Conserva los productos, las líneas comerciales y los totales. Haz una copia de seguridad de la instalación de origen antes de importarla.
 
 La clave `GIOVAL_ACCESS_PASSWORD` sigue siendo compartida por los dos usuarios; no identifica a cada persona. Compártela únicamente con trabajadores autorizados.

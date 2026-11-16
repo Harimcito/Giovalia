@@ -2,6 +2,10 @@
 
 Consulta [perfiles y servidor de equipo](SERVIDOR_PRINCIPAL.md) para la instalación central y [catálogo público](docs/SEO_GEO_CATALOGO.md) para exportar fichas aprobadas.
 
+Los cambios de descripción, precio y anexos son propios de cada cotización. En Productos puedes guardar precios en la biblioteca mediante una acción explícita. En Fotos y fichas puedes reemplazar u omitir la foto o ficha de un producto y copiar un anexo a la biblioteca si corresponde.
+
+El paso final genera la vista previa del PDF. La confirmación habilita la descarga de ese mismo archivo y guarda una versión. También puedes guardar una versión de trabajo y luego comparar o restaurar versiones desde el Historial. La restauración conserva el correlativo, guarda el estado previo y abre un borrador para emitir documentos actualizados.
+
 Dos formas de usarlo:
 
 1. **Tengo la cotización en Excel** → entrega un PDF único: cotización (con tu formato y logo)
@@ -103,7 +107,7 @@ búsqueda, pega el enlace directo de una imagen o PDF, o usa los botones de Goog
   que puedas contrastarlas y editarlas.
 - Elige si los precios que ingresas llevan IVA o son netos. El Neto es la suma de las líneas,
   el IVA es 19 % y el Total es Neto + IVA.
-- Los precios se recuerdan por producto y se autocompletan la próxima vez.
+- Los precios guardados explícitamente en la biblioteca se proponen al preparar otra cotización.
 - Para cambiar el encabezado, logo o forma de pago, edita `plantilla_cotizacion.xlsx`.
 
 ## Ticket de Mercado Público
