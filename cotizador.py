@@ -361,7 +361,7 @@ class Biblioteca:
         nombre = self._slug(clave)
         if (
             not nombre or nombre.endswith(".")
-            or nombre in {"COTIZACIONES", "CATALOGOS_EMITIDOS"}
+            or nombre in {"COTIZACIONES", "CATALOGOS_EMITIDOS", "ANEXOS_COTIZACIONES"}
             or re.fullmatch(r"CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]", nombre.split(".")[0])
         ):
             raise ValueError("El código no es válido para la biblioteca.")
@@ -760,7 +760,7 @@ def anexo_fotos(items: list[dict], destino) -> Path:
     return Path(destino)
 
 
-def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="nativo") -> dict:
+def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="nativo", *, resolver_anexos=None) -> dict:
     """Arma: cotización + anexo de fotos + fichas técnicas (una por producto).
 
     `lineas` son las líneas a incluir, cada una con 'clave' (puede ir vacía).
@@ -772,14 +772,17 @@ def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="
         clave = ln.get("clave", "").strip().upper()
         if clave and clave in vistos:  # mismo producto en dos líneas: una sola foto/ficha
             continue
-        foto, ficha = bib.archivos(clave)
+        if resolver_anexos:
+            foto, ficha, ficha_no_requerida = resolver_anexos(clave)
+        else:
+            foto, ficha = bib.archivos(clave)
+            ficha_no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
         if not clave:
             informe["sin_clave"].append(ln["descripcion"][:60])
         else:
             vistos.add(clave)
             if not foto:
                 informe["sin_foto"].append(clave)
-            ficha_no_requerida = bool(bib.indice.get(clave, {}).get("ficha_no_requerida", False))
             if not ficha and not ficha_no_requerida:
                 informe["sin_ficha"].append(clave)
             elif ficha:
@@ -793,6 +796,7 @@ def generar_pdf_final(xlsx, lineas: list[dict], bib: Biblioteca, salida, motor="
 
     with tempfile.TemporaryDirectory() as tmp:
         cot = excel_a_pdf(xlsx, Path(tmp) / "cot.pdf", motor)
+        informe["paginas_cotizacion"] = len(PdfReader(cot).pages)
         escritor = PdfWriter()
         escritor.append(str(cot), outline_item="Cotización")
         if items:

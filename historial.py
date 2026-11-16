@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
+from anexos_cotizacion import limpiar_referencias
+
 ESTADOS = ["Borrador", "Enviada", "Aceptada", "Rechazada"]
 FORMATO_DEFECTO = "{n:04d}-COT{aa}"
 _CAMPOS_COT = {"fecha", "cliente", "rut", "neto", "iva", "total", "estado", "notas", "con_iva",
@@ -50,6 +52,8 @@ def _datos_compartidos(datos: dict | None) -> dict:
     for campo in ("origen_pedido", "precios_modo", "paso", "editado_manual"):
         if campo in datos:
             salida[campo] = datos[campo]
+    if "anexos" in datos:
+        salida["anexos"] = limpiar_referencias(datos["anexos"])
     # Se conserva solo la tabla normalizada de productos; nunca el texto original
     # ni un documento de origen que pudiera contener datos del cliente.
     orden = datos.get("orden_df")
@@ -106,9 +110,30 @@ class Historial:
                     total REAL DEFAULT 0, estado TEXT DEFAULT 'Borrador', notas TEXT DEFAULT '',
                     con_iva INTEGER DEFAULT 1, origen TEXT DEFAULT 'pedido', datos TEXT, xlsx TEXT,
                     pdf TEXT, creado TEXT, actualizado TEXT);
+                CREATE TABLE IF NOT EXISTS versiones_cotizacion (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, cot_id INTEGER NOT NULL,
+                    fecha TEXT NOT NULL, etiqueta TEXT NOT NULL, contenido TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS versiones_por_cotizacion
+                    ON versiones_cotizacion(cot_id, id);
             """)
         if PRIVACIDAD_COMPARTIDA:
             self._migrar_privacidad_compartida()
+            self._sanear_versiones()
+
+    def _sanear_versiones(self):
+        """Aplica el mismo límite de privacidad a versiones creadas en otro modo."""
+        clave = "privacidad_versiones_v1"
+        if self.config(clave):
+            return
+        with self._con() as con:
+            con.execute("BEGIN IMMEDIATE")
+            filas = con.execute("SELECT id, contenido FROM versiones_cotizacion").fetchall()
+            for fila in filas:
+                contenido = json.loads(fila["contenido"])
+                contenido.update(cliente="", rut="", datos=_datos_compartidos(contenido.get("datos")))
+                con.execute("UPDATE versiones_cotizacion SET contenido=? WHERE id=?",
+                            (_json(contenido), fila["id"]))
+            con.execute("INSERT OR IGNORE INTO config(clave, valor) VALUES(?, '1')", (clave,))
 
     def _migrar_privacidad_compartida(self):
         """Elimina PII heredada y archivos de cotización antiguos una sola vez."""
@@ -250,15 +275,17 @@ class Historial:
             nombre_anterior = re.sub(r"[^A-Za-z0-9._-]", "_", anterior)
             nombre_nuevo = re.sub(r"[^A-Za-z0-9._-]", "_", nuevo_numero)
             for campo, extension in (("xlsx", ".xlsx"), ("pdf", ".pdf")):
-                archivo_anterior = carpeta_nueva / f"{nombre_anterior}{extension}"
-                if archivo_anterior.exists():
-                    archivo_nuevo = carpeta_nueva / f"{nombre_nuevo}{extension}"
-                    archivo_anterior.rename(archivo_nuevo)
-                    campos[campo] = str(archivo_nuevo)
-                elif reg.get(campo):
-                    ruta = Path(reg[campo])
-                    if ruta.exists() and ruta.parent == carpeta_anterior:
-                        campos[campo] = str(carpeta_nueva / ruta.name)
+                if not reg.get(campo):
+                    continue
+                ruta = Path(reg[campo])
+                movido = carpeta_nueva / ruta.name
+                if ruta.parent != carpeta_anterior or not movido.is_file():
+                    continue
+                if ruta.name == f"{nombre_anterior}{extension}":
+                    nuevo = carpeta_nueva / f"{nombre_nuevo}{extension}"
+                    movido.rename(nuevo)
+                    movido = nuevo
+                campos[campo] = str(movido)
         with self._con() as con:
             columnas = ["numero=?", "actualizado=?"]
             valores = [nuevo_numero, _ahora()]
@@ -434,6 +461,7 @@ class Historial:
     def eliminar(self, cot_id: int):
         reg = self.obtener(cot_id)
         with self._con() as con:
+            con.execute("DELETE FROM versiones_cotizacion WHERE cot_id=?", (cot_id,))
             con.execute("DELETE FROM cotizaciones WHERE id=?", (cot_id,))
         if reg:
             shutil.rmtree(self._carpeta(reg["numero"]), ignore_errors=True)
@@ -442,8 +470,71 @@ class Historial:
     def _carpeta(self, numero: str) -> Path:
         return self.archivos / re.sub(r"[^A-Za-z0-9._-]", "_", numero)
 
-    def guardar_archivos(self, cot_id: int, xlsx=None, pdf=None, version_esperada=None):
+    @staticmethod
+    def _registrar_version(con, fila, etiqueta):
+        contenido = {k: fila[k] for k in ("fecha", "cliente", "rut", "neto", "iva", "total",
+                                        "con_iva", "origen", "datos")}
+        contenido["datos"] = json.loads(contenido["datos"] or "{}")
         if PRIVACIDAD_COMPARTIDA:
+            contenido.update(cliente="", rut="", datos=_datos_compartidos(contenido["datos"]))
+        con.execute(
+            "INSERT INTO versiones_cotizacion(cot_id, fecha, etiqueta, contenido) VALUES (?, ?, ?, ?)",
+            (fila["id"], _ahora(), etiqueta, _json(contenido)),
+        )
+
+    def guardar_version(self, cot_id, version_esperada, etiqueta):
+        with self._con() as con:
+            con.execute("BEGIN IMMEDIATE")
+            fila = con.execute("SELECT * FROM cotizaciones WHERE id=?", (cot_id,)).fetchone()
+            if not fila or not version_esperada or fila["actualizado"] != version_esperada:
+                raise ConflictoActualizacion("Recarga la cotización antes de guardar su versión.")
+            self._registrar_version(con, fila, etiqueta)
+
+    def versiones(self, cot_id):
+        with self._con() as con:
+            filas = con.execute(
+                "SELECT id, fecha, etiqueta, contenido FROM versiones_cotizacion WHERE cot_id=? ORDER BY id DESC",
+                (cot_id,),
+            ).fetchall()
+        versiones = []
+        for fila in filas:
+            contenido = json.loads(fila["contenido"])
+            if PRIVACIDAD_COMPARTIDA:
+                contenido.update(cliente="", rut="", datos=_datos_compartidos(contenido.get("datos")))
+            versiones.append({**dict(fila), "contenido": contenido})
+        return versiones
+
+    def restaurar_version(self, cot_id, version_id, version_esperada):
+        with self._con() as con:
+            con.execute("BEGIN IMMEDIATE")
+            actual = con.execute("SELECT * FROM cotizaciones WHERE id=?", (cot_id,)).fetchone()
+            if not actual or not version_esperada or actual["actualizado"] != version_esperada:
+                raise ConflictoActualizacion("La cotización cambió. Recárgala antes de restaurar.")
+            fila = con.execute(
+                "SELECT contenido FROM versiones_cotizacion WHERE cot_id=? AND id=?", (cot_id, version_id),
+            ).fetchone()
+            if not fila:
+                raise ValueError("No encontré la versión de esta cotización.")
+            guardada = json.loads(fila["contenido"])
+            datos = guardada["datos"]
+            if PRIVACIDAD_COMPARTIDA:
+                guardada.update(cliente="", rut="")
+                datos = _datos_compartidos(datos)
+            if datos.get("lineas"):
+                datos.update(paso=2, editado_manual=True)
+            self._registrar_version(con, actual, "Antes de restaurar")
+            con.execute(
+                """UPDATE cotizaciones SET fecha=?, cliente=?, rut=?, neto=?, iva=?, total=?,
+                   con_iva=?, origen=?, datos=?, actualizado=?, estado='Borrador', xlsx=NULL, pdf=NULL
+                   WHERE id=?""",
+                [*(guardada[k] for k in ("fecha", "cliente", "rut", "neto", "iva", "total", "con_iva", "origen")),
+                 _json(datos), _ahora(), cot_id],
+            )
+
+    def guardar_archivos(self, cot_id: int, xlsx=None, pdf=None, version_esperada=None, etiqueta_version=None):
+        if PRIVACIDAD_COMPARTIDA:
+            if etiqueta_version:
+                self.guardar_version(cot_id, version_esperada, etiqueta_version)
             return
         if not xlsx and pdf is None:
             return
@@ -455,7 +546,7 @@ class Historial:
                 return
             if not reg:
                 raise ConflictoActualizacion("La cotización ya no existe.")
-            if PERFILES and (not version_esperada or reg["actualizado"] != version_esperada):
+            if (PERFILES or etiqueta_version) and (not version_esperada or reg["actualizado"] != version_esperada):
                 raise ConflictoActualizacion("Otra sesión modificó la cotización. Recarga antes de generar documentos.")
             carpeta = self._carpeta(reg["numero"])
             carpeta.mkdir(parents=True, exist_ok=True)
@@ -469,7 +560,7 @@ class Historial:
                     continue
                 # Versionar evita sustituir un archivo aún referenciado por otra sesión.
                 from uuid import uuid4
-                sufijo = f"-{uuid4().hex[:12]}" if PERFILES else ""
+                sufijo = f"-{uuid4().hex[:12]}" if PERFILES or etiqueta_version else ""
                 destino = carpeta / f"{base}{sufijo}{extension}"
                 temporal = destino.with_suffix(extension + ".tmp")
                 temporal.write_bytes(contenido)
@@ -478,6 +569,8 @@ class Historial:
             columnas = [f"{campo}=?" for campo in campos] + ["actualizado=?"]
             con.execute(f"UPDATE cotizaciones SET {', '.join(columnas)} WHERE id=?",
                         [*campos.values(), _ahora(), cot_id])
+            if etiqueta_version:
+                self._registrar_version(con, reg, etiqueta_version)
 
     # ------------------------------------------------------------ clientes
     def clientes(self) -> list[dict]:
