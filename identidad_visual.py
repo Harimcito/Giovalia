@@ -15,11 +15,11 @@ def marca():
 
 
 def topbar(seccion, usuario="", *, compartida=False):
-    logo = Path(__file__).with_name("logo_gioval_catalogo.png")
+    logo = Path(__file__).with_name("logo_gioval_oscuro.svg")
     marca = '<strong>Giovalia</strong>'
     if logo.is_file():
         imagen = b64encode(logo.read_bytes()).decode("ascii")
-        marca = f'<img src="data:image/png;base64,{imagen}" alt="Gioval" width="112">'
+        marca = f'<img src="data:image/svg+xml;base64,{imagen}" alt="Gioval" width="112">'
     cuenta = f'<span>Hola, {escape(usuario)}</span>' if usuario else ""
     biblioteca = "Biblioteca compartida" if compartida else "Biblioteca local"
     st.html(f'<div class="gv-topbar">{marca}<div class="gv-contexto">'
