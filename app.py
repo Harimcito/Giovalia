@@ -3939,42 +3939,23 @@ def refrescar_biblioteca():
 
 
 # ============================================================== PANTALLA
-# La cabecera identifica el espacio de trabajo activo.
-cabecera = st.container(key="cabecera_giovalia")
-if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
-    col_marca, col_estado, col_salir, col_ajustes = cabecera.columns(
-        [3.5, 2, 1, 1], vertical_alignment="center"
-    )
-else:
-    col_marca, col_estado, col_ajustes = cabecera.columns([4, 2, 1], vertical_alignment="center")
-with col_marca:
-    visual.topbar(E.get("vista", INICIO), identidad["nombre"] if identidad else "")
-    logo_marca = Path(__file__).with_name("logo_gioval_catalogo.png")
-    if logo_marca.is_file():
-        st.image(str(logo_marca), width=130, alt="Gioval")
-    else:
-        st.markdown("### Giovalia")
-    if identidad:
-        st.caption(f"Hola, {identidad['nombre']}")
-        st.caption("Puedes retomar una cotización desde el Historial.")
-with col_estado:
-    st.badge(
-        "Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES else "Biblioteca local",
-        icon=":material/verified_user:" if GIOVAL_REQUIRE_ACCESS else ":material/receipt_long:",
-        color="blue",
-    )
-with col_ajustes:
+cabecera = st.container(key="cabecera_giovalia", gap="xsmall")
+resumen_cabecera = cabecera.empty()
+with cabecera.container(key="gv_cabecera_acciones", gap="xsmall"):
+    busqueda_cabecera = st.container()
+    opciones_ux = experiencia.preferencias(E, identidad, acceso)
     carpeta, bib, hist, api_key, usar_lo, mp_ticket = configuracion_compacta()
-    st.button("Actualizar", key="refrescar_compartido", icon=":material/refresh:", type="tertiary",
-              on_click=refrescar_biblioteca)
-abrir_enlace_guardado()
-if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
-    with col_salir:
-        if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
+    st.button("Actualizar", key="refrescar_compartido", icon=":material/refresh:", on_click=refrescar_biblioteca)
+    if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
+        if st.button("Salir", icon=":material/logout:", key="gioval_cerrar_sesion"):
             if GIOVAL_PROFILES:
                 acceso.cerrar_sesion()
             E.clear()
             st.rerun()
+abrir_enlace_guardado()
+with resumen_cabecera.container():
+    visual.topbar(E.get("vista", INICIO), identidad["nombre"] if identidad else "",
+                  compartida=GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES)
 
 if E.get("_conflicto_guardado"):
     st.error(
@@ -4020,8 +4001,6 @@ etiquetas_vista = {
 }
 if codigo := E.pop("_abrir_producto_catalogo", None):
     abrir_producto_desde_catalogo(codigo)
-with col_estado:
-    opciones_ux = experiencia.preferencias(E, identidad, acceso)
 vistas_principales = [INICIO, VISTAS[0], PRECIOS, VISTAS[2], VISTAS[3], VISTAS[1], VISTAS[4], VISTAS[5]]
 vista_activa = E.get("vista", INICIO)
 if vista_activa not in vistas_principales:
@@ -4067,7 +4046,8 @@ with st.container(key="gv_scripts_runtime"):
     st.html(Path(__file__).with_name("cambios_linea.html"), unsafe_allow_javascript=True)
     st.html(Path(__file__).with_name("interfaz_foco.html"), unsafe_allow_javascript=True)
 st.html(Path(__file__).with_name("interfaz_giovalia.css"))
-mostrar_busqueda_global()
+with busqueda_cabecera:
+    mostrar_busqueda_global()
 if vista == INICIO:
     with st.container(key="gv_inicio"):
         selector_borradores()

@@ -14,10 +14,18 @@ def marca():
     st.html(f'<div class="gv-brand"><div class="gv-mark" aria-hidden="true">{logo}</div><div><div class="gv-name">Giovalia</div><div class="gv-sub">Espacio comercial</div></div></div>')
 
 
-def topbar(seccion, usuario=""):
-    usuario = str(usuario or "Equipo")
-    iniciales = "".join(p[0] for p in usuario.split()[:2]).upper()
-    st.html(f'<div class="gv-topbar"><div class="gv-breadcrumb"><span>Giovalia</span><span>›</span><strong>{escape(str(seccion))}</strong></div><div class="gv-account"><span>{escape(usuario)}</span><div class="gv-avatar" aria-hidden="true">{escape(iniciales)}</div></div></div>')
+def topbar(seccion, usuario="", *, compartida=False):
+    logo = Path(__file__).with_name("logo_gioval_catalogo.png")
+    marca = '<strong>Giovalia</strong>'
+    if logo.is_file():
+        imagen = b64encode(logo.read_bytes()).decode("ascii")
+        marca = f'<img src="data:image/png;base64,{imagen}" alt="Gioval" width="112">'
+    cuenta = f'<span>Hola, {escape(usuario)}</span>' if usuario else ""
+    biblioteca = "Biblioteca compartida" if compartida else "Biblioteca local"
+    st.html(f'<div class="gv-topbar">{marca}<div class="gv-contexto">'
+            f'<div class="gv-breadcrumb"><strong>{escape(str(seccion))}</strong></div>'
+            f'<div class="gv-cuenta">{cuenta}<span>{biblioteca}</span></div>'
+            '</div></div>')
 
 
 def titulo(texto, detalle, categoria="Espacio comercial", icono="↗"):

@@ -27,7 +27,13 @@ def comprobar_interfaz(numero, numero_otro):
         expect(page.locator(".st-key-gv_nav").get_by_role("button", name="Precios")).to_be_visible()
         expect(page.locator(".st-key-gv_nav_movil")).to_be_hidden()
         page.wait_for_function("getComputedStyle(document.querySelector('[data-testid=stAppViewContainer]')).backgroundImage.includes('radial-gradient')")
-        page.get_by_role("button", name="Vista y lectura").click()
+        cabecera = page.locator(".st-key-cabecera_giovalia")
+        acciones = cabecera.locator(".st-key-gv_cabecera_acciones")
+        botones = ("Buscar", "Vista y lectura", "Ajustes", "Actualizar")
+        posiciones = [acciones.get_by_role("button", name=etiqueta).bounding_box() for etiqueta in botones]
+        assert max(p["y"] for p in posiciones) - min(p["y"] for p in posiciones) <= 2
+        assert posiciones[0]["x"] < posiciones[-1]["x"]
+        acciones.get_by_role("button", name="Vista y lectura").click()
         page.get_by_role("combobox", name="Tamaño del texto").click()
         page.get_by_role("option", name="Muy grande").click()
         page.wait_for_function("getComputedStyle(document.documentElement).fontSize === '20px'")
@@ -69,6 +75,11 @@ def comprobar_interfaz(numero, numero_otro):
         page.wait_for_function("getComputedStyle(document.querySelector('.gv-lista tbody tr')).display === 'grid'")
         assert tabla.bounding_box()['width']<=390
         expect(page.locator(".st-key-gv_nav_movil")).to_be_visible()
+        ancho_cabecera = cabecera.bounding_box()
+        for etiqueta in botones:
+            posicion = acciones.get_by_role("button", name=etiqueta).bounding_box()
+            assert ancho_cabecera["x"] <= posicion["x"]
+            assert posicion["x"] + posicion["width"] <= ancho_cabecera["x"] + ancho_cabecera["width"] + 1
         page.set_viewport_size({'width':1440,'height':930})
         page.locator('.st-key-gv_nav').get_by_role('button', name='Historial', exact=True).click()
         historial=page.get_by_role('table',name='Cotizaciones del historial')
