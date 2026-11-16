@@ -113,6 +113,23 @@ class FlujosAppTests(unittest.TestCase):
         self.assertEqual(app.session_state["lineas"][0]["cantidad"], 2)
         self.assertEqual(hist.versiones(cot_id)[0]["contenido"]["total"], 3570)
 
+    def test_gestion_comercial_abre_seguimiento_seo_y_proveedores(self):
+        bib = Biblioteca(self.raiz / "biblioteca")
+        bib.registrar("RESMA-500", "Resma carta 500 hojas", precio_neto=1000)
+        hist = Historial(self.raiz / "biblioteca")
+        cot_id, _ = hist.crear({"nombre": "Cliente prueba"}, [], {"total": 1190})
+        hist.guardar_seguimiento(cot_id, "2026-12-01", None)
+        app = self.iniciar()
+        app.session_state["vista"] = "Gestión comercial"
+        self.recargar(app)
+        self.assertTrue(any("Cliente prueba" in el.value for el in app.text_area))
+        app.session_state["gestion_vista"] = "Vista SEO"
+        self.recargar(app)
+        self.assertTrue(any("Resma carta" in el.value for el in app.subheader))
+        app.session_state["gestion_vista"] = "Proveedores"
+        self.recargar(app)
+        self.assertTrue(any(el.label == "Proveedor" for el in app.text_input))
+
     def test_modo_compartido_pide_clave_y_cierra_sesion(self):
         with patch.dict(os.environ, {"GIOVAL_REQUIRE_ACCESS": "true", "GIOVAL_ACCESS_PASSWORD": "clave-de-prueba"}):
             app = self.iniciar()

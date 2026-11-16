@@ -29,6 +29,7 @@ jobs:
         run: |
           $files = @(
             "abrir_gioval.ps1",
+            "actualizar_servidor_principal.ps1",
             "configurar_cliente_gioval.ps1",
             "iniciar_servidor_gioval.ps1",
             "instalar_servidor_gioval.ps1",
@@ -101,6 +102,18 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Empaquetar código para actualizar el servidor con perfiles
+        shell: pwsh
+        run: git archive --format=zip --prefix=Giovalia/ --output=Giovalia-Servidor-Actualizacion.zip HEAD
+
+      - name: Publicar paquete del servidor
+        uses: actions/upload-artifact@v4
+        with:
+          name: Giovalia-Servidor-Actualizacion
+          path: Giovalia-Servidor-Actualizacion.zip
+          if-no-files-found: error
+          retention-days: 30
+
   publicar:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build-windows-installer
@@ -111,6 +124,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: Giovalia-Windows-Installer
+      - uses: actions/download-artifact@v4
+        with:
+          name: Giovalia-Servidor-Actualizacion
 
       - name: Publicar versión más reciente
         uses: softprops/action-gh-release@v2
@@ -121,7 +137,9 @@ jobs:
             Instalador de Windows generado automáticamente desde la rama main.
             Descarga Gioval-Setup.exe en Assets.
             Cada ejecución exitosa de este flujo reemplaza el instalador de esta versión.
-          files: Gioval-Setup.exe
+          files: |
+            Gioval-Setup.exe
+            Giovalia-Servidor-Actualizacion.zip
           overwrite_files: true
           make_latest: true
           prerelease: false

@@ -11,6 +11,7 @@ import tempfile
 import zipfile
 import time
 from datetime import date, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote_plus
 from uuid import uuid4
@@ -30,6 +31,9 @@ import ui_montos as montos
 import pdf_cotizacion as pc
 import revisor as rv
 import revision_cotizacion as revision_doc
+import operacion_comercial as op
+import operacion_comercial_ui as gestion
+from vista_precios import vista_precios
 import catalogo_clientes as cc
 from productos_ui import editar_ficha
 
@@ -237,7 +241,7 @@ ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
 
 
 # ============================================================== FUNCIONES COMUNES
-VISTAS = ["Cotizar", "Historial", "Biblioteca", "Catálogo PDF"]
+VISTAS = ["Cotizar", "Historial", "Biblioteca", "Catálogo PDF", "Gestión comercial"]
 OPCIONES_PRECIO = ["Incluyen IVA (lo que paga el cliente)", "Son netos (sin IVA)"]
 FUENTE_TEXTO = "Lo escribo o pego aquí"
 FUENTE_TABLA = "Subir Excel o CSV"
@@ -334,10 +338,11 @@ def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
         if not desc or normalizada in resultados:
             continue
         clave = bib.detectar(desc, solo_conocidos=True)
-        if clave:
+        if clave and not op.conflicto_presentacion(desc, bib.indice[clave]):
             resultados[normalizada] = {"clave": clave, "origen": "biblioteca", "certeza": "alta"}
             continue
-        candidatos = bib.coincidencias_semanticas(desc, limite=2)
+        candidatos = [c for c in bib.coincidencias_semanticas(desc, limite=5)
+                      if not op.conflicto_presentacion(desc, bib.indice[c["clave"]])][:2]
         primero = candidatos[0] if candidatos else None
         segundo = candidatos[1] if len(candidatos) > 1 else None
         if primero and primero["score"] >= 0.78 and (not segundo or primero["score"] - segundo["score"] >= 0.10):
@@ -352,7 +357,8 @@ def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
             con_ia = li.entender_productos(pendientes, api_key, catalogo_ia)
             for descripcion, match in zip(pendientes, con_ia):
                 clave = str(match.get("clave", "")).strip().upper()
-                if clave in catalogo_ia and match.get("certeza") in ("alta", "media"):
+                if (clave in catalogo_ia and match.get("certeza") in ("alta", "media")
+                        and not op.conflicto_presentacion(descripcion, catalogo_ia[clave])):
                     resultados[ct.normalizar(descripcion)] = {
                         "clave": clave, "origen": "ia", "certeza": match["certeza"],
                         "razon": match.get("razon", ""),
@@ -589,6 +595,9 @@ def lineas_desde_orden(orden: pd.DataFrame, con_iva: bool) -> list[dict]:
         es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
         match = E.get("_orden_coincidencias", {}).get(ct.normalizar(descripcion), {}) if es_producto else {}
         clave = match.get("clave") or (bib.detectar(descripcion) if es_producto else "")
+        if clave in bib.indice and op.conflicto_presentacion(descripcion, bib.indice[clave]):
+            clave = ""
+            match = {}
         origen = match.get("origen") or (
             "biblioteca" if clave and clave in bib.indice else "texto" if clave else "descripcion"
         )
@@ -1463,7 +1472,8 @@ def pedido_ui(fuente: str):
             for fila in filas:
                 codigo_catalogo = _texto_seguro(fila.get("codigo")).upper()
                 ficha = bib.indice.get(codigo_catalogo, {})
-                if codigo_catalogo in bib.indice and not ct.identidad_conflictiva(codigo_catalogo, ficha):
+                if (codigo_catalogo in bib.indice and not ct.identidad_conflictiva(codigo_catalogo, ficha)
+                        and not op.conflicto_presentacion(fila["descripcion"], ficha)):
                     coincidencias[ct.normalizar(fila["descripcion"])] = {
                         "clave": codigo_catalogo, "origen": "biblioteca", "certeza": "alta"
                     }
@@ -1475,16 +1485,22 @@ def pedido_ui(fuente: str):
             precios = []
             for fila in filas:
                 match = coincidencias.get(ct.normalizar(fila["descripcion"]), {})
-                clave = match.get("clave") or bib.detectar(fila["descripcion"], solo_conocidos=True)
+                clave = match.get("clave")
                 neto = bib.precio_sugerido(clave) or bib.indice.get(clave, {}).get("precio_neto")
                 precios.append(ct.precio_para_mostrar(neto, con_iva) if neto else None)
+            origen_por_fuente = {
+                FUENTE_TEXTO: "Texto ingresado",
+                FUENTE_TABLA: "Planilla del pedido",
+                FUENTE_DOCUMENTO: "Extracción de PDF o imagen",
+                FUENTE_MERCADO_PUBLICO: "Mercado Público",
+            }
             E["orden_df"] = pd.DataFrame({
                 "Incluir": [True] * len(filas),
                 "Cantidad": [fila["cantidad"] for fila in filas],
                 "Producto": [fila["descripcion"] for fila in filas],
                 "Código": [fila.get("codigo", "") for fila in filas],
                 "Unidad": [fila.get("unidad", "") for fila in filas],
-                "Origen": [fila.get("origen", "Pedido ingresado") for fila in filas],
+                "Origen": [fila.get("origen") or origen_por_fuente[fuente] for fila in filas],
                 "Precio unitario": precios,
             })
             E["orden_df_base"] = E["orden_df"].copy()
@@ -1565,6 +1581,13 @@ def pedido_ui(fuente: str):
     if sin_precio:
         st.warning("Faltan precios en: " + ", ".join(sin_precio))
         continuar_igual = st.checkbox("Quiero continuar igual y completar los precios después", key="ok_sin_precio")
+    if fuente in (FUENTE_TABLA, FUENTE_DOCUMENTO, FUENTE_MERCADO_PUBLICO):
+        firma_revision = sha256(orden.to_json(orient="split", default_handler=str).encode()).hexdigest()[:16]
+        revisado = st.checkbox(
+            "Revisé los productos, cantidades y fuentes importadas",
+            key=f"verificar_importacion_{firma_revision}",
+        )
+        continuar_igual = continuar_igual and revisado
     if st.button("Guardar pedido y continuar →", type="primary", width="stretch",
                  disabled=not any(ln.get("incluir", True) for ln in lineas_orden) or not continuar_igual):
         cliente = cliente_actual()
@@ -1892,6 +1915,7 @@ def paso_2():
             guardar_precios_inventario(E["lineas"])
             st.success("Precios guardados en la biblioteca.")
     mostrar_totales()
+    gestion.margen_pedido(E.get("lineas", []), bib, hist, E.get("cot_id"))
     agregar_desde_catalogo()
     revisar_asociaciones_catalogo(sin_vinculo)
     mostrar_resumen_lineas()
@@ -1990,7 +2014,11 @@ def cambiar_anexo(clave, campo, valor):
 
 def aplicar_anexo(clave, tipo, nombre, contenido, de_cotizacion):
     if de_cotizacion:
-        cambiar_anexo(clave, tipo, anexos_doc.guardar(bib, tipo, contenido))
+        anterior = E.get("anexos_cotizacion", {}).get(clave, {}).get(tipo)
+        referencia = anexos_doc.guardar(bib, tipo, contenido)
+        cambiar_anexo(clave, tipo, referencia)
+        if anterior != referencia:
+            hist.registrar_cambio("Cotización", E.get("cot_numero"), f"{tipo} · {clave}", anterior, referencia)
     else:
         bib.guardar_archivo(clave, tipo, nombre, contenido)
 
@@ -2975,6 +3003,10 @@ def configuracion_compacta():
     else:
         servicios["biblioteca"].refrescar_si_cambio()
 
+    historiador = servicios["historial"]
+    historiador.actor = (identidad["nombre"] if identidad else
+                         "Equipo con clave compartida" if GIOVAL_REQUIRE_ACCESS else "Usuario local")
+    servicios["biblioteca"].registrar_cambio = historiador.registrar_cambio
     conexion_ia = li.buscar_api_key(APP_DIR)
     conexion_mp = mp.buscar_ticket(APP_DIR)
     ajustes = st.popover("Ajustes", icon=":material/settings:", key="settings-popover", on_change="rerun")
@@ -3022,7 +3054,7 @@ def mostrar_preferencias(carpeta_compartida, servicios, conexion_ia, conexion_mp
     elif GIOVAL_REQUIRE_ACCESS:
         st.caption(
             "La IA no está configurada en el servidor. El administrador puede definir "
-            "OPENAI_API_KEY en las variables del servicio Render; no se guardan claves "
+            "OPENAI_API_KEY en las variables del servidor; no se guardan claves "
             "personales desde una sesión compartida."
         )
     else:
@@ -3267,6 +3299,7 @@ etiquetas_vista = {
     VISTAS[1]: ":material/history: Historial",
     VISTAS[2]: ":material/inventory_2: Biblioteca",
     VISTAS[3]: ":material/menu_book: Catálogo PDF",
+    VISTAS[4]: ":material/monitoring: Gestión comercial",
 }
 vista = st.segmented_control(
     "Secciones",
@@ -3284,6 +3317,9 @@ elif vista == VISTAS[2]:
     vista_productos()
 elif vista == VISTAS[3]:
     cc.render_ui(st, bib, abrir_producto=abrir_producto_desde_catalogo)
+elif vista == VISTAS[4]:
+    gestion.render(bib, hist, cargar_en_pedido, privado=GIOVAL_REQUIRE_ACCESS,
+                   admin=not identidad or identidad["rol"] == "admin", vista_precios=vista_precios)
 elif not E.get("cot_id"):
     selector_borradores()
 else:

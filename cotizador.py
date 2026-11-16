@@ -12,6 +12,7 @@ Estructura de la biblioteca (carpeta "biblioteca" por defecto):
 """
 import csv
 from functools import lru_cache
+from hashlib import sha256
 import io
 import json
 import math
@@ -186,6 +187,7 @@ def leer_cotizacion(ruta) -> list[dict]:
 class Biblioteca:
     def __init__(self, carpeta="biblioteca"):
         self.dir = Path(carpeta)
+        self.registrar_cambio = None
         self.dir.mkdir(parents=True, exist_ok=True)
         self._idx = self.dir / "indice.json"
         self.indice: dict = json.loads(self._idx.read_text("utf-8")) if self._idx.exists() else {}
@@ -288,6 +290,12 @@ class Biblioteca:
             self._snapshot_indice = deepcopy(combinado)
             self._indice_mtime_ns = self._mtime_indice()
             self._semantic_mtime_ns = None
+            if self.registrar_cambio and combinado != indice_actual:
+                for clave in indice_actual.keys() | combinado.keys():
+                    antes, despues = indice_actual.get(clave, {}), combinado.get(clave, {})
+                    for campo in ("nombre", "costo_neto", "precio_neto", "margen_pct", "precio_recomendado_neto"):
+                        if antes.get(campo) != despues.get(campo):
+                            self.registrar_cambio("Biblioteca", clave, campo, antes.get(campo), despues.get(campo))
 
     def _asegurar_indice_semantico(self):
         """Precalcula tokens y un índice invertido una vez por versión del catálogo."""
@@ -414,6 +422,12 @@ class Biblioteca:
             raise ValueError("tipo debe ser 'foto' o 'ficha'")
         with _INDICE_LOCK:
             c.mkdir(parents=True, exist_ok=True)
+            anterior = None
+            if self.registrar_cambio:
+                archivos = self.archivos(clave)
+                vigente = archivos[0] if tipo == "foto" else archivos[1]
+                if vigente:
+                    anterior = sha256(vigente.read_bytes()).hexdigest()
             temporal = destino.with_suffix(destino.suffix + ".tmp")
             try:
                 temporal.write_bytes(datos)
@@ -423,6 +437,10 @@ class Biblioteca:
                         ruta.unlink(missing_ok=True)
             finally:
                 temporal.unlink(missing_ok=True)
+            if self.registrar_cambio:
+                nuevo = sha256(datos).hexdigest()
+                if anterior != nuevo:
+                    self.registrar_cambio("Biblioteca", clave, tipo, anterior, nuevo)
 
     def registrar(self, clave: str, nombre: str | None = None, alias: str | None = None,
                   precio_neto: float | None = None):

@@ -20,6 +20,7 @@ FORMATO_DEFECTO = "{n:04d}-COT{aa}"
 _CAMPOS_COT = {"fecha", "cliente", "rut", "neto", "iva", "total", "estado", "notas", "con_iva",
                "origen", "xlsx", "pdf"}
 _CAMPOS_CLI = ("nombre", "rut", "direccion", "ciudad", "telefono", "email")
+_SIN_VERSION_CONFIG = object()
 
 # El servidor central activa este modo con GIOVAL_REQUIRE_ACCESS=true.
 # Las instalaciones locales independientes conservan el comportamiento anterior.
@@ -97,6 +98,7 @@ class Historial:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.db = self.dir / "cotizador.db"
         self.archivos = self.dir / "cotizaciones"
+        self.actor = "Equipo"
         with self._con() as con:
             con.executescript("""
                 CREATE TABLE IF NOT EXISTS config (clave TEXT PRIMARY KEY, valor TEXT);
@@ -115,6 +117,14 @@ class Historial:
                     fecha TEXT NOT NULL, etiqueta TEXT NOT NULL, contenido TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS versiones_por_cotizacion
                     ON versiones_cotizacion(cot_id, id);
+                CREATE TABLE IF NOT EXISTS costos_proveedor (
+                    proveedor TEXT PRIMARY KEY, actualizado TEXT NOT NULL, costos TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS seguimiento_cotizacion (
+                    cot_id INTEGER PRIMARY KEY, vence TEXT, ultimo_contacto TEXT);
+                CREATE TABLE IF NOT EXISTS cambios_comerciales (
+                    id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, actor TEXT NOT NULL,
+                    entidad TEXT NOT NULL, objeto TEXT NOT NULL, campo TEXT NOT NULL,
+                    anterior TEXT, nuevo TEXT);
             """)
         if PRIVACIDAD_COMPARTIDA:
             self._migrar_privacidad_compartida()
@@ -190,8 +200,13 @@ class Historial:
             fila = con.execute("SELECT valor FROM config WHERE clave=?", (clave,)).fetchone()
         return fila["valor"] if fila else defecto
 
-    def set_config(self, clave: str, valor):
+    def set_config(self, clave: str, valor, *, anterior=_SIN_VERSION_CONFIG):
         with self._con() as con:
+            if anterior is not _SIN_VERSION_CONFIG:
+                con.execute("BEGIN IMMEDIATE")
+                fila = con.execute("SELECT valor FROM config WHERE clave=?", (clave,)).fetchone()
+                if (fila["valor"] if fila else None) != anterior:
+                    raise ConflictoActualizacion("La configuración cambió en otra sesión. Recárgala antes de guardar.")
             con.execute("INSERT INTO config(clave, valor) VALUES(?, ?) "
                         "ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor", (clave, str(valor)))
 
@@ -398,10 +413,9 @@ class Historial:
         with self._con() as con:
             # Bloquea brevemente otros escritores mientras compara la versión y guarda.
             con.execute("BEGIN IMMEDIATE")
+            anterior = con.execute("SELECT * FROM cotizaciones WHERE id=?", (cot_id,)).fetchone()
             if version_esperada is not None:
-                fila = con.execute(
-                    "SELECT actualizado FROM cotizaciones WHERE id=?", (cot_id,)
-                ).fetchone()
+                fila = anterior
                 if not fila:
                     raise ConflictoActualizacion(
                         "La cotización ya no existe. Recarga el historial antes de continuar."
@@ -416,6 +430,73 @@ class Historial:
             cur = con.execute(f"UPDATE cotizaciones SET {', '.join(sets)} WHERE id=?", valores)
             if cur.rowcount != 1:
                 raise ConflictoActualizacion("No pude guardar la cotización porque ya no existe.")
+            for campo in ("neto", "iva", "total", "estado", "fecha"):
+                if campo in campos:
+                    valor = campos[campo]
+                    nuevo = valor.isoformat() if isinstance(valor, date) else valor
+                    if anterior[campo] != nuevo:
+                        self._auditar(con, "Cotización", anterior["numero"], campo, anterior[campo], nuevo)
+            if datos is not None:
+                previo = json.loads(anterior["datos"] or "{}")
+                for campo in ("lineas", "anexos"):
+                    if previo.get(campo) != datos.get(campo):
+                        def resumen(valor):
+                            return {"cantidad": len(valor or [])}
+                        self._auditar(con, "Cotización", anterior["numero"], campo,
+                                      resumen(previo.get(campo)), resumen(datos.get(campo)))
+
+    def _auditar(self, con, entidad, objeto, campo, anterior, nuevo):
+        con.execute(
+            "INSERT INTO cambios_comerciales(fecha,actor,entidad,objeto,campo,anterior,nuevo) VALUES (?,?,?,?,?,?,?)",
+            (_ahora(), self.actor, entidad, str(objeto), campo, _json(anterior), _json(nuevo)),
+        )
+
+    def registrar_cambio(self, entidad, objeto, campo, anterior, nuevo):
+        with self._con() as con:
+            self._auditar(con, entidad, objeto, campo, anterior, nuevo)
+
+    def cambios_comerciales(self, limite=150):
+        with self._con() as con:
+            return [dict(fila) for fila in con.execute(
+                "SELECT fecha, actor, entidad, objeto, campo, anterior, nuevo "
+                "FROM cambios_comerciales ORDER BY id DESC LIMIT ?", (limite,),
+            )]
+
+    def lista_proveedor(self, proveedor):
+        with self._con() as con:
+            fila = con.execute("SELECT costos FROM costos_proveedor WHERE proveedor=?", (proveedor,)).fetchone()
+        return json.loads(fila["costos"]) if fila else {}
+
+    def guardar_lista_proveedor(self, proveedor, precios, previa):
+        with self._con() as con:
+            con.execute("BEGIN IMMEDIATE")
+            fila = con.execute("SELECT costos FROM costos_proveedor WHERE proveedor=?", (proveedor,)).fetchone()
+            if (json.loads(fila["costos"]) if fila else {}) != previa:
+                raise ConflictoActualizacion("La lista de este proveedor cambió. Revisa la comparación antes de guardar.")
+            con.execute("INSERT INTO costos_proveedor VALUES (?,?,?) ON CONFLICT(proveedor) "
+                        "DO UPDATE SET actualizado=excluded.actualizado,costos=excluded.costos",
+                        (proveedor, _ahora(), _json(precios)))
+            self._auditar(con, "Proveedor", proveedor, "Lista de costos", len(previa), len(precios))
+
+    def seguimientos(self):
+        with self._con() as con:
+            return {fila["cot_id"]: dict(fila) for fila in con.execute("SELECT * FROM seguimiento_cotizacion")}
+
+    def guardar_seguimiento(self, cot_id, vencimiento, ultimo_contacto):
+        vence = date.fromisoformat(vencimiento).isoformat() if vencimiento else None
+        contacto = date.fromisoformat(ultimo_contacto).isoformat() if ultimo_contacto else None
+        with self._con() as con:
+            con.execute("BEGIN IMMEDIATE")
+            actual = con.execute("SELECT numero FROM cotizaciones WHERE id=?", (cot_id,)).fetchone()
+            if not actual:
+                raise ConflictoActualizacion("La cotización ya no existe.")
+            previo = con.execute("SELECT vence, ultimo_contacto FROM seguimiento_cotizacion WHERE cot_id=?",
+                                 (cot_id,)).fetchone()
+            con.execute("INSERT INTO seguimiento_cotizacion VALUES (?,?,?) ON CONFLICT(cot_id) "
+                        "DO UPDATE SET vence=excluded.vence,ultimo_contacto=excluded.ultimo_contacto",
+                        (cot_id, vence, contacto))
+            self._auditar(con, "Cotización", actual["numero"], "Seguimiento",
+                          dict(previo) if previo else None, {"vence": vence, "ultimo_contacto": contacto})
 
     def obtener(self, cot_id: int) -> dict | None:
         with self._con() as con:
@@ -462,6 +543,7 @@ class Historial:
         reg = self.obtener(cot_id)
         with self._con() as con:
             con.execute("DELETE FROM versiones_cotizacion WHERE cot_id=?", (cot_id,))
+            con.execute("DELETE FROM seguimiento_cotizacion WHERE cot_id=?", (cot_id,))
             con.execute("DELETE FROM cotizaciones WHERE id=?", (cot_id,))
         if reg:
             shutil.rmtree(self._carpeta(reg["numero"]), ignore_errors=True)

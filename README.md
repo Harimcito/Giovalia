@@ -6,6 +6,8 @@ Los cambios de descripción, precio y anexos son propios de cada cotización. En
 
 El paso final genera la vista previa del PDF. La confirmación habilita la descarga de ese mismo archivo y guarda una versión. También puedes guardar una versión de trabajo y luego comparar o restaurar versiones desde el Historial. La restauración conserva el correlativo, guarda el estado previo y abre un borrador para emitir documentos actualizados.
 
+**Gestión comercial** reúne el historial por cliente, vigencias, mensajes para copiar, listas de proveedores, cambios por usuario, vista previa SEO y verificación de respaldos en una copia temporal. En Productos puedes simular el margen de la cotización con despacho, descuento y otros costos. Los pedidos importados tienen una revisión por línea con la fuente de cada producto.
+
 Dos formas de usarlo:
 
 1. **Tengo la cotización en Excel** → entrega un PDF único: cotización (con tu formato y logo)
