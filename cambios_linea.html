@@ -48,8 +48,31 @@
   let esperando = null;
   let reproduciendo = false;
   let revisionProgramada = false;
+  let guardando = null;
+  const estadoGuardado = () => document.getElementById("gv-estado-guardado");
+  function actualizarEstadoGuardado() {
+    const estado = estadoGuardado();
+    if (!estado) return;
+    if (guardando && estado.dataset.acuse !== guardando.acuse) guardando = null;
+    const enCurso = guardando && Date.now() < guardando.hasta;
+    const porGuardar = pendiente() || Boolean(guardando && !enCurso);
+    const texto = enCurso ? "Guardando…" :
+      porGuardar && estado.dataset.nivel !== "error" ? "Cambios pendientes" : estado.dataset.texto;
+    const nivel = enCurso ? "avance" : porGuardar && estado.dataset.nivel !== "error" ? "pendiente" : estado.dataset.nivel;
+    if (estado.textContent !== texto) estado.textContent = texto;
+    if (estado.dataset.visual !== nivel) estado.dataset.visual = nivel;
+  }
+  document.addEventListener("click", (evento) => {
+    const boton = evento.target.closest?.(".st-key-guardar_editor button, .st-key-aplicar_precio button, .st-key-siguiente_precio button");
+    const estado = estadoGuardado();
+    if (!boton || boton.disabled || !estado) return;
+    guardando = {acuse: estado.dataset.acuse, hasta: Date.now() + 12000};
+    actualizarEstadoGuardado();
+    setTimeout(actualizarEstadoGuardado, 12000);
+  }, true);
   function revisar() {
     revisionProgramada = false;
+    actualizarEstadoGuardado();
     const aviso = marca();
     if (!aviso) return;
     const ocultar = !pendiente();

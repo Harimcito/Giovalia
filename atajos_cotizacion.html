@@ -49,6 +49,7 @@
         : ".st-key-siguiente_precio button");
       if (!boton || boton.disabled) return;
       evento.preventDefault();
+      if (!guardar) window.giovaliaAbrirLinea?.(false);
       document.activeElement?.blur();
       requestAnimationFrame(() => {
         boton.click();
