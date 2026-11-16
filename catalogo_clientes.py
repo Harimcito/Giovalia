@@ -26,6 +26,7 @@ from reportlab.pdfgen import canvas as pdfcanvas
 
 from revisor import IVA, clp
 import buscador as bs
+import catalogo_publico
 import seo_geo
 
 AZUL = colors.HexColor("#010ED0")
@@ -641,15 +642,31 @@ def _seo_geo_ui(st, biblioteca, clasificar, data_dir):
 
     if not productos:
         return
+    if st.button("Asignar identificadores a fichas existentes", key="seo_geo_asignar_ids"):
+        nuevos = biblioteca.asignar_ids_globales()
+        st.success(f"Identificadores asignados a {nuevos} fichas.")
     x, y = st.columns(2)
     x.download_button("Descargar datos SEO + GEO", seo_geo.paquete_editorial(productos, perfil),
                       file_name="gioval_seo_geo_productos.json", mime="application/json",
                       key="seo_geo_descargar_paquete", icon=":material/download:", on_click="ignore")
-    y.download_button("Descargar marcado Product JSON-LD", seo_geo.paquete_jsonld(productos, perfil),
+    y.download_button("Descargar borrador JSON-LD", seo_geo.paquete_jsonld(productos, perfil),
                       file_name="gioval_product_jsonld.json", mime="application/ld+json",
                       key="seo_geo_descargar_jsonld", icon=":material/code:", on_click="ignore")
     st.caption("El JSON-LD solo agrega precio público, disponibilidad, URL o imagen cuando se completan "
                "explícitamente en la ficha; no convierte el último precio cotizado en una oferta pública.")
+    url_base = st.text_input("URL base HTTPS de las fichas publicadas", key="seo_geo_url_fichas")
+    if seo_geo.url_publica_valida(url_base):
+        aprobado, errores = catalogo_publico.exportar_catalogo(biblioteca.indice, url_base)
+        st.caption(f"{len(aprobado['@graph'])} fichas aptas para exportar.")
+        if errores:
+            st.dataframe(errores, hide_index=True, width="stretch")
+        if aprobado["@graph"]:
+            st.download_button(
+                "Descargar JSON-LD de fichas aprobadas",
+                json.dumps(aprobado, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name="gioval_productos_aprobados.json", mime="application/ld+json",
+                key="seo_geo_exportar_aprobadas", on_click="ignore",
+            )
 
 
 FAMILIAS = ("Tintas y tóners", "Papel", "Librería", "Impresión", "Otros")

@@ -48,6 +48,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="Gioval",
+    icon=str(ROOT / "assets" / "gioval.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

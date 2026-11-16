@@ -18,6 +18,7 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir=Output
 OutputBaseFilename=Gioval-Setup
+SetupIconFile=..\assets\gioval.ico
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes

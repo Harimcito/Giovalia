@@ -26,6 +26,7 @@ import unicodedata
 from copy import copy, deepcopy
 from datetime import date
 from pathlib import Path
+from uuid import uuid4
 from zipfile import ZipFile
 from xml.sax.saxutils import escape
 
@@ -432,7 +433,7 @@ class Biblioteca:
             return
         clave = clave.strip().upper()
         self.carpeta(clave)
-        ficha = self.indice.setdefault(clave, {"nombre": nombre or clave, "aliases": []})
+        ficha = self.indice.setdefault(clave, {"nombre": nombre or clave, "aliases": [], "id_global": str(uuid4())})
         if precio_neto:
             ficha["precio_neto"] = float(precio_neto)
         if alias and len(normalizar(alias)) >= 6:
@@ -448,8 +449,19 @@ class Biblioteca:
         "marca", "modelo", "gtin", "mpn", "unidad_venta", "compatibilidad", "atributos_tecnicos",
         "seo_titulo", "seo_descripcion", "seo_slug", "seo_url_publica", "seo_imagen_url", "seo_imagen_alt",
         "seo_precio_publico", "seo_disponibilidad", "seo_condicion", "geo_resumen", "geo_faq",
-        "geo_fuente", "geo_verificado",
+        "geo_fuente", "geo_verificado", "publicacion",
     )
+
+    def asignar_ids_globales(self) -> int:
+        """Asigna identificadores faltantes sin reemplazar los que ya existen."""
+        with _INDICE_LOCK:
+            self.refrescar_si_cambio()
+            fichas = [ficha for ficha in self.indice.values() if not ficha.get("id_global")]
+            for ficha in fichas:
+                ficha["id_global"] = str(uuid4())
+            if fichas:
+                self._guardar_indice()
+            return len(fichas)
 
     def actualizar(self, clave: str, *, version_esperada=None, **campos):
         """Cambia nombre, costo neto, margen %, notas o último precio. None borra el dato."""
@@ -467,6 +479,10 @@ class Biblioteca:
                 if v is None or v == "" or (isinstance(v, float) and math.isnan(v)):
                     if k != "nombre":
                         ficha.pop(k, None)
+                elif k == "publicacion":
+                    if not isinstance(v, dict):
+                        raise ValueError("La ficha pública debe ser un objeto.")
+                    ficha[k] = deepcopy(v)
                 elif k == "ficha_no_requerida":
                     ficha[k] = bool(v)
                 else:

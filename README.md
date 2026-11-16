@@ -1,5 +1,7 @@
 # Cotizador: cotización + fotos + fichas técnicas
 
+Consulta [perfiles y servidor de equipo](SERVIDOR_PRINCIPAL.md) para la instalación central y [catálogo público](docs/SEO_GEO_CATALOGO.md) para exportar fichas aprobadas.
+
 Dos formas de usarlo:
 
 1. **Tengo la cotización en Excel** → entrega un PDF único: cotización (con tu formato y logo)

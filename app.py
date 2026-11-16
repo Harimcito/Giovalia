@@ -13,10 +13,12 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote_plus
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
 
+import acceso
 import buscador as bs
 import cotizador as ct
 import historial as hs
@@ -30,7 +32,8 @@ from productos_ui import editar_ficha
 
 APP_DIR = Path(os.environ.get("GIOVAL_DATA_DIR") or Path(__file__).parent).expanduser().resolve()
 E = st.session_state
-GIOVAL_REQUIRE_ACCESS = os.environ.get("GIOVAL_REQUIRE_ACCESS", "false").strip().lower() in {"1", "true", "yes", "on"}
+GIOVAL_PROFILES = acceso.perfiles_activos()
+GIOVAL_REQUIRE_ACCESS = not GIOVAL_PROFILES and os.environ.get("GIOVAL_REQUIRE_ACCESS", "false").strip().lower() in {"1", "true", "yes", "on"}
 GIOVAL_ACCESS_PASSWORD = os.environ.get("GIOVAL_ACCESS_PASSWORD", "")
 GIOVAL_ALLOW_INITIAL_IMPORT = os.environ.get("GIOVAL_ALLOW_INITIAL_IMPORT", "false").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -52,6 +55,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+identidad = acceso.exigir_perfil() if GIOVAL_PROFILES else None
 
 if GIOVAL_REQUIRE_ACCESS:
     if not GIOVAL_ACCESS_PASSWORD:
@@ -260,10 +265,13 @@ def editor(df, **kw):
         extra = 1 if kw.get("num_rows") == "dynamic" else 0
         return montos.editor(df, height=min(35 * (len(df) + 1 + extra) + 8, 2400), **kw)
 
+@acceso.proteger
 def limpiar_estado_trabajo():
     """Reinicia la cotización actual sin cerrar el login ni borrar preferencias útiles."""
     conservar = (
         "gioval_autenticado",
+        "_gioval_token",
+        "_gioval_identidad",
         "config_carpeta",
         "config_usar_lo",
         "config_api_key",
@@ -277,6 +285,7 @@ def limpiar_estado_trabajo():
     E.update(valores)
 
 
+@acceso.proteger
 def guardar_ticket_mp_sesion():
     """Mantiene el ticket disponible al cerrar Ajustes, sin escribirlo en disco."""
     ticket = str(E.get("config_ticket_mercado_publico", "")).strip()
@@ -286,6 +295,7 @@ def guardar_ticket_mp_sesion():
         E.pop("_mercado_publico_ticket", None)
 
 
+@acceso.proteger
 def ir_a(paso: int):
     E["paso"] = paso
     persistir_borrador()
@@ -535,7 +545,7 @@ def cargar(ruta: Path, origen_pedido: str):
         if registro_guardado and registro_guardado.get("xlsx") and Path(registro_guardado["xlsx"]).exists():
             E["ruta"] = Path(registro_guardado["xlsx"])
         elif Path(ruta).exists():
-            hist.guardar_archivos(E["cot_id"], xlsx=ruta)
+            archivar_cotizacion(E["cot_id"], xlsx=ruta)
             registro_guardado = hist.obtener(E["cot_id"])
             if registro_guardado and registro_guardado.get("xlsx"):
                 E["ruta"] = Path(registro_guardado["xlsx"])
@@ -799,7 +809,7 @@ def guardar_precios_inventario(lineas: list[dict]):
         except (TypeError, ValueError):
             continue
 
-        ficha = bib.indice.setdefault(clave, {"nombre": descripcion or clave, "aliases": []})
+        ficha = bib.indice.setdefault(clave, {"nombre": descripcion or clave, "aliases": [], "id_global": str(uuid4())})
         nombre = descripcion or clave
         if not ficha.get("nombre"):
             ficha["nombre"] = nombre
@@ -876,7 +886,7 @@ def persistir_borrador():
     if not registro:
         return
     try:
-        if GIOVAL_REQUIRE_ACCESS:
+        if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
             version_esperada = E.get("_cotizacion_version")
             if not version_esperada:
                 E["_conflicto_guardado"] = True
@@ -918,7 +928,7 @@ def widget_numero_cotizacion():
         E["error_numero"] = "El número de cotización no puede quedar vacío."
     elif numero != registro["numero"]:
         try:
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
                 hist.renumerar(
                     cot_id, numero, version_esperada=E.get("_cotizacion_version")
                 )
@@ -1122,12 +1132,13 @@ def refrescar_excel_actual():
         # El Excel contiene los datos del cliente de esta sesión: queda temporal y solo se descarga.
         E["ruta"] = ruta_tmp
     else:
-        hist.guardar_archivos(cot_id, xlsx=ruta_tmp)
+        archivar_cotizacion(cot_id, xlsx=ruta_tmp)
         registro = hist.obtener(cot_id)
         if registro and registro.get("xlsx"):
             E["ruta"] = Path(registro["xlsx"])
 
 
+@acceso.proteger
 def iniciar_borrador(fuente: str = FUENTE_TEXTO):
     """Crea inmediatamente una cotización vacía, lista para guardar avances."""
     limpiar_estado_trabajo()
@@ -1144,6 +1155,7 @@ def iniciar_borrador(fuente: str = FUENTE_TEXTO):
     persistir_borrador()
 
 
+@acceso.proteger
 def restaurar_borrador(cot_id: int):
     """Recupera desde SQLite una cotización incompleta, con su lista y precios."""
     registro = hist.obtener(cot_id)
@@ -1732,7 +1744,7 @@ def pedido_ui(fuente: str):
                 "orden_texto": E.get("orden_texto", ""),
                 "mercado_publico": datos_mercado_publico_guardables(),
             }
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
                 hist.actualizar_si_version(
                     E["cot_id"], E.get("_cotizacion_version"),
                     datos=datos_cotizacion, **campos_cotizacion
@@ -1742,7 +1754,7 @@ def pedido_ui(fuente: str):
             registro_nuevo = hist.obtener(E["cot_id"])
             if registro_nuevo:
                 E["_cotizacion_version"] = registro_nuevo.get("actualizado")
-            hist.guardar_archivos(E["cot_id"], xlsx=ruta)
+            archivar_cotizacion(E["cot_id"], xlsx=ruta)
             hist.guardar_cliente(cliente)
         except hs.ConflictoActualizacion as exc:
             E["_conflicto_guardado"] = True
@@ -2047,6 +2059,7 @@ def guardar_candidato(clave: str, tipo: str, c: dict):
     st.rerun()
 
 
+@acceso.proteger
 def guardar_anexo_subido(clave: str, tipo: str):
     """Guarda el archivo una vez, al recibirlo desde el selector."""
     llave = f"{tipo}_{clave}"
@@ -2340,11 +2353,20 @@ def panel_revision(en_paso_4: bool = False) -> int:
 
 
 # ============================================================== PASO 4: PDF
+def archivar_cotizacion(cot_id, **archivos):
+    version = E.get("_cotizacion_version")
+    if GIOVAL_PROFILES and cot_id != E.get("cot_id"):
+        version = hist.obtener(cot_id)["actualizado"]
+    hist.guardar_archivos(cot_id, version_esperada=version, **archivos)
+    if GIOVAL_PROFILES:
+        E["_cotizacion_version"] = hist.obtener(cot_id)["actualizado"]
+
+
 def registrar_en_historial(pdf_bytes: bytes):
     """Guarda el PDF en el historial (y registra la cotización si venía de un Excel ya hecho)."""
     cot_id = E.get("cot_id")
     if cot_id and hist.obtener(cot_id):
-        hist.guardar_archivos(cot_id, pdf=pdf_bytes)
+        archivar_cotizacion(cot_id, pdf=pdf_bytes)
         return
     if E.get("origen_pedido") == "cotizacion":
         d = pc.leer_para_pdf(E["ruta"])
@@ -2357,7 +2379,7 @@ def registrar_en_historial(pdf_bytes: bytes):
                                {"neto": tot.get("TOTALNETO") or 0, "iva": tot.get("IVA") or 0,
                                 "total": tot.get("TOTAL") or 0},
                                con_iva=False, origen="cotizacion", numero=numero)
-        hist.guardar_archivos(cot_id, xlsx=E["ruta"], pdf=pdf_bytes)
+        archivar_cotizacion(cot_id, xlsx=E["ruta"], pdf=pdf_bytes)
         E["cot_id"] = cot_id
         registro_nuevo = hist.obtener(cot_id)
         E["_cotizacion_version"] = registro_nuevo.get("actualizado") if registro_nuevo else None
@@ -2505,6 +2527,7 @@ def fecha_corta(iso: str) -> str:
         return str(iso or "")
 
 
+@acceso.proteger
 def cargar_en_pedido(cot_id: int, mantener: bool):
     """Lleva una cotización guardada al paso 1: como copia nueva, o para seguir editándola."""
     rec = hist.obtener(cot_id)
@@ -2753,6 +2776,7 @@ def vista_historial():
 
 
 # ============================================================== MIS PRODUCTOS
+@acceso.proteger
 def renombrar_producto(clave: str):
     nuevo = str(E.get(f"ren_{clave}", "")).strip().upper()
     try:
@@ -2762,6 +2786,7 @@ def renombrar_producto(clave: str):
         E["p_msg"] = ("error", str(e))
 
 
+@acceso.proteger
 def borrar_producto(clave: str):
     bib.eliminar(clave)
     E.pop("p_sel", None)
@@ -2965,7 +2990,7 @@ def vista_productos():
 def configuracion_compacta():
     """Resuelve los servicios de sesión y carga Ajustes solo cuando se abre."""
     carpeta_compartida = str((APP_DIR / "biblioteca").resolve())
-    carpeta = carpeta_compartida if GIOVAL_REQUIRE_ACCESS else E.get("config_carpeta", carpeta_compartida)
+    carpeta = carpeta_compartida if (GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES) else E.get("config_carpeta", carpeta_compartida)
     ruta = str(Path(carpeta).resolve())
     servicios = E.get("_servicios_sesion")
     if not isinstance(servicios, dict) or servicios.get("carpeta") != ruta:
@@ -2979,7 +3004,10 @@ def configuracion_compacta():
     ajustes = st.popover("Ajustes", icon=":material/settings:", key="settings-popover", on_change="rerun")
     if ajustes.open:
         with ajustes:
-            mostrar_preferencias(carpeta_compartida, servicios, conexion_ia, conexion_mp)
+            if identidad:
+                acceso.panel_cuenta()
+            if not identidad or identidad["rol"] == "admin":
+                mostrar_preferencias(carpeta_compartida, servicios, conexion_ia, conexion_mp)
 
     api_key = str(conexion_ia[0] or E.get("config_api_key", "")).strip()
     usar_lo = bool(E.get("config_usar_lo", False))
@@ -3170,6 +3198,7 @@ def mostrar_preferencias(carpeta_compartida, servicios, conexion_ia, conexion_mp
                     st.error(f"No pude importar el respaldo: {exc}")
 
 
+@acceso.proteger
 def guardar_conflicto_como_nueva():
     """Conserva el trabajo de esta sesión como una cotización nueva sin tocar la versión compartida."""
     lineas = list(E.get("lineas", []))
@@ -3197,25 +3226,34 @@ def guardar_conflicto_como_nueva():
 
 # ============================================================== PANTALLA
 # La cabecera identifica el espacio de trabajo activo.
-if GIOVAL_REQUIRE_ACCESS:
+if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
     col_marca, col_estado, col_salir, col_ajustes = st.columns(
         [3.5, 2, 1, 1], vertical_alignment="center"
     )
 else:
     col_marca, col_estado, col_ajustes = st.columns([4, 2, 1], vertical_alignment="center")
 with col_marca:
-    st.markdown("### Giovalia")
+    logo_marca = Path(__file__).with_name("logo_gioval_catalogo.png")
+    if logo_marca.is_file():
+        st.image(str(logo_marca), width=130, alt="Gioval")
+    else:
+        st.markdown("### Giovalia")
+    if identidad:
+        st.caption(f"Hola, {identidad['nombre']}")
+        st.caption("Puedes retomar una cotización desde el Historial.")
 with col_estado:
     st.badge(
-        "Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS else "Biblioteca local",
+        "Biblioteca compartida" if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES else "Biblioteca local",
         icon=":material/verified_user:" if GIOVAL_REQUIRE_ACCESS else ":material/receipt_long:",
         color="blue",
     )
 with col_ajustes:
     carpeta, bib, hist, api_key, usar_lo, mp_ticket = configuracion_compacta()
-if GIOVAL_REQUIRE_ACCESS:
+if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
     with col_salir:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
+            if GIOVAL_PROFILES:
+                acceso.cerrar_sesion()
             E.clear()
             st.rerun()
 
