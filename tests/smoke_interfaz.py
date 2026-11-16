@@ -78,8 +78,9 @@ def comprobar_interfaz(numero, numero_otro):
         expect(page.get_by_role('textbox',name='Buscar',exact=True)).to_have_value(numero)
         page.locator('.st-key-vista').get_by_text('Biblioteca',exact=True).click()
         page.get_by_role('button',name='Sin foto · 1').click()
+        expect(page.get_by_role('combobox', name='Filtrar por estado')).to_have_value('Sin foto')
         page.get_by_text('Galería',exact=True).click()
-        page.get_by_role('button',name='Ver producto').click()
+        page.locator('.st-key-biblioteca_galeria_RESMA').get_by_role('button', name='Ver producto').click()
         expect(page.get_by_text('Detalle del producto',exact=True)).to_be_visible()
         page.get_by_role('button',name='Limpiar búsqueda y filtros').click()
         assert not errores, errores
