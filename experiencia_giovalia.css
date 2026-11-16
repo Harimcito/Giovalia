@@ -5,27 +5,29 @@ html:has(#gv-preferencias[data-escala="2"]) {font-size:20px}
   top: 3.75rem;
   z-index: 8;
   padding: .6rem;
-  border: 1px solid #cad7ea;
+  border: 1px solid var(--gv-line);
   border-radius: .8rem;
-  background: #fff;
+  background: var(--gv-panel-strong);
   box-shadow: 0 6px 18px #163a6815;
 }
 .st-key-barra_cotizacion button, .st-key-cabecera_giovalia button {min-height: 2.65rem}
 .st-key-barra_cotizacion [data-testid="stMarkdownContainer"] p {margin:0; font-variant-numeric:tabular-nums}
 html:has(#gv-preferencias[data-contraste="1"]) .stApp {
-  background:#f8fafc;
-  color:#101b32;
+  color:#fff;
+  --gv-line:#91a5c8;
+  --gv-muted:#e1eaff;
+  --gv-ink:#fff;
 }
 html:has(#gv-preferencias[data-contraste="1"]) :is(.st-key-cabecera_giovalia,.gv-lista,.st-key-barra_cotizacion,[data-testid="stVerticalBlockBorderWrapper"]) {
-  border-color:#526786;
-  --borde:#526786;
+  border-color:#91a5c8;
+  --borde:#91a5c8;
 }
 html:has(#gv-preferencias[data-contraste="1"]) :is(input,textarea,[role="combobox"]) {
-  outline:1px solid #526786;
+  outline:1px solid #9baed5;
   outline-offset:-1px;
 }
 html:has(#gv-preferencias[data-contraste="1"]) :is(button, a, input, select, textarea):focus-visible {
-  outline:3px solid #1746bd;
+  outline:3px solid #aac4ff;
   outline-offset:2px;
 }
 @media(max-width: 640px) {

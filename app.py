@@ -39,6 +39,7 @@ import flujo_cotizacion as flujo
 import stock_catalogo
 import edicion_lineas as edicion
 import interfaz_giovalia as interfaz
+import identidad_visual as visual
 import experiencia_giovalia as experiencia
 from vista_precios import vista_precios
 import catalogo_clientes as cc
@@ -69,8 +70,9 @@ st.set_page_config(
     page_title="Gioval · Cotizador comercial",
     page_icon=":material/description:",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="auto",
 )
+visual.estilos()
 
 identidad = acceso.exigir_perfil() if GIOVAL_PROFILES else None
 
@@ -251,6 +253,7 @@ ORIGEN = {"biblioteca": "Catálogo", "ia": "IA", "texto": "Texto del pedido",
 
 # ============================================================== FUNCIONES COMUNES
 VISTAS = ["Cotizar", "Historial", "Biblioteca", "Catálogo PDF", "Gestión comercial", "Datos pendientes"]
+INICIO, PRECIOS = "Inicio", "Precios"
 OPCIONES_PRECIO = ["Incluyen IVA (lo que paga el cliente)", "Son netos (sin IVA)"]
 FUENTE_TEXTO = "Lo escribo o pego aquí"
 FUENTE_TABLA = "Subir Excel o CSV"
@@ -269,7 +272,7 @@ if E.get("vista") in {"Mis productos", "Catálogo"}:
     E["vista"] = VISTAS[2]
 elif E.get("vista") in {"Nueva cotización", "Inicio"}:
     E["vista"] = VISTAS[0]
-E.setdefault("vista", VISTAS[0])
+E.setdefault("vista", INICIO)
 
 
 def editor(df, **kw):
@@ -332,14 +335,7 @@ def mostrar_pasos(actual: int):
             if E.get("_regreso_historial"):
                 st.button("Volver al historial", icon=":material/history:", key="editor_regresar_historial",
                           on_click=lambda: E.update(vista=VISTAS[1]))
-        with st.container(horizontal=True, vertical_alignment="center"):
-            for i, nombre in enumerate(nombres, 1):
-                if i < actual:
-                    st.badge(f"{i}. {nombre}", icon=":material/check:", color="green")
-                elif i == actual:
-                    st.badge(f"{i}. {nombre}", icon=":material/edit_note:", color="blue", help="Etapa actual")
-                else:
-                    st.badge(f"{i}. {nombre} · Pendiente", icon=":material/schedule:", color="gray")
+        visual.pasos(actual, nombres)
         lineas = [ln for ln in E.get("lineas", []) if ln.get("incluir", True)]
         if lineas:
             pendientes = sum(ln.get("unitario") is None and ln.get("precio_neto") is None for ln in lineas)
@@ -1300,19 +1296,20 @@ def selector_borradores():
         float(r.get("total") or 0) for r in registros if r.get("estado") == "Aceptada"
     )
 
-    titulo, accion = st.columns([3, 1], vertical_alignment="center")
-    with titulo:
-        st.title("Cotizaciones")
-        st.caption("Inicia una propuesta o retoma un borrador guardado.")
-    with accion:
-        st.button(
-            "Nueva cotización", icon=":material/add:", type="primary",
-            width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
-        )
-        st.button(
-            "Desde Mercado Público", icon=":material/account_balance:", width="stretch",
-            on_click=iniciar_borrador, args=(FUENTE_MERCADO_PUBLICO,), key="inicio_mercado_publico",
-        )
+    with st.container(key="gv_inicio_encabezado"):
+        titulo, accion = st.columns([3, 1.35], vertical_alignment="center")
+        with titulo:
+            st.title("Cotizaciones")
+            st.caption("Inicia una propuesta o retoma un borrador guardado.")
+        with accion:
+            st.button(
+                "Nueva cotización", icon=":material/add:", type="primary",
+                width="stretch", on_click=iniciar_borrador, key="inicio_nueva_cotizacion",
+            )
+            st.button(
+                "Desde Mercado Público", icon=":material/account_balance:", width="stretch",
+                on_click=iniciar_borrador, args=(FUENTE_MERCADO_PUBLICO,), key="inicio_mercado_publico",
+            )
 
     if not opciones_ux["mostrador"]:
         m1, m2, m3, m4 = st.columns(4)
@@ -1321,10 +1318,13 @@ def selector_borradores():
         m3.metric("Monto aceptado", rv.clp(cotizaciones_aceptadas), border=True)
         m4.metric("Productos en biblioteca", len(bib.indice), border=True)
 
-    izq, der = st.columns([1, 1.35])
+    der, izq = st.columns([2.2, 1])
     with izq:
-        with st.container(border=True):
-            st.subheader("Borradores")
+        with st.container(border=True, key="gv_inicio_retomar"):
+            st.subheader("Continuar")
+            if E.get("cot_id"):
+                st.button("Retomar la cotización abierta", icon=":material/arrow_forward:", width="stretch",
+                          on_click=navegar_vista, args=(VISTAS[0],), key="inicio_cotizacion_activa")
             if borradores:
                 ultimo = max(borradores, key=lambda r: (r.get("actualizado") or r.get("creado") or "", r["id"]))
                 st.button("Retomar el último borrador", icon=":material/edit_document:", type="primary",
@@ -1349,20 +1349,35 @@ def selector_borradores():
                 )
             else:
                 st.caption("No tienes borradores pendientes.")
-    with der:
-        with st.container(border=True):
-            st.subheader("Actividad reciente")
-            if registros:
-                elegido = lista_cotizaciones("Cotizaciones recientes", registros[:5], key="actividad_reciente")
-                if elegido is not None:
-                    restaurar_borrador(elegido)
-                    st.rerun()
-                st.button(
-                    "Ver todas las cotizaciones", icon=":material/arrow_forward:",
-                    width="stretch", on_click=lambda: E.update(vista=VISTAS[1]), key="inicio_ver_todas",
-                )
-            else:
-                st.caption("Las cotizaciones que prepares aparecerán aquí.")
+    with der, st.container(border=True, key="gv_inicio_actividad"):
+        st.subheader("Actividad")
+        recientes, borradores_tab = st.tabs(["Recientes", "Borradores"])
+        with recientes:
+            mostrar_actividad_inicio("Cotizaciones recientes", registros[:5], key="actividad_reciente")
+        with borradores_tab:
+            consulta = st.text_input("Buscar borrador", key="inicio_buscar_borrador", placeholder="Número de cotización")
+            visibles = [r for r in borradores if consulta.strip().casefold() in r["numero"].casefold()]
+            mostrar_actividad_inicio("Borradores recientes", visibles[:8], key="actividad_borradores")
+        st.button("Ver todas las cotizaciones", icon=":material/arrow_forward:", width="stretch",
+                  on_click=navegar_vista, args=(VISTAS[1],), key="inicio_ver_todas")
+
+
+def mostrar_actividad_inicio(titulo, registros, *, key):
+    if not registros:
+        st.caption("No hay cotizaciones en esta lista.")
+        return
+    elegido = lista_cotizaciones(titulo, registros, key=key)
+    if elegido is None:
+        return
+    registro = hist.obtener(elegido)
+    if registro and registro["estado"] == "Borrador":
+        if E.get("cot_id") == elegido:
+            E["vista"] = VISTAS[0]
+        else:
+            restaurar_borrador(elegido)
+    else:
+        mostrar_cotizacion_historial(elegido)
+    st.rerun()
 
 
 # ============================================================== PASO 1: PEDIDO
@@ -1808,8 +1823,7 @@ def cotizacion_ui():
 
 
 def paso_1():
-    st.title("Pedido")
-    st.caption("Elige cómo cargar los productos de la cotización.")
+    visual.titulo("Pedido", "Elige cómo cargar los productos de la cotización.", "Cotización", "")
     atras_cotizacion.button("Volver", key="inicio_desde_pedido", width="stretch", on_click=limpiar_estado_trabajo)
     if E.get("fuente_pedido") not in ETIQUETAS_FUENTES:
         E["fuente_pedido"] = FUENTE_TEXTO
@@ -2145,7 +2159,7 @@ def mostrar_entregas(lineas):
 
 
 def paso_2():
-    st.title("Editar cotización")
+    visual.titulo("Editar cotización", "Edita las líneas que irán en la propuesta.", "Cotización", "")
     st.caption("Ctrl+K buscar · Alt+N agregar línea y Enter · Alt+P siguiente precio · Ctrl+S guardar")
     trabajo = st.container()
     resumen = st.container(key="totales_editor_cotizacion")
@@ -2767,7 +2781,7 @@ def confirmar_pdf():
 
 
 def paso_4():
-    st.title("Revisa y crea tu PDF", icon=":material/picture_as_pdf:")
+    visual.titulo("Revisa y crea tu PDF", "Comprueba los importes y el contenido antes de emitir.", "Cotización", "")
     if "pdf_bytes" not in E:
         editor_productos()
         boton_actualizar_totales()
@@ -3879,6 +3893,51 @@ def guardar_conflicto_como_nueva():
         E["_conflicto_guardado_mensaje"] = f"No pude crear la copia de tus cambios: {exc}"
 
 
+def proteger_edicion_al_navegar():
+    if E.get("_vista_renderizada") != VISTAS[0] or not E.get("cot_id"):
+        return
+    persistir_borrador()
+    orden = E.get("orden_df")
+    if isinstance(orden, pd.DataFrame):
+        E["orden_df_base"] = orden.copy()
+        E["orden_editor_version"] = E.get("orden_editor_version", 0) + 1
+    if E.get("paso", 1) > 1 and "lineas" in E:
+        tabla = tabla_desde_lineas(E["lineas"])
+        E.update(tabla=tabla, tabla_edit=tabla.copy(), tabla_base=tabla.copy(),
+                 editor_version=E.get("editor_version", 0) + 1)
+
+
+def navegar_vista(seccion):
+    if seccion != E.get("_vista_renderizada"):
+        proteger_edicion_al_navegar()
+    E["vista"] = seccion
+
+
+def mostrar_cotizacion_historial(cot_id):
+    navegar_vista(VISTAS[1])
+    E.update(_historial_seleccion=cot_id, _filtros_historial=("", "Todos", "Todas las fechas"),
+             h_texto="", h_estado="Todos", h_periodo="Todas las fechas")
+
+
+def abrir_enlace_guardado():
+    cot = st.query_params.get("cotizacion", "")
+    producto = st.query_params.get("producto", "")
+    for campo in ("cotizacion", "producto"):
+        if campo in st.query_params:
+            del st.query_params[campo]
+    if re.fullmatch(r"[1-9][0-9]{0,17}", cot):
+        mostrar_cotizacion_historial(int(cot))
+    elif producto and len(producto) <= 100:
+        clave = bib.clave_vigente(producto)
+        if clave:
+            abrir_producto_desde_catalogo(clave)
+
+
+def refrescar_biblioteca():
+    bib.refrescar_si_cambio()
+    E["_mensaje_guardado"] = "Biblioteca e historial actualizados."
+
+
 # ============================================================== PANTALLA
 # La cabecera identifica el espacio de trabajo activo.
 cabecera = st.container(key="cabecera_giovalia")
@@ -3889,6 +3948,7 @@ if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
 else:
     col_marca, col_estado, col_ajustes = cabecera.columns([4, 2, 1], vertical_alignment="center")
 with col_marca:
+    visual.topbar(E.get("vista", INICIO), identidad["nombre"] if identidad else "")
     logo_marca = Path(__file__).with_name("logo_gioval_catalogo.png")
     if logo_marca.is_file():
         st.image(str(logo_marca), width=130, alt="Gioval")
@@ -3905,6 +3965,9 @@ with col_estado:
     )
 with col_ajustes:
     carpeta, bib, hist, api_key, usar_lo, mp_ticket = configuracion_compacta()
+    st.button("Actualizar", key="refrescar_compartido", icon=":material/refresh:", type="tertiary",
+              on_click=refrescar_biblioteca)
+abrir_enlace_guardado()
 if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
     with col_salir:
         if st.button("Salir", icon=":material/logout:", width="stretch", key="gioval_cerrar_sesion"):
@@ -3946,6 +4009,8 @@ if destino := E.pop("_hallazgo_destino", None):
     ir_al_hallazgo(*destino)
 
 etiquetas_vista = {
+    INICIO: ":material/space_dashboard: Inicio",
+    PRECIOS: ":material/query_stats: Precios",
     VISTAS[0]: ":material/edit_document: Cotizar",
     VISTAS[1]: ":material/history: Historial",
     VISTAS[2]: ":material/inventory_2: Biblioteca",
@@ -3957,30 +4022,56 @@ if codigo := E.pop("_abrir_producto_catalogo", None):
     abrir_producto_desde_catalogo(codigo)
 with cabecera:
     opciones_ux = experiencia.preferencias(E, identidad, acceso)
-vistas_visibles = VISTAS
+vistas_principales = [INICIO, VISTAS[0], PRECIOS, VISTAS[2], VISTAS[3], VISTAS[1], VISTAS[4], VISTAS[5]]
+vista_activa = E.get("vista", INICIO)
+if vista_activa not in vistas_principales:
+    vista_activa = E["vista"] = INICIO
+vistas_visibles = vistas_principales
 if opciones_ux["mostrador"]:
-    if E.get("vista") in VISTAS[:3]:
-        vistas_visibles = VISTAS[:3]
+    vistas_visibles = [INICIO, VISTAS[0], VISTAS[2], VISTAS[1]]
+    if vista_activa not in vistas_visibles:
+        vistas_visibles = vistas_visibles + [vista_activa]
     with st.popover("Gestión", icon=":material/settings:"):
-        for avanzada in VISTAS[3:]:
-            st.button(avanzada, key=f"ux_gestion_{VISTAS.index(avanzada)}", width="stretch",
-                      on_click=lambda vista_destino=avanzada: E.update(vista=vista_destino))
-vista = st.segmented_control(
-    "Secciones",
-    vistas_visibles,
-    key="vista",
-    format_func=lambda valor: etiquetas_vista[valor],
-    required=True,
-    width="stretch",
-    wrap=True,
-    label_visibility="collapsed",
-)
+        for avanzada in (PRECIOS, *VISTAS[3:]):
+            st.button(avanzada, key=f"ux_gestion_{vistas_principales.index(avanzada)}", width="stretch",
+                      on_click=navegar_vista, args=(avanzada,))
+with st.sidebar:
+    visual.marca()
+    with st.container(key="gv_nav", gap="xxsmall"):
+        for seccion in vistas_visibles:
+            icono, _ = etiquetas_vista[seccion].split(" ", 1)
+            st.button(seccion, icon=icono, width="stretch", key=f"gv_nav_{vistas_principales.index(seccion)}",
+                      type="primary" if vista_activa == seccion else "secondary",
+                      on_click=navegar_vista, args=(seccion,))
+    if E.get("cot_id"):
+        st.divider()
+        st.caption("Cotización abierta")
+        st.badge(E.get("cot_numero") or (E.get("informe") or {}).get("resumen", {}).get("numero") or "Borrador",
+                 icon=":material/draft:", color="blue")
+with st.container(key="gv_nav_movil"):
+    vista = st.segmented_control(
+        "Secciones", vistas_visibles, key="vista", format_func=etiquetas_vista.__getitem__,
+        required=True, width="stretch", wrap=True, label_visibility="collapsed",
+        on_change=lambda: navegar_vista(E["vista"]),
+    )
+ruta_visual = (vista, E.get("paso") if vista == VISTAS[0] else None)
+if E.get("_ruta_visual") != ruta_visual:
+    E["_ruta_visual"] = ruta_visual
+    E["_secuencia_visual"] = E.get("_secuencia_visual", 0) + 1
+    if not E.get("_destino_visual"):
+        visual.inicio_de_seccion(E["_secuencia_visual"])
+E["_vista_renderizada"] = vista
 st.html(Path(__file__).with_name("atajos_cotizacion.html"), unsafe_allow_javascript=True)
 st.html(Path(__file__).with_name("cambios_linea.html"), unsafe_allow_javascript=True)
 st.html(Path(__file__).with_name("interfaz_giovalia.css"))
 st.html(Path(__file__).with_name("interfaz_foco.html"), unsafe_allow_javascript=True)
 mostrar_busqueda_global()
-if vista == VISTAS[1]:
+if vista == INICIO:
+    with st.container(key="gv_inicio"):
+        selector_borradores()
+elif vista == PRECIOS:
+    vista_precios(bib, hist)
+elif vista == VISTAS[1]:
     vista_historial()
 elif vista == VISTAS[2]:
     vista_productos()
@@ -3992,7 +4083,8 @@ elif vista == VISTAS[4]:
 elif vista == VISTAS[5]:
     vista_pendientes()
 elif not E.get("cot_id"):
-    selector_borradores()
+    with st.container(key="gv_inicio"):
+        selector_borradores()
 else:
     E.setdefault("paso", 1)
     if E["paso"] > 1 and "lineas" not in E:

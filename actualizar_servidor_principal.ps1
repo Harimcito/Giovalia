@@ -34,7 +34,7 @@ function Probar-Giovalia([switch]$VersionNueva) {
             if ($respuesta.StatusCode -eq 200 -and $respuesta.Content.Trim() -eq 'ok') {
                 if (-not $VersionNueva) { return }
                 $version = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$puerto/api/giovalia/version" -TimeoutSec 2
-                if ($version.Content.Trim() -eq 'gestion-comercial-v1') { return }
+                if ($version.Content.Trim() -eq $versionEsperada) { return }
             }
         } catch { Start-Sleep -Seconds 1 }
     }
@@ -75,6 +75,18 @@ foreach ($configPrivada in @('.env', 'configuracion.py', '.streamlitsecrets.toml
 if ($LASTEXITCODE -ne 0) { throw 'La comprobación de sintaxis del paquete falló.' }
 & $python (Join-Path $preparada 'respaldo_servidor.py') $base (Join-Path $base 'Backups\Actualizacion')
 if ($LASTEXITCODE -ne 0) { throw 'No se pudo verificar el respaldo previo.' }
+
+$archivosVersion = @('app.py', 'giovalia.css', 'interfaz_giovalia.css', 'experiencia_giovalia.css', '.streamlit/config.toml')
+$huellas = foreach ($archivoVersion in $archivosVersion) {
+    (Get-FileHash -LiteralPath (Join-Path $preparada $archivoVersion) -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$hashVersion = [Security.Cryptography.SHA256]::Create()
+try {
+    $bytesVersion = [Text.Encoding]::ASCII.GetBytes((-join $huellas))
+    $versionEsperada = 'giovalia-' + [BitConverter]::ToString($hashVersion.ComputeHash($bytesVersion)).Replace('-', '').ToLowerInvariant()
+} finally {
+    $hashVersion.Dispose()
+}
 
 $movidaAnterior = $false
 $puestaNueva = $false
