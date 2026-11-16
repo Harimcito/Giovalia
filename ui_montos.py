@@ -57,9 +57,9 @@ def editor(datos, **kw):
     for c in columnas:
         # Preserve underlying precision when the displayed amount was not edited.
         valores = []
-        for pos, valor in enumerate(editado[c]):
-            if pos < len(df) and valor == df[c].iloc[pos]:
-                valores.append(datos[c].iloc[pos])
+        for indice, valor in editado[c].items():
+            if indice in df.index and valor == df.at[indice, c]:
+                valores.append(datos.at[indice, c])
             else:
                 numero = leer(valor)
                 minimo = kw["column_config"][c].get("type_config", {}).get("min_value")

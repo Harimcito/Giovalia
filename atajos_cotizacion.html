@@ -1,0 +1,59 @@
+<style>
+  .st-key-totales_editor_cotizacion {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--st-background-color, white);
+  }
+</style>
+<script>
+  window.giovaliaAtajos?.abort();
+  window.giovaliaAtajos = new AbortController();
+
+  function enfocar(selector, anterior = null) {
+    let intentos = 0;
+    const buscar = () => {
+      const campo = document.querySelector(selector);
+      if (campo && campo !== anterior && campo.getClientRects().length) {
+        campo.focus();
+        campo.select();
+      } else if (intentos++ < 75) {
+        setTimeout(buscar, 40);
+      }
+    };
+    buscar();
+  }
+
+  document.addEventListener("keydown", (evento) => {
+    if (evento.repeat || evento.isComposing) return;
+    const tecla = evento.key.toLowerCase();
+    const control = (evento.ctrlKey || evento.metaKey) && !evento.altKey;
+    if (control && tecla === "k") {
+      const boton = document.querySelector(".st-key-busqueda_global button");
+      if (!boton) return;
+      evento.preventDefault();
+      if (boton.getAttribute("aria-expanded") !== "true") boton.click();
+      enfocar(".st-key-consulta_global input");
+    } else if (evento.altKey && !evento.ctrlKey && !evento.metaKey && tecla === "n") {
+      if (!document.querySelector(".st-key-linea_nueva input")) return;
+      evento.preventDefault();
+      enfocar(".st-key-linea_nueva input");
+    } else if ((control && tecla === "s") ||
+               (evento.altKey && !evento.ctrlKey && !evento.metaKey && tecla === "p")) {
+      const guardar = tecla === "s";
+      const selector = "input[aria-label='Precio de la línea seleccionada']";
+      const campo = document.querySelector(selector);
+      const editandoLinea = campo?.closest('[data-testid="stForm"]')?.contains(document.activeElement);
+      const boton = document.querySelector(guardar
+        ? (editandoLinea ? ".st-key-aplicar_precio button" : ".st-key-guardar_editor button")
+        : ".st-key-siguiente_precio button");
+      if (!boton || boton.disabled) return;
+      evento.preventDefault();
+      document.activeElement?.blur();
+      requestAnimationFrame(() => {
+        boton.click();
+        if (!guardar) enfocar(selector, campo);
+      });
+    }
+  }, { signal: window.giovaliaAtajos.signal });
+</script>

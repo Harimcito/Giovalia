@@ -23,7 +23,7 @@ def comparar(anterior, nuevo):
     for i in range(max(len(lineas_a), len(lineas_b))):
         a = lineas_a[i] if i < len(lineas_a) else {}
         b = lineas_b[i] if i < len(lineas_b) else {}
-        for campo in ("descripcion", "cantidad", "clave_auto", "incluir"):
+        for campo in ("descripcion", "cantidad", "clave_auto", "incluir", "disponibilidad", "plazo_dias"):
             anotar(f"Línea {i + 1}", campo, a.get(campo), b.get(campo))
         def precio(linea):
             valor = linea.get("unitario")

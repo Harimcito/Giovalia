@@ -34,9 +34,9 @@ if PERFILES:
 
 _CAMPOS_LINEA_COMPARTIDA = {
     "fila", "cantidad", "descripcion", "unitario", "precio_neto", "es_producto",
-    "clave_auto", "origen", "incluir",
+    "clave_auto", "origen", "incluir", "disponibilidad", "plazo_dias",
 }
-_CAMPOS_ORDEN_COMPARTIDA = ("Incluir", "Cantidad", "Producto", "Precio unitario")
+_CAMPOS_ORDEN_COMPARTIDA = ("Incluir", "Cantidad", "Producto", "Precio unitario", "Disponibilidad", "Plazo (días)")
 
 
 def _datos_compartidos(datos: dict | None) -> dict:

@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from streamlit.testing.v1 import AppTest
 
 from cotizador import Biblioteca
+from flujo_cotizacion import buscar
 from historial import Historial
 
 
@@ -58,7 +59,8 @@ class FlujosAppTests(unittest.TestCase):
         self.assertEqual(app.session_state["lineas"][0]["descripcion"], "Resma carta editada")
         version = app.session_state["editor_version"]
         self.editar_tabla(app, f"editor_productos_{version}__clp",
-                          {"Cantidad": 3, "Producto": "Segunda descripción", "Precio unitario": "$2.380"})
+                          {"Cantidad": 3, "Producto": "Segunda descripción", "Precio unitario": "$2.380",
+                           "Disponibilidad": "A pedido", "Plazo (días)": 5})
         self.pulsar(app, "Actualizar totales")
         self.pulsar(app, "Siguiente: fotos")
         self.pulsar(app, "Siguiente: revisar")
@@ -76,10 +78,13 @@ class FlujosAppTests(unittest.TestCase):
         self.pulsar(app, "Confirmar versión")
         self.assertEqual(app.session_state["pdf_bytes"], previo)
         pdf = PdfReader(BytesIO(previo))
-        self.assertIn("Segunda descripción", " ".join(p.extract_text() for p in pdf.pages))
+        texto_pdf = " ".join(p.extract_text() for p in pdf.pages)
+        self.assertIn("Segunda descripción", texto_pdf)
+        self.assertIn("A pedido, 5 días", texto_pdf)
         registro = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])
         self.assertEqual(Path(registro["pdf"]).read_bytes(), previo)
         self.assertEqual(registro["total"], 7140)
+        self.assertEqual(registro["datos"]["lineas"][0]["plazo_dias"], 5)
         biblioteca.refrescar_si_cambio()
         self.assertEqual(biblioteca.indice["RESMA-CARTA"]["precio_neto"], 500)
         self.assertEqual(Historial(self.raiz / "biblioteca").versiones(registro["id"])[0]["etiqueta"],
@@ -87,9 +92,96 @@ class FlujosAppTests(unittest.TestCase):
         with Path(registro["xlsx"]).open("rb") as archivo:
             wb = load_workbook(archivo, read_only=True)
             try:
-                self.assertTrue(any("Segunda descripción" in fila for fila in wb.active.values))
+                self.assertTrue(any("Segunda descripción · A pedido, 5 días" in fila for fila in wb.active.values))
             finally:
                 wb.close()
+
+    def test_busqueda_editor_y_bandeja_comparten_datos(self):
+        bib = Biblioteca(self.raiz / "biblioteca")
+        bib.registrar("TN1060", "Tóner Brother", alias="cartucho negro")
+        hist = Historial(self.raiz / "biblioteca")
+        hist.guardar_cliente({"nombre": "Empresa de Arica", "rut": "12345678-5"})
+        lineas = [
+            {"cantidad": 1, "descripcion": "Tóner Brother TN1060", "clave_auto": "TN1060",
+             "unitario": 1000, "disponibilidad": "A pedido", "plazo_dias": 5},
+            {"cantidad": 2, "descripcion": "Resma oficio", "clave_auto": "RESMA", "unitario": 1000,
+             "disponibilidad": "En stock"},
+        ]
+        cot_id, _ = hist.crear({"nombre": "Empresa de Arica"}, lineas, {})
+        hist.actualizar(cot_id, datos={"lineas": lineas, "paso": 2})
+        app = self.iniciar()
+        app.session_state["busqueda_global_popover"] = True
+        self.recargar(app)
+        app.text_input(key="consulta_global").set_value("12345678-5")
+        self.recargar(app)
+        self.assertTrue(any("Empresa de Arica" in boton.label for boton in app.button))
+        self.assertEqual(buscar("Empresa de Arica", bib, hist, privado=True), ([], [], []))
+        self.assertEqual(buscar("cartucho negro", bib, hist)[0], [("TN1060", "Tóner Brother")])
+        app.text_input(key="consulta_global").set_value("TN-1060")
+        self.recargar(app)
+        self.assertTrue(app.button(key="buscar_producto_TN1060"))
+        app.button(key=f"buscar_cotizacion_{cot_id}").click()
+        self.recargar(app)
+        self.assertEqual(app.session_state["paso"], 2)
+        self.assertTrue(any("entregas parciales" in e.label for e in app.expander))
+        app.text_input(key="linea_nueva").set_value("Carpeta simple")
+        self.recargar(app)
+        self.assertEqual(len(app.session_state["lineas"]), 3)
+        precio = next(c for c in app.text_input if c.label == "Precio de la línea seleccionada")
+        precio.set_value("$2.380")
+        app.button(key="siguiente_precio").click()
+        self.recargar(app)
+        self.assertEqual(app.session_state["linea_editor"], 1)
+        self.assertEqual(hist.obtener(cot_id)["datos"]["lineas"][0]["unitario"], 2000)
+        self.pulsar(app, "← Volver")
+        app.checkbox(key="ok_sin_precio").check()
+        self.recargar(app)
+        for verificacion in app.checkbox:
+            if verificacion.key and verificacion.key.startswith("verificar_importacion_"):
+                verificacion.check()
+                self.recargar(app)
+                break
+        self.pulsar(app, "Guardar pedido")
+        self.assertEqual(app.session_state["lineas"][0]["plazo_dias"], 5)
+        self.assertEqual(app.session_state["lineas"][1]["disponibilidad"], "En stock")
+        app.session_state["vista"] = "Datos pendientes"
+        self.recargar(app)
+        next(w for w in app.number_input if w.label == "Costo neto").set_value(6000.0)
+        next(w for w in app.selectbox if w.label == "Stock en biblioteca").set_value("En stock")
+        self.pulsar(app, "Guardar costo y stock")
+        bib.refrescar_si_cambio()
+        self.assertEqual(bib.indice["TN1060"]["estado_stock"], "En stock")
+        self.assertEqual(bib.indice["TN1060"]["costo_neto"], 6000)
+        next(c for c in app.checkbox if c.label.startswith("Este producto no requiere")).check()
+        self.recargar(app)
+        self.assertTrue(any("No hay productos pendientes" in s.value for s in app.success))
+
+    def test_borrar_primera_linea_conserva_precio_y_plazo_de_la_siguiente(self):
+        hist = Historial(self.raiz / "biblioteca")
+        lineas = [
+            {"cantidad": 1, "descripcion": "Tóner", "clave_auto": "TONER", "unitario": 1000.1,
+             "disponibilidad": "En stock"},
+            {"cantidad": 2, "descripcion": "Resma", "clave_auto": "RESMA", "unitario": 1000.3,
+             "disponibilidad": "A pedido", "plazo_dias": 7},
+        ]
+        cot_id, _ = hist.crear({}, lineas, {})
+        hist.actualizar(cot_id, datos={"lineas": lineas, "paso": 2})
+        app = self.iniciar()
+        app.session_state["busqueda_global_popover"] = True
+        self.recargar(app)
+        app.text_input(key="consulta_global").set_value("RESMA")
+        self.recargar(app)
+        app.button(key=f"buscar_cotizacion_{cot_id}").click()
+        self.recargar(app)
+        version = app.session_state["editor_version"]
+        app.session_state[f"editor_productos_{version}__clp"] = {
+            "edited_rows": {}, "added_rows": [], "deleted_rows": [0],
+        }
+        self.recargar(app)
+        guardadas = hist.obtener(cot_id)["datos"]["lineas"]
+        self.assertEqual(len(guardadas), 1)
+        self.assertEqual(guardadas[0]["unitario"], 1000.3)
+        self.assertEqual(guardadas[0]["plazo_dias"], 7)
 
     def test_historial_compara_y_restaura_una_version(self):
         hist = Historial(self.raiz / "biblioteca")
