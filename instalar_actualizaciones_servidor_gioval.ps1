@@ -22,16 +22,13 @@ try {
         throw "No encuentro la clave de acceso del servidor. Ejecuta iniciar_servidor_gioval.bat una vez, crea la clave y luego detén esa ventana con Ctrl+C."
     }
 
-    foreach ($port in @(8501, 8502)) {
-        try {
-            $response = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/_stcore/health" -f $port) -UseBasicParsing -TimeoutSec 2
-            if ($response.StatusCode -eq 200 -and $response.Content -match "ok") {
-                throw "Detecté una aplicación Gioval activa en el puerto $port. Detén las ventanas actuales del cotizador y de Radar con Ctrl+C y vuelve a ejecutar este archivo para evitar dos servidores compitiendo por los mismos puertos."
-            }
-        } catch {
-            if ($_.Exception.Message -like "Detecté una aplicación Gioval activa*") { throw }
-            # Que no haya respuesta es normal antes de iniciar el servidor.
-        }
+    $response = try {
+        Invoke-WebRequest -Uri "http://127.0.0.1:8501/_stcore/health" -UseBasicParsing -TimeoutSec 2
+    } catch {
+        $null
+    }
+    if ($response.StatusCode -eq 200 -and $response.Content -match "ok") {
+        throw "El cotizador ya está activo en el puerto 8501. Detén la ventana del servidor con Ctrl+C antes de continuar."
     }
 
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -42,7 +39,7 @@ try {
 
     $stopSignal = Join-Path $baseDir "detener-actualizador.flag"
     if (Test-Path $stopSignal) { Remove-Item -LiteralPath $stopSignal -Force }
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Mantiene Gioval y Radar disponibles y actualiza el código desde la rama main de GitHub cada cinco minutos." -Force | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Mantiene Gioval disponible y actualiza el código desde la rama main de GitHub cada cinco minutos." -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
 
     Write-Host ""
@@ -50,7 +47,6 @@ try {
     Write-Host "El servidor inicia ahora y también al iniciar sesión en Windows." -ForegroundColor Green
     Write-Host "Revisa el registro en: $baseDir\logs\actualizador-servidor.log"
     Write-Host "Cotizador: http://localhost:8501"
-    Write-Host "Radar Comercial: http://localhost:8502"
     Write-Host "GitHub se consulta cada 5 minutos. Los datos permanecen en $baseDir\Datos, fuera del repositorio."
     Write-Host ""
     Read-Host "Presiona Enter para cerrar"

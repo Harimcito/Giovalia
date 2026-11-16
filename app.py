@@ -22,7 +22,7 @@ import cotizador as ct
 import historial as hs
 import lector_ia as li
 import mercado_publico as mp
-from radar_comercial import ui_montos as montos
+import ui_montos as montos
 import pdf_cotizacion as pc
 import revisor as rv
 

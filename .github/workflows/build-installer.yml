@@ -1,6 +1,8 @@
 name: Construir instalador de Giovalia
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
     paths-ignore:
@@ -9,10 +11,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: giovalia-installer-main
+  group: giovalia-installer-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,6 +28,10 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
+            "abrir_gioval.ps1",
+            "configurar_cliente_gioval.ps1",
+            "iniciar_servidor_gioval.ps1",
+            "instalar_servidor_gioval.ps1",
             "supervisar_servidor_gioval.ps1",
             "instalar_actualizaciones_servidor_gioval.ps1",
             "desinstalar_actualizaciones_servidor_gioval.ps1"
@@ -65,6 +71,15 @@ jobs:
         shell: pwsh
         run: python -m PyInstaller --noconfirm --clean gioval_desktop.spec
 
+      - name: Verificar el paquete de escritorio
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "dist/Gioval/Gioval.exe").Path
+          $process = Start-Process -FilePath $exe -ArgumentList @("--check-package") -PassThru -Wait -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) {
+            throw "El paquete de escritorio no pudo cargar sus dependencias de ventana."
+          }
+
       - name: Instalar Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
@@ -86,6 +101,17 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  publicar:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build-windows-installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Giovalia-Windows-Installer
+
       - name: Publicar versión más reciente
         uses: softprops/action-gh-release@v2
         with:
@@ -95,7 +121,7 @@ jobs:
             Instalador de Windows generado automáticamente desde la rama main.
             Descarga Gioval-Setup.exe en Assets.
             Cada ejecución exitosa de este flujo reemplaza el instalador de esta versión.
-          files: installer/Output/Gioval-Setup.exe
+          files: Gioval-Setup.exe
           overwrite_files: true
           make_latest: true
           prerelease: false

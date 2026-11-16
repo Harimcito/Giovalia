@@ -66,6 +66,7 @@ _TAMANO_PRODUCTO = {"CARTA": "CARTA", "LETTER": "CARTA", "OFICIO": "OFICIO", "LE
                     "A4": "A4", "A3": "A3", "A5": "A5", "TABLOIDE": "TABLOIDE"}
 _MARCAS_PRODUCTO = {"EQUALIT", "DURACELL", "FULTON", "COLON", "HP", "CANON", "EPSON", "KYOCERA",
                     "BROTHER", "SAMSUNG", "XEROX", "LEXMARK", "TOSHIBA", "LAVORO", "RHEIN", "TORRE"}
+_PILAS_PRODUCTO = frozenset({"AA", "AAA"})
 
 
 @lru_cache(maxsize=8192)
@@ -86,11 +87,11 @@ def _tokens_producto(texto: str, ignorar_similares: bool = True) -> frozenset[st
 @lru_cache(maxsize=32)
 def _carpetas_por_alias(ruta: str, mtime_ns: int) -> dict[str, tuple[Path, ...]]:
     """Indexa una vez las carpetas antiguas; evita recorrer toda la biblioteca por producto."""
-    raiz = Path(ruta)
     mapa: dict[str, list[Path]] = {}
-    for carpeta in raiz.iterdir():
-        if carpeta.is_dir():
-            mapa.setdefault(normalizar(carpeta.name), []).append(carpeta)
+    with os.scandir(ruta) as carpetas:
+        for carpeta in carpetas:
+            if carpeta.is_dir():
+                mapa.setdefault(normalizar(carpeta.name), []).append(Path(carpeta.path))
     return {alias: tuple(candidatas) for alias, candidatas in mapa.items()}
 
 
@@ -102,21 +103,26 @@ def _mapa_carpetas(raiz: Path) -> dict[str, tuple[Path, ...]]:
     return _carpetas_por_alias(str(raiz.resolve()), mtime_ns)
 
 
-def _conflicto_producto(a: set[str], b: set[str]) -> bool:
-    tamanos_a = {_TAMANO_PRODUCTO[t] for t in a if t in _TAMANO_PRODUCTO}
-    tamanos_b = {_TAMANO_PRODUCTO[t] for t in b if t in _TAMANO_PRODUCTO}
-    if tamanos_a and tamanos_b and tamanos_a.isdisjoint(tamanos_b):
-        return True
-    pilas_a, pilas_b = a & {"AA", "AAA"}, b & {"AA", "AAA"}
-    if pilas_a and pilas_b and pilas_a.isdisjoint(pilas_b):
-        return True
-    marcas_a, marcas_b = a & _MARCAS_PRODUCTO, b & _MARCAS_PRODUCTO
-    if marcas_a and marcas_b and marcas_a.isdisjoint(marcas_b):
-        return True
-    # No unir presentaciones distintas cuando ambas describen explícitamente una cantidad.
-    nums_a = {t for t in a if t.isdigit() and len(t) <= 5}
-    nums_b = {t for t in b if t.isdigit() and len(t) <= 5}
-    return bool(nums_a and nums_b and nums_a.isdisjoint(nums_b))
+@lru_cache(maxsize=8192)
+def _atributos_producto(tokens: frozenset[str]) -> tuple[frozenset[str], ...]:
+    """Agrupa los atributos incompatibles de cada variante una vez."""
+    return (
+        frozenset(_TAMANO_PRODUCTO[t] for t in tokens if t in _TAMANO_PRODUCTO),
+        tokens & _PILAS_PRODUCTO,
+        tokens & _MARCAS_PRODUCTO,
+        frozenset(t for t in tokens if t.isdigit() and len(t) <= 5),
+    )
+
+
+def _conflicto_atributos(a, b) -> bool:
+    for izquierda, derecha in zip(a, b):
+        if izquierda and derecha and izquierda.isdisjoint(derecha):
+            return True
+    return False
+
+
+def _conflicto_producto(a, b) -> bool:
+    return _conflicto_atributos(_atributos_producto(frozenset(a)), _atributos_producto(frozenset(b)))
 
 
 def identidad_conflictiva(clave: str, ficha: dict) -> bool:
@@ -186,7 +192,7 @@ class Biblioteca:
         self._indice_mtime_ns = self._mtime_indice()
         self._semantic_mtime_ns = None
         self._semantic_postings: dict[str, set[str]] = {}
-        self._semantic_variantes: dict[str, tuple[frozenset[str], ...]] = {}
+        self._semantic_variantes = {}
         self.asociar_carpetas_anteriores()
 
     def _mtime_indice(self) -> int:
@@ -292,7 +298,7 @@ class Biblioteca:
                 _tokens_producto(str(variante), ignorar_similares=False)
                 for variante in variantes if variante
             )
-            variantes_por_clave[clave] = grupos
+            variantes_por_clave[clave] = tuple((grupo, _atributos_producto(grupo)) for grupo in grupos if grupo)
             for grupo in grupos:
                 for token in grupo:
                     postings.setdefault(token, set()).add(clave)
@@ -355,8 +361,8 @@ class Biblioteca:
             return None, None
         c = self.carpeta(clave)
         foto = next((p for e in EXT_FOTO if (p := c / f"foto{e}").exists()), None)
-        ficha = c / "ficha.pdf"
-        if foto and ficha.exists():
+        ficha = p if (p := c / "ficha.pdf").exists() else None
+        if foto and ficha:
             return foto, ficha
 
         ficha_producto = self.indice.get(clave.strip().upper(), {})
@@ -370,13 +376,13 @@ class Biblioteca:
         for anterior in carpetas_anteriores:
             if not foto:
                 foto = next((p for e in EXT_FOTO if (p := anterior / f"foto{e}").exists()), None)
-            if not ficha.exists():
+            if not ficha:
                 ficha_antigua = anterior / "ficha.pdf"
                 if ficha_antigua.exists():
                     ficha = ficha_antigua
-            if foto and ficha.exists():
+            if foto and ficha:
                 break
-        return foto, (ficha if ficha.exists() else None)
+        return foto, ficha
 
     def guardar_archivo(self, clave: str, tipo: str, nombre_origen: str, datos: bytes):
         c = self.carpeta(clave)
@@ -514,22 +520,20 @@ class Biblioteca:
         if not consulta:
             return []
         self._asegurar_indice_semantico()
-        candidatos = set().union(*(self._semantic_postings.get(token, set()) for token in consulta))
+        atributos_consulta = _atributos_producto(consulta)
+        marcas_consulta = atributos_consulta[2]
+        candidatos = set().union(*(self._semantic_postings.get(token, ()) for token in consulta))
         resultados = []
         for clave in candidatos:
             ficha = self.indice.get(clave, {})
             mejor = 0.0
-            for tokens in self._semantic_variantes.get(clave, ()):
-                if not tokens or _conflicto_producto(consulta, tokens):
-                    continue
+            for tokens, atributos in self._semantic_variantes.get(clave, ()):
                 comunes = consulta & tokens
-                if not comunes:
+                if not comunes or _conflicto_atributos(atributos_consulta, atributos):
                     continue
                 # F1 sobre tokens: tolera palabras adicionales sin aceptar un solo término genérico.
                 score = 2 * len(comunes) / (len(consulta) + len(tokens))
-                marcas_consulta = consulta & _MARCAS_PRODUCTO
-                marcas_candidata = tokens & _MARCAS_PRODUCTO
-                if marcas_consulta and not marcas_candidata:
+                if marcas_consulta and not atributos[2]:
                     score *= 0.75
                 if len(comunes) == 1 and len(consulta) > 1:
                     score *= 0.65

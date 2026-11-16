@@ -19,8 +19,8 @@ jobs:
           python-version: "3.12"
       - name: Comprobar sintaxis Python
         run: python -m compileall -q .
-      - name: Instalar dependencias para la prueba de catálogo
-        run: python -m pip install openpyxl pillow pypdf reportlab requests pandas 'streamlit>=1.50'
+      - name: Instalar dependencias del cotizador
+        run: python -m pip install -r requirements.txt
       - name: Comprobar persistencia y numeración
         run: |
           python - <<'PY'
@@ -81,8 +81,5 @@ jobs:
           print("OK: persistencia, archivos, numeración e índice compartido concurrente.")
           PY
 
-      - name: Verificar aislamiento de datos personales en modo compartido
+      - name: Ejecutar pruebas del cotizador
         run: python -m unittest discover -s tests -v
-
-      - name: Verificar servicios del Radar Comercial
-        run: python -m unittest discover -s tests -p 'test_radar_comercial.py' -v

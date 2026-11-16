@@ -10,5 +10,5 @@ if ($task) {
 }
 Write-Host "Se desactivó el inicio automático de Gioval."
 Write-Host "El supervisor cerrará ordenadamente las aplicaciones en un máximo aproximado de 30 segundos."
-Write-Host "Después puedes volver a usar iniciar_servidor_gioval.bat e iniciar_radar_gioval.bat en modo manual."
+Write-Host "Después puedes volver a usar iniciar_servidor_gioval.bat en modo manual."
 Read-Host "Presiona Enter para cerrar"
