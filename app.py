@@ -2670,8 +2670,15 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_
 def pagina_productos(total, seccion):
     por_pagina = 12
     paginas = (total + por_pagina - 1) // por_pagina
-    pagina = st.selectbox("Página de productos", range(1, paginas + 1),
-                          key=f"pagina_{seccion}_{E['cot_id']}_{paginas}") if paginas > 1 else 1
+    llave = f"pagina_{seccion}_{E['cot_id']}"
+    pagina = min(E.get(llave, 1), max(1, paginas))
+    if paginas > 1:
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.button("Página anterior", key=f"{llave}_anterior", disabled=pagina == 1,
+                      on_click=E.update, kwargs={llave: pagina - 1})
+            st.text(f"Página {pagina} de {paginas}")
+            st.button("Página siguiente", key=f"{llave}_siguiente", disabled=pagina == paginas,
+                      on_click=E.update, kwargs={llave: pagina + 1})
     inicio = (pagina - 1) * por_pagina
     return inicio, min(inicio + por_pagina, total)
 
