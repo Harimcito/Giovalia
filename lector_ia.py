@@ -19,6 +19,8 @@ import cotizador as ct
 MODELO = "gpt-4o"
 MAX_IMAGENES = 8
 MIN_TEXTO_PDF = 80  # menos caracteres que esto = PDF escaneado
+TIMEOUT_COINCIDENCIAS = 12.0
+TIMEOUT_LECTURA = 60.0
 PROMPT = (
     "Lees solicitudes de compra y pedidos en Chile. Extrae SOLO los productos solicitados y su "
     "cantidad, unidad, especificaciones, marca/modelo y código si aparecen. Conserva esos datos "
@@ -130,7 +132,7 @@ def entender_productos(descripciones: list[str], api_key: str = "", catalogo=Non
         if not api_key:
             raise ValueError("Falta la clave de OpenAI.")
         from openai import OpenAI
-        cliente = OpenAI(api_key=api_key)
+        cliente = OpenAI(api_key=api_key, timeout=TIMEOUT_COINCIDENCIAS, max_retries=0)
     resp = cliente.chat.completions.create(
         model=MODELO, temperature=0, response_format={"type": "json_object"},
         messages=[{"role": "user", "content": prompt}],
@@ -188,7 +190,7 @@ def leer_orden_ia(archivos: list[tuple[str, bytes]], api_key: str = "", cliente=
             raise ValueError("Falta la API key de OpenAI (variable OPENAI_API_KEY, archivo .env "
                              "o barra lateral).")
         from openai import OpenAI
-        cliente = OpenAI(api_key=api_key)
+        cliente = OpenAI(api_key=api_key, timeout=TIMEOUT_LECTURA, max_retries=0)
     resp = cliente.chat.completions.create(
         model=MODELO, temperature=0, response_format={"type": "json_object"},
         messages=[{"role": "user", "content": contenido}])

@@ -1,14 +1,18 @@
+import json
 import os
 from datetime import date
 import unittest
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import catalogo_clientes as catalogo
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from PIL import Image
 from pypdf import PdfReader
+from reportlab.pdfgen.canvas import Canvas
 from streamlit.testing.v1 import AppTest
 
 from cotizador import Biblioteca
@@ -49,6 +53,116 @@ class FlujosAppTests(unittest.TestCase):
         next(b for b in app.button if b.label.startswith(etiqueta)).click()
         self.recargar(app)
 
+    def test_pedido_pdf_y_foto_con_codigos_duplicados_y_sin_coincidencia(self):
+        bib = Biblioteca(self.raiz / "biblioteca")
+        bib.registrar("ACM01", "Insumo comercial A", precio_neto=1000)
+        bib.registrar("ACM02", "Insumo comercial B", precio_neto=2000)
+        foto = BytesIO()
+        Image.new("RGB", (32, 32)).save(foto, format="PNG")
+        pdf = BytesIO()
+        documento = Canvas(pdf)
+        documento.drawString(40, 730, "Referencia de prueba para el lector PDF. " * 3)
+        documento.save()
+        filas = [
+            {"cantidad": 1, "descripcion": "Insumo de impresión", "codigo": codigo, "unidad": "Caja", "fuente": "pedido.pdf"}
+            for codigo in ("ACM01", "ACM02") for _ in range(36)
+        ] + [{"cantidad": 2, "descripcion": "Lámina holográfica", "fuente": "foto.png"}] * 36
+
+        def respuesta(**solicitud):
+            pedido = solicitud["messages"][0]["content"]
+            if isinstance(pedido, list):
+                self.assertIn("ARCHIVO pedido.pdf", pedido[0]["text"])
+                self.assertTrue(any(parte["type"] == "image_url" for parte in pedido))
+                datos = {"productos": filas}
+            else:
+                self.assertEqual(pedido.rsplit("DESCRIPCIONES:\n", 1)[-1], '["Lámina holográfica"]')
+                datos = {"resultados": []}
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(datos)))])
+
+        with patch.dict(os.environ, OPENAI_API_KEY="prueba"), patch("openai.OpenAI") as sdk:
+            completar = sdk.return_value.chat.completions.create
+            completar.side_effect = respuesta
+            app = self.iniciar()
+            self.pulsar(app, "Nueva cotización")
+            app.session_state["fuente_pedido"] = "Subir PDF o foto"
+            self.recargar(app)
+            app.file_uploader(key="orden_ia").set_value([
+                ("pedido.pdf", pdf.getvalue(), "application/pdf"),
+                ("foto.png", foto.getvalue(), "image/png"),
+            ])
+            self.pulsar(app, "Leer el pedido")
+            orden = app.session_state["orden_df"]
+            self.assertEqual(len(orden), 108)
+            self.assertEqual(orden["Precio unitario"].iloc[[0, 36]].tolist(), [1190, 2380])
+            self.assertTrue(orden["Precio unitario"].iloc[72:].isna().all())
+            next(c for c in app.checkbox if c.label.startswith("Revisé los productos")).check()
+            app.checkbox(key="ok_sin_precio").check()
+            self.recargar(app)
+            self.pulsar(app, "Guardar pedido")
+            self.assertEqual(completar.call_count, 2)
+            self.assertTrue(all(llamada.kwargs["max_retries"] == 0 for llamada in sdk.call_args_list))
+        lineas = app.session_state["lineas"]
+        self.assertEqual([lineas[i]["clave_auto"] for i in (0, 36)], ["ACM01", "ACM02"])
+        self.assertEqual(lineas[36]["unidad_fuente"], "Caja")
+        self.assertEqual(lineas[-1]["fuente_pedido"], "foto.png")
+        self.pulsar(app, "← Volver")
+        self.assertEqual(app.session_state["orden_df"].iloc[36]["Unidad"], "Caja")
+        self.assertEqual(app.session_state["orden_df"].iloc[-1]["Origen"], "foto.png")
+
+    def test_planilla_precio_cero_y_linea_excluida_conservan_totales(self):
+        bib = Biblioteca(self.raiz / "biblioteca")
+        bib.registrar("A109", "Cartucho A109", precio_neto=1000)
+        bib.registrar("B109", "Cartucho B109", precio_neto=2000)
+        libro = Workbook()
+        libro.active.append(["Cantidad", "Producto", "SKU", "Unidad de medida"])
+        libro.active.append([3, "Tinta", "A109", "Caja"])
+        libro.active.append([4, "Tinta adicional", "B109", "Unidad"])
+        libro.active.append([1, "Lápiz de muestra", "", "Unidad"])
+        planilla = BytesIO()
+        libro.save(planilla)
+        libro.close()
+        app = self.iniciar()
+        self.pulsar(app, "Nueva cotización")
+        app.session_state["fuente_pedido"] = "Subir Excel o CSV"
+        self.recargar(app)
+        app.file_uploader(key="orden_archivo").upload("pedido.xlsx", planilla.getvalue())
+        self.pulsar(app, "Leer el pedido")
+        version = app.session_state["orden_editor_version"]
+        app.session_state[f"orden_editor_{version}__clp"] = {
+            "edited_rows": {"1": {"Incluir": False}, "2": {"Precio unitario": "$0"}},
+            "added_rows": [], "deleted_rows": [],
+        }
+        self.recargar(app)
+        next(c for c in app.checkbox if c.label.startswith("Revisé los productos")).check()
+        self.recargar(app)
+        self.pulsar(app, "Guardar pedido")
+        guardada = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])
+        self.assertEqual(guardada["total"], 3570)
+        self.assertEqual(guardada["datos"]["lineas"][0]["codigo_fuente"], "A109")
+        self.assertFalse(guardada["datos"]["lineas"][1]["incluir"])
+        self.assertEqual(guardada["datos"]["lineas"][2]["unitario"], 0)
+
+    def test_abrir_borrador_no_modifica_la_version_compartida(self):
+        hist = Historial(self.raiz / "biblioteca")
+        lineas = [{"cantidad": 1, "descripcion": "Papel", "unitario": 1000}]
+        cot_id, _ = hist.crear({}, lineas, {})
+        hist.actualizar(cot_id, datos={"lineas": lineas, "paso": 2})
+        version = hist.obtener(cot_id)["actualizado"]
+        primera, segunda = self.iniciar(), self.iniciar()
+        for app in (primera, segunda):
+            app.button(key="inicio_ultimo_borrador").click()
+            self.recargar(app)
+            self.assertEqual(hist.obtener(cot_id)["actualizado"], version)
+
+        for app, monto in ((primera, "2380"), (segunda, "3570")):
+            precio = next(c for c in app.text_input if c.label == "Precio de la línea seleccionada")
+            precio.set_value(monto)
+            app.button(key="aplicar_precio").click()
+            self.recargar(app)
+        self.assertNotIn("_conflicto_guardado", primera.session_state)
+        self.assertTrue(segunda.session_state["_conflicto_guardado"])
+        self.assertEqual(hist.obtener(cot_id)["datos"]["lineas"][0]["unitario"], 2000)
+
     def test_pantalla_modelos_opciones_y_pdf(self):
         biblioteca = Biblioteca(self.raiz / "biblioteca")
         for codigo, nombre, precio in [("OEM", "Tóner original", 100), ("ALT", "Tóner compatible", 50)]:
@@ -82,6 +196,15 @@ class FlujosAppTests(unittest.TestCase):
         self.assertEqual(seleccion[0][GRUPO], seleccion[1][GRUPO])
         datos = Historial(self.raiz / "biblioteca").obtener(app.session_state["cot_id"])["datos"]
         self.assertFalse(datos["lineas"][0]["incluir"])
+        version = app.session_state["editor_version"]
+        self.editar_tabla(app, f"editor_productos_{version}__clp", {"Incluir": True})
+        self.assertEqual([ln["incluir"] for ln in app.session_state["lineas"][:2]], [True, False])
+        app.session_state["linea_editor"] = 1
+        self.recargar(app)
+        next(c for c in app.checkbox if c.label == "Incluir en la cotización").check()
+        app.button(key="aplicar_precio").click()
+        self.recargar(app)
+        self.assertEqual([ln["incluir"] for ln in app.session_state["lineas"][:2]], [False, True])
         self.pulsar(app, "Siguiente: fotos")
         self.pulsar(app, "Siguiente: revisar")
         self.pulsar(app, "Crear el PDF")

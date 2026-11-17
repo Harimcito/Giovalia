@@ -389,7 +389,7 @@ class Historial:
             raise ConflictoActualizacion(
                 "No conozco la versión que abriste. Recarga la cotización antes de guardar para evitar sobrescribir cambios."
             )
-        self._actualizar(cot_id, datos=datos, version_esperada=version_esperada, **campos)
+        return self._actualizar(cot_id, datos=datos, version_esperada=version_esperada, **campos)
 
     def _actualizar(self, cot_id: int, datos: dict | None = None,
                     version_esperada: str | None = None, **campos):
@@ -444,6 +444,7 @@ class Historial:
                             return {"cantidad": len(valor or [])}
                         self._auditar(con, "Cotización", anterior["numero"], campo,
                                       resumen(previo.get(campo)), resumen(datos.get(campo)))
+        return marca_tiempo
 
     def _auditar(self, con, entidad, objeto, campo, anterior, nuevo):
         con.execute(
@@ -649,10 +650,12 @@ class Historial:
                 os.replace(temporal, destino)
                 campos[campo] = str(destino)
             columnas = [f"{campo}=?" for campo in campos] + ["actualizado=?"]
+            marca_tiempo = _ahora()
             con.execute(f"UPDATE cotizaciones SET {', '.join(columnas)} WHERE id=?",
-                        [*campos.values(), _ahora(), cot_id])
+                        [*campos.values(), marca_tiempo, cot_id])
             if etiqueta_version:
                 self._registrar_version(con, reg, etiqueta_version)
+        return marca_tiempo
 
     # ------------------------------------------------------------ clientes
     def clientes(self) -> list[dict]:
