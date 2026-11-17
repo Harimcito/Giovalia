@@ -84,6 +84,22 @@ def comprobar_interfaz(numero, numero_otro):
         expect(panel).to_be_visible()
         expect(page.locator('[data-testid="stSidebar"]')).to_be_hidden()
         assert panel.bounding_box()["width"] <= 390
+        stock = panel.get_by_role("combobox", name="Disponibilidad")
+        stock.click()
+        page.get_by_role("option", name="A pedido").click()
+        panel.get_by_role("spinbutton", name="Plazo (días)").fill("7")
+        incluir = panel.get_by_role("checkbox", name="Incluir en la cotización")
+        panel.get_by_text("Incluir en la cotización", exact=True).click()
+        expect(incluir).not_to_be_checked()
+        panel.get_by_role("button", name="Guardar línea").click()
+        expect(tabla.get_by_role("row").filter(has_text="Resma oficio")).to_contain_text("No incluido")
+        page.locator('[data-testid="stApp"][data-test-script-state="notRunning"]').wait_for()
+        expect(incluir).to_have_count(1)
+        panel.get_by_text("Incluir en la cotización", exact=True).click()
+        expect(incluir).to_be_checked()
+        panel.get_by_role("button", name="Guardar línea").click()
+        expect(tabla.get_by_role("row").filter(has_text="Resma oficio")).to_contain_text("A pedido · 7 días")
+        page.locator('[data-testid="stApp"][data-test-script-state="notRunning"]').wait_for()
         panel.get_by_role("button", name="Volver a productos").click()
         expect(panel).to_be_hidden()
         expect(tabla.get_by_role("button", name="Resma oficio")).to_be_focused()
@@ -111,9 +127,41 @@ def comprobar_interfaz(numero, numero_otro):
         page.locator('.st-key-biblioteca_galeria_RESMA').get_by_role('button', name='Ver producto').click()
         expect(page.get_by_text('Detalle del producto',exact=True)).to_be_visible()
         page.get_by_role('button',name='Limpiar búsqueda y filtros').click()
+        page.locator('.st-key-gv_nav').get_by_role('button', name='Inicio', exact=True).click()
+        expect(page.get_by_role('heading', name='Cotizaciones', exact=True)).to_be_visible()
         assert not errores, errores
         comprobar_canastas_y_evidencia(browser, numero_otro)
+        comprobar_importacion_y_casillas(browser)
         print('Chrome: actividad, teclado, resaltado, filas, guardado, foco de alertas, móvil, historial y galería OK')
+
+
+def comprobar_importacion_y_casillas(browser):
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page.goto("http://127.0.0.1:8610/")
+    page.get_by_role("button", name="Nueva cotización", exact=True).click()
+    page.get_by_text("Excel o CSV", exact=True).click()
+    page.locator('input[type=file]').set_input_files({
+        "name": "pedido.csv", "mimeType": "text/csv", "buffer":
+            b"Cantidad;Producto\n2;Toner Brother TN1060\n3;Cuaderno sin catalogar\n",
+    })
+    expect(page.get_by_text("pedido.csv")).to_be_visible()
+    page.get_by_role("button", name="Leer el pedido").click()
+    revision = page.get_by_role("checkbox", name="Revisé los productos, cantidades y fuentes importadas")
+    pendientes = page.get_by_role("checkbox", name="Quiero continuar igual y completar los precios después")
+    continuar = page.get_by_role("button", name="Guardar pedido y continuar")
+    expect(continuar).to_be_disabled()
+    for casilla in (revision, pendientes):
+        page.get_by_text(casilla.get_attribute("aria-label"), exact=True).click()
+        expect(casilla).to_be_checked()
+        page.locator('[data-testid="stApp"][data-test-script-state="notRunning"]').wait_for()
+    expect(continuar).to_be_enabled()
+    page.get_by_text("Revisé los productos, cantidades y fuentes importadas", exact=True).click()
+    expect(continuar).to_be_disabled()
+    page.get_by_text("Revisé los productos, cantidades y fuentes importadas", exact=True).click()
+    continuar.click()
+    expect(page.get_by_role("table", name="Productos de la cotización")).to_contain_text("Cuaderno sin catalogar")
+    expect(page.get_by_test_id("stException")).to_have_count(0)
+    page.close()
 
 
 def comprobar_canastas_y_evidencia(browser, numero):

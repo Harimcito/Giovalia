@@ -273,18 +273,14 @@ ETIQUETAS_FUENTES = {
 
 if E.get("vista") in {"Mis productos", "Catálogo"}:
     E["vista"] = VISTAS[2]
-elif E.get("vista") in {"Nueva cotización", "Inicio"}:
+elif E.get("vista") == "Nueva cotización":
     E["vista"] = VISTAS[0]
 E.setdefault("vista", INICIO)
 
 
 def editor(df, **kw):
     """Tabla editable que se estira para mostrar todas sus filas, sin barra de desplazamiento interna."""
-    try:
-        return montos.editor(df, height="content", **kw)
-    except Exception:  # versiones antiguas de Streamlit: calcula el alto a mano
-        extra = 1 if kw.get("num_rows") == "dynamic" else 0
-        return montos.editor(df, height=min(35 * (len(df) + 1 + extra) + 8, 2400), **kw)
+    return montos.editor(df, height="content", **kw)
 
 @acceso.proteger
 def limpiar_estado_trabajo():
@@ -371,12 +367,14 @@ def mostrar_estado_guardado(contenedor):
 def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
     """Resuelve descripciones contra productos guardados; recurre a IA ante ambigüedad."""
     resultados = {}
-    pendientes = []
+    pendientes = {}
+    vistos = set()
     for descripcion in descripciones:
         desc = _texto_seguro(descripcion)
         normalizada = ct.normalizar(desc)
-        if not desc or normalizada in resultados:
+        if not normalizada or normalizada in vistos:
             continue
+        vistos.add(normalizada)
         clave = bib.detectar(desc, solo_conocidos=True)
         if clave and not op.conflicto_presentacion(desc, bib.indice[clave]):
             resultados[normalizada] = {"clave": clave, "origen": "biblioteca", "certeza": "alta"}
@@ -389,23 +387,31 @@ def resolver_productos_catalogo(descripciones: list[str]) -> dict[str, dict]:
             resultados[normalizada] = {"clave": primero["clave"], "origen": "similitud",
                                        "certeza": "alta", "nombre": primero["nombre"]}
         else:
-            pendientes.append(desc)
-    if pendientes and api_key:
+            pendientes[normalizada] = desc
+    if pendientes and api_key and bib.indice:
         try:
             catalogo_ia = {clave: ficha for clave, ficha in bib.indice.items()
                            if not ct.identidad_conflictiva(clave, ficha)}
-            con_ia = li.entender_productos(pendientes, api_key, catalogo_ia)
-            for descripcion, match in zip(pendientes, con_ia):
-                clave = str(match.get("clave", "")).strip().upper()
+            con_ia = li.entender_productos(list(pendientes.values()), api_key, catalogo_ia)
+            for (normalizada, descripcion), match in zip(pendientes.items(), con_ia):
+                clave = _texto_seguro(match.get("clave")).upper()
                 if (clave in catalogo_ia and match.get("certeza") in ("alta", "media")
                         and not op.conflicto_presentacion(descripcion, catalogo_ia[clave])):
-                    resultados[ct.normalizar(descripcion)] = {
+                    resultados[normalizada] = {
                         "clave": clave, "origen": "ia", "certeza": match["certeza"],
                         "razon": match.get("razon", ""),
                     }
         except Exception as exc:
             E["_error_match_ia"] = str(exc)
     return resultados
+
+
+def coincidencia_codigo_pedido(codigo, descripcion):
+    clave = _texto_seguro(codigo).upper()
+    ficha = bib.indice.get(clave)
+    if ficha is not None and not ct.identidad_conflictiva(clave, ficha) and not op.conflicto_presentacion(descripcion, ficha):
+        return {"clave": clave, "origen": "biblioteca", "certeza": "alta"}
+    return {}
 
 
 def referencias_lineas_guardadas(lineas):
@@ -453,8 +459,8 @@ def referencia_mercado_publico_borrador(registro: dict, datos: dict) -> dict:
 def cargar(ruta: Path, origen_pedido: str, *, lineas_pedido=None):
     """Lee una cotización y prepara líneas, datos del cliente y precios editables."""
     lineas = ct.leer_cotizacion(ruta) if lineas_pedido is None else lineas_pedido
-    productos = [ln for ln in lineas if ln["es_producto"]]
-    matches = resolver_productos_catalogo([ln["descripcion"] for ln in productos])
+    matches = (resolver_productos_catalogo([ln["descripcion"] for ln in lineas if ln["es_producto"]])
+               if lineas_pedido is None else referencias_lineas_guardadas(lineas))
 
     # Los valores del Excel se aplican al inicio de la siguiente ejecución de Streamlit,
     # no aquí: las pestañas del paso 1 ya pueden haber creado widgets con esas claves.
@@ -527,7 +533,7 @@ def cargar(ruta: Path, origen_pedido: str, *, lineas_pedido=None):
         E["_snapshot_cabecera"] = tuple(
             _texto_seguro(E.get(k)) for k in ("c_nombre", "c_rut", "c_dir", "c_ciudad", "c_tel", "c_email")
         ) + (str(E.get("c_fecha", date.today())),)
-    if E.get("cot_id"):
+    if E.get("cot_id") and lineas_pedido is None:
         registro_guardado = hist.obtener(E["cot_id"])
         if registro_guardado and registro_guardado.get("xlsx") and Path(registro_guardado["xlsx"]).exists():
             E["ruta"] = Path(registro_guardado["xlsx"])
@@ -537,7 +543,7 @@ def cargar(ruta: Path, origen_pedido: str, *, lineas_pedido=None):
             if registro_guardado and registro_guardado.get("xlsx"):
                 E["ruta"] = Path(registro_guardado["xlsx"])
         try:
-            if GIOVAL_REQUIRE_ACCESS:
+            if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
                 hist.actualizar_si_version(
                     E["cot_id"], E.get("_cotizacion_version"), origen=origen_pedido
                 )
@@ -551,7 +557,6 @@ def cargar(ruta: Path, origen_pedido: str, *, lineas_pedido=None):
             E["_conflicto_guardado_id"] = E.get("cot_id")
             E["_conflicto_guardado_mensaje"] = str(exc)
             return
-    persistir_borrador()
 
 
 def datos_productos():
@@ -604,7 +609,7 @@ def tabla_desde_lineas(lineas: list[dict], con_iva: bool | None = None) -> pd.Da
     if con_iva is None:
         con_iva = E.get("precios_modo", OPCIONES_PRECIO[0]) == OPCIONES_PRECIO[0]
     return pd.DataFrame({
-        COL_INCLUIR: [ln.get("incluir", ln.get("es_producto", True)) for ln in lineas],
+        COL_INCLUIR: pd.array([ln.get("incluir", ln.get("es_producto", True)) for ln in lineas], dtype="boolean"),
         COL_CANT: [ln.get("cantidad", 1) for ln in lineas],
         COL_PROD: [ln.get("descripcion", "") for ln in lineas],
         COL_COD: [ln.get("clave_auto", "") for ln in lineas],
@@ -631,12 +636,17 @@ def lineas_desde_orden(orden: pd.DataFrame, con_iva: bool) -> list[dict]:
             continue
         precio_ui = fila.get("Precio unitario")
         try:
-            precio_neto = None if pd.isna(precio_ui) or float(precio_ui) <= 0 else ct.neto_desde(float(precio_ui), con_iva)
+            precio_neto = None if pd.isna(precio_ui) or float(precio_ui) < 0 else ct.neto_desde(float(precio_ui), con_iva)
         except (TypeError, ValueError):
             precio_neto = None
         descripcion = ct.limpiar_descripcion(descripcion)
         es_producto = not any(p in ct.normalizar(descripcion).lower() for p in ct.PALABRAS_NO_PRODUCTO)
-        match = E.get("_orden_coincidencias", {}).get(ct.normalizar(descripcion), {}) if es_producto else {}
+        codigo = _texto_seguro(fila.get("Código"))
+        match = {}
+        if es_producto:
+            match = coincidencia_codigo_pedido(codigo, descripcion) or E.get(
+                "_orden_coincidencias", {}
+            ).get(ct.normalizar(descripcion), {})
         clave = match.get("clave") or (bib.detectar(descripcion) if es_producto else "")
         if clave in bib.indice and op.conflicto_presentacion(descripcion, bib.indice[clave]):
             clave = ""
@@ -650,7 +660,7 @@ def lineas_desde_orden(orden: pd.DataFrame, con_iva: bool) -> list[dict]:
             "incluir": _esta_marcado(fila.get("Incluir"), True),
             "clave_auto": clave, "origen": origen,
             "fuente_pedido": _texto_seguro(fila.get("Origen")),
-            "codigo_fuente": _texto_seguro(fila.get("Código")),
+            "codigo_fuente": codigo,
             "unidad_fuente": _texto_seguro(fila.get("Unidad")),
             **flujo.datos_entrega(
                 fila.get(flujo.COL_STOCK, bib.indice.get(clave, {}).get("estado_stock")),
@@ -829,10 +839,10 @@ def guardar_precios_inventario(lineas: list[dict]):
         bib._guardar_indice()
 
 
-def persistir_borrador():
+def persistir_borrador(*, registrar_apertura=False):
     """Persiste el trabajo actual en SQLite y evita sobrescribir otra sesión."""
     cot_id = E.get("cot_id")
-    if not cot_id or E.get("_conflicto_guardado"):
+    if not cot_id or E.get("_conflicto_guardado") or E.get("_abriendo_borrador"):
         return
     pendiente = E.get("_pending_import_header")
     cliente = cliente_actual()
@@ -880,6 +890,9 @@ def persistir_borrador():
         {"datos": datos, "campos": campos_guardado},
         sort_keys=True, ensure_ascii=False, default=str,
     )
+    if registrar_apertura:
+        E.update(_snapshot_guardado_id=cot_id, _snapshot_guardado=huella)
+        return
     if E.get("_snapshot_guardado_id") == cot_id and E.get("_snapshot_guardado") == huella:
         E.pop("_error_guardado", None)
         return
@@ -887,19 +900,20 @@ def persistir_borrador():
         if not hist.obtener(cot_id):
             E["_error_guardado"] = True
             return
-        hist.actualizar_si_version(cot_id, E.get("_cotizacion_version"), datos=datos, **campos_guardado)
+        version_guardada = hist.actualizar_si_version(
+            cot_id, E.get("_cotizacion_version"), datos=datos, **campos_guardado
+        )
     except hs.ConflictoActualizacion as exc:
         E["_conflicto_guardado"] = True
         E["_conflicto_guardado_id"] = cot_id
         E["_conflicto_guardado_mensaje"] = str(exc)
+        st.rerun()
         return
     except (OSError, sqlite3.Error):
         E["_error_guardado"] = True
         return
     E.pop("_error_guardado", None)
-    registro_actual = hist.obtener(cot_id)
-    if registro_actual:
-        E["_cotizacion_version"] = registro_actual.get("actualizado")
+    E["_cotizacion_version"] = version_guardada
     E["_snapshot_guardado_id"] = cot_id
     E["_snapshot_guardado"] = huella
 
@@ -1049,7 +1063,9 @@ def sincronizar_editor_productos(editada: pd.DataFrame):
             "incluir": _esta_marcado(fila.get(COL_INCLUIR), es_producto),
             **flujo.datos_entrega(fila.get(flujo.COL_STOCK), fila.get(flujo.COL_PLAZO)),
         })
-    normalizadas = opciones_cot.normalizar_alternativas(nuevas)
+    excluidas = {ln[edicion.ID] for ln in anteriores if not ln.get("incluir", True)}
+    preferidas = [ln[edicion.ID] for ln in nuevas if ln[edicion.ID] in excluidas and ln.get("incluir", True)]
+    normalizadas = opciones_cot.normalizar_alternativas(nuevas, preferidas)
     if normalizadas != nuevas:
         aplicar_lineas_editor(normalizadas)
         st.rerun()
@@ -1135,7 +1151,7 @@ def boton_actualizar_totales():
         # Actualiza el Excel intermedio solo a petición del usuario; nunca se hace
         # durante cada cambio de celda. En la generación final se vuelve a actualizar.
         try:
-            if E.get("lineas") and E.get("ruta"):
+            if E.get("lineas") and not (E.get("_conflicto_guardado") or E.get("_error_guardado")):
                 refrescar_excel_actual()
         except Exception as exc:
             st.warning(f"El cálculo está actualizado, pero el Excel intermedio no se regeneró: {exc}")
@@ -1148,7 +1164,8 @@ def refrescar_excel_actual(*, archivar=True):
     cot_id = E.get("cot_id")
     if not cot_id or "lineas" not in E:
         return
-    if E.get("origen_pedido") == "cotizacion" and not E.get("editado_manual", False) and not GIOVAL_REQUIRE_ACCESS:
+    if (E.get("origen_pedido") == "cotizacion" and not E.get("editado_manual", False)
+            and not GIOVAL_REQUIRE_ACCESS and E.get("ruta") and Path(E["ruta"]).is_file()):
         return  # En modo local se respeta el Excel subido; el espacio compartido lo regenera sin datos de cliente.
     registro = hist.obtener(cot_id)
     if not registro:
@@ -1161,6 +1178,8 @@ def refrescar_excel_actual(*, archivar=True):
             "cantidad": ln.get("cantidad", 1),
             "descripcion": flujo.descripcion_oferta(ln),
             "precio_neto": (ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto")),
+            "codigo": ln.get("codigo_fuente"),
+            "unidad": ln.get("unidad_fuente"),
         })
     cliente = cliente_actual()
     cliente["numero"] = registro["numero"]
@@ -1307,14 +1326,10 @@ def restaurar_borrador(cot_id: int):
         E["tabla"] = tabla_desde_lineas(E["lineas"])
         E["tabla_edit"] = E["tabla"].copy()
         E["tabla_base"] = E["tabla"].copy()
-        if registro.get("xlsx") and Path(registro["xlsx"]).exists():
-            E["ruta"] = Path(registro["xlsx"])
-        else:
-            refrescar_excel_actual()
-    elif registro.get("xlsx") and Path(registro["xlsx"]).exists():
+    if registro.get("xlsx") and Path(registro["xlsx"]).exists():
         E["ruta"] = Path(registro["xlsx"])
     E["paso"] = E["paso"] if E["lineas"] else 1
-    persistir_borrador()
+    E["_abriendo_borrador"] = True
 
 
 def selector_borradores():
@@ -1569,9 +1584,10 @@ def pedido_ui(fuente: str):
             elif fuente == FUENTE_TABLA:
                 if not archivo_orden:
                     raise ValueError("Primero sube un Excel o CSV.")
-                tmp = Path(tempfile.mkdtemp()) / archivo_orden.name
-                tmp.write_bytes(archivo_orden.getvalue())
-                filas = ct.leer_orden_archivo(tmp)
+                with tempfile.TemporaryDirectory() as temporal:
+                    ruta_orden = Path(temporal) / Path(archivo_orden.name).name
+                    ruta_orden.write_bytes(archivo_orden.getvalue())
+                    filas = ct.leer_orden_archivo(ruta_orden)
             else:
                 filas = ct.parsear_texto_orden(texto)
         except Exception as exc:
@@ -1584,27 +1600,32 @@ def pedido_ui(fuente: str):
                 st.warning("No encontré productos. Revisa el pedido e inténtalo de nuevo.")
         else:
             E.pop("_error_match_ia", None)
+            exactas = [coincidencia_codigo_pedido(fila.get("codigo"), fila["descripcion"]) for fila in filas]
             with st.spinner("Buscando tus productos en la biblioteca…"):
-                coincidencias = resolver_productos_catalogo([f["descripcion"] for f in filas])
-            for fila in filas:
-                codigo_catalogo = _texto_seguro(fila.get("codigo")).upper()
-                ficha = bib.indice.get(codigo_catalogo, {})
-                if (codigo_catalogo in bib.indice and not ct.identidad_conflictiva(codigo_catalogo, ficha)
-                        and not op.conflicto_presentacion(fila["descripcion"], ficha)):
-                    coincidencias[ct.normalizar(fila["descripcion"])] = {
-                        "clave": codigo_catalogo, "origen": "biblioteca", "certeza": "alta"
-                    }
+                coincidencias = resolver_productos_catalogo([
+                    fila["descripcion"] for fila, exacta in zip(filas, exactas) if not exacta
+                ])
             E["_orden_coincidencias"] = coincidencias
-            E["_productos_catalogo_revision"] = list(dict.fromkeys(
-                _texto_seguro(fila.get("descripcion")) for fila in filas
-                if not coincidencias.get(ct.normalizar(fila.get("descripcion")), {}).get("clave")
-            ))
+            sin_asociar = {}
+            asociados = 0
             precios = []
-            for fila in filas:
-                match = coincidencias.get(ct.normalizar(fila["descripcion"]), {})
+            for fila, exacta in zip(filas, exactas):
+                descripcion = fila["descripcion"]
+                match = exacta or coincidencias.get(ct.normalizar(descripcion), {})
                 clave = match.get("clave")
-                neto = bib.precio_sugerido(clave) or bib.indice.get(clave, {}).get("precio_neto")
-                precios.append(ct.precio_para_mostrar(neto, con_iva) if neto else None)
+                neto = None
+                if clave:
+                    asociados += 1
+                    neto = bib.precio_sugerido(clave)
+                    if neto is None:
+                        neto = bib.indice.get(clave, {}).get("precio_neto")
+                else:
+                    sin_asociar[descripcion] = None
+                try:
+                    precios.append(ct.precio_para_mostrar(float(neto), con_iva) if neto is not None else None)
+                except (TypeError, ValueError, OverflowError):
+                    precios.append(None)
+            E["_productos_catalogo_revision"] = list(sin_asociar)
             origen_por_fuente = {
                 FUENTE_TEXTO: "Texto ingresado",
                 FUENTE_TABLA: "Planilla del pedido",
@@ -1623,8 +1644,8 @@ def pedido_ui(fuente: str):
             E["orden_df_base"] = E["orden_df"].copy()
             E["orden_editor_version"] = int(E.get("orden_editor_version", 0)) + 1
             E["editor_version"] = int(E.get("editor_version", 0)) + 1
-            if coincidencias:
-                st.success(f"Encontré {len(coincidencias)} producto(s) en tu biblioteca y usé sus precios guardados.")
+            if asociados:
+                st.success(f"Asocié {asociados} línea(s) a la biblioteca. Los precios guardados se cargaron cuando estaban disponibles.")
             if E["_productos_catalogo_revision"]:
                 st.info(
                     f"{len(E['_productos_catalogo_revision'])} producto(s) quedaron pendientes de asociación. "
@@ -1671,7 +1692,7 @@ def pedido_ui(fuente: str):
         E["orden_df_base"] = orden_base.copy()
     orden_version = int(E.get("orden_editor_version", 0))
     orden = editor(
-        orden_base, num_rows="dynamic", hide_index=True, width="stretch",
+        orden_base.astype({"Incluir": "boolean"}), num_rows="dynamic", hide_index=True, width="stretch",
         key=f"orden_editor_{orden_version}",
         column_config={
             "Incluir": st.column_config.CheckboxColumn("Incluir", width="small"),
@@ -1712,7 +1733,7 @@ def pedido_ui(fuente: str):
         cliente = cliente_actual()
         totales = rv.totales_de([
             {"cantidad": ln["cantidad"], "precio_neto": ln.get("unitario")}
-            for ln in lineas_orden if ln.get("unitario") is not None
+            for ln in lineas_orden if ln.get("incluir", True) and ln.get("unitario") is not None
         ])
         cot_id = E.get("cot_id")
         if not cot_id:
@@ -1726,7 +1747,7 @@ def pedido_ui(fuente: str):
             registro = hist.obtener(cot_id)
             if registro and _texto_seguro(E.get("cot_numero")) != registro["numero"]:
                 try:
-                    if GIOVAL_REQUIRE_ACCESS:
+                    if GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES:
                         hist.renumerar(
                             cot_id,
                             _texto_seguro(E.get("cot_numero")),
@@ -1763,7 +1784,7 @@ def pedido_ui(fuente: str):
                     )
                     version_actual = E.get("_cotizacion_version")
                     version_coincide = (
-                        not GIOVAL_REQUIRE_ACCESS
+                        not (GIOVAL_REQUIRE_ACCESS or GIOVAL_PROFILES)
                         or (version_actual and version_actual == candidato.get("actualizado"))
                     )
                     if firma_actual == firma_guardada and version_coincide:
@@ -1847,8 +1868,8 @@ def cotizacion_ui():
         ruta.write_bytes(archivo.getvalue())
         try:
             cargar(ruta, "cotizacion")
-        except ValueError as e:
-            st.error(str(e))
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            st.error(f"No pude abrir la cotización Excel: {exc}")
             return
         ir_a(2)
 
@@ -1941,15 +1962,6 @@ def revisar_asociaciones_catalogo(pendientes: list[str]):
     if not pendientes:
         return
 
-    productos = {
-        f"{clave} · {_texto_seguro(ficha.get('nombre') or clave)}": clave
-        for clave, ficha in sorted(bib.indice.items())
-        if not ct.identidad_conflictiva(clave, ficha)
-    }
-    if not productos:
-        st.caption("Agrega productos a la biblioteca para poder vincularlos a esta cotización.")
-        return
-    opciones = ["Dejar pendiente"] + list(productos)
     panel = st.expander(
         f"Revisar coincidencias ({len(pendientes)})", icon=":material/link:",
         key="revisar_coincidencias", on_change="rerun",
@@ -1957,8 +1969,18 @@ def revisar_asociaciones_catalogo(pendientes: list[str]):
     if not panel.open:
         return
     with panel:
+        productos = {
+            f"{clave} · {_texto_seguro(ficha.get('nombre') or clave)}": clave
+            for clave, ficha in sorted(bib.indice.items())
+            if not ct.identidad_conflictiva(clave, ficha)
+        }
+        if not productos:
+            st.info("Agrega productos a la biblioteca para poder vincularlos a esta cotización.")
+            return
+        opciones = ["Dejar pendiente", *productos]
         st.caption("Elige el producto que corresponde a cada descripción del pedido.")
-        for indice, descripcion in enumerate(pendientes):
+        inicio, fin = pagina_productos(len(pendientes), "coincidencias")
+        for indice, descripcion in enumerate(pendientes[inicio:fin], inicio):
             normalizada = ct.normalizar(descripcion)
             c_desc, c_producto, c_accion = st.columns([2.2, 3, 1])
             c_desc.caption(descripcion)
@@ -2011,8 +2033,8 @@ def registrar_deshacer(anteriores, nuevas):
         E["_deshacer_lineas"] = [*cambios, *edicion.cambios(anteriores, nuevas)][-50:]
 
 
-def aplicar_lineas_editor(lineas, *, registrar=True):
-    lineas = opciones_cot.normalizar_alternativas(edicion.identificar(lineas))
+def aplicar_lineas_editor(lineas, *, registrar=True, preferidas=()):
+    lineas = opciones_cot.normalizar_alternativas(edicion.identificar(lineas), preferidas)
     if registrar:
         registrar_deshacer(E.get("lineas", []), lineas)
     tabla = tabla_desde_lineas(lineas)
@@ -2235,7 +2257,11 @@ def editar_alternativas():
 
 
 def mostrar_faltantes_cotizacion():
-    with st.expander("Stock y faltantes de la cotización", icon=":material/inventory:"):
+    panel = st.expander("Stock y faltantes de la cotización", icon=":material/inventory:",
+                        key="faltantes_cotizacion", on_change="rerun")
+    if not panel.open:
+        return
+    with panel:
         st.caption("Suma las cantidades repetidas por código y usa la última confirmación de la biblioteca.")
         faltantes = opciones_cot.faltantes(E["lineas"], bib)
         if faltantes:
@@ -2284,7 +2310,8 @@ def paso_2():
                     if campos["clave_auto"] != lineas[indice].get("clave_auto"):
                         campos["origen"] = "descripcion"
                     lineas[indice] = {**lineas[indice], **campos, "unitario": neto, "precio_neto": neto}
-                    aplicar_lineas_editor(lineas)
+                    preferidas = (lineas[indice][edicion.ID],) if campos["incluir"] else ()
+                    aplicar_lineas_editor(lineas, preferidas=preferidas)
                 if not (E.get("_conflicto_guardado") or E.get("_error_guardado")):
                     E["_estado_acuse_linea"] = "aplicado"
                     E["_revision_campos_linea"] = E.get("_revision_campos_linea", 0) + 1
@@ -2349,7 +2376,9 @@ def paso_2():
                 ln.get("unitario") if ln.get("unitario") is not None else ln.get("precio_neto"), con_iva)
                 if (ln.get("unitario") is not None or ln.get("precio_neto") is not None) else None
                 for ln in E.get("lineas", [])],
-            "Código": [ln.get("clave_auto", "") for ln in E.get("lineas", [])],
+            "Código": [ln.get("codigo_fuente", "") for ln in E.get("lineas", [])],
+            "Unidad": [ln.get("unidad_fuente", "") for ln in E.get("lineas", [])],
+            "Origen": [ln.get("fuente_pedido", "") for ln in E.get("lineas", [])],
             **flujo.columnas_entrega(E.get("lineas", [])),
         })
         E["orden_df_base"] = E["orden_df"].copy()
@@ -2470,6 +2499,16 @@ def estado_anexos(clave: str, de_cotizacion: bool = False):
     return anexos_doc.resolver(bib, clave, seleccion)
 
 
+def guardar_ficha_opcional(clave, de_cotizacion, llave):
+    try:
+        if de_cotizacion:
+            cambiar_anexo(clave, "ficha_opcional", E[llave])
+        else:
+            bib.actualizar(clave, ficha_no_requerida=E[llave])
+    except (OSError, ValueError) as exc:
+        E[f"error_{llave}"] = str(exc)
+
+
 def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_cotizacion=False):
     problema_ficha = revisar_ficha_producto(clave, ficha, ficha_no_requerida)
     estado_ficha = problema_ficha or ("Disponible" if ficha else "No requerida")
@@ -2509,18 +2548,16 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_
                     experiencia.mostrar_anexo(anexo, f"{desc} · {clave}", tipo)
                 if aviso := E.get(f"error_{tipo}_{clave}"):
                     st.error(aviso)
-            nueva_no_requerida = st.checkbox(
+            ambito = f"cot_{E.get('cot_id')}" if de_cotizacion else "biblioteca"
+            llave = f"ficha_no_requerida_{ambito}_{clave}"
+            E[llave] = ficha_no_requerida
+            st.checkbox(
                 "Este producto no requiere ficha técnica",
-                value=ficha_no_requerida,
-                key=f"ficha_no_requerida_{clave}",
+                key=llave, on_change=guardar_ficha_opcional, args=(clave, de_cotizacion, llave),
                 help="Útil para artículos de librería u otros productos sin ficha técnica. Seguirá incluyendo la foto si existe.",
             )
-            if nueva_no_requerida != ficha_no_requerida:
-                if de_cotizacion:
-                    cambiar_anexo(clave, "ficha_opcional", nueva_no_requerida)
-                else:
-                    bib.actualizar(clave, ficha_no_requerida=nueva_no_requerida)
-                st.rerun()
+            if error := E.pop(f"error_{llave}", None):
+                st.error(f"No pude guardar la selección de ficha técnica: {error}")
             b1, b2 = st.columns(2)
             sug_foto, sug_ficha = consultas_sugeridas(clave, desc)
             q_foto, q_ficha = E.get(f"qf_{clave}", sug_foto), E.get(f"qd_{clave}", sug_ficha)
@@ -2630,6 +2667,22 @@ def tarjeta(clave: str, desc: str, foto, ficha, ficha_no_requerida: bool, *, de_
                         guardar_candidato(clave, "ficha", c, de_cotizacion)
 
 
+def pagina_productos(total, seccion):
+    por_pagina = 12
+    paginas = (total + por_pagina - 1) // por_pagina
+    llave = f"pagina_{seccion}_{E['cot_id']}"
+    pagina = min(E.get(llave, 1), max(1, paginas))
+    if paginas > 1:
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.button("Página anterior", key=f"{llave}_anterior", disabled=pagina == 1,
+                      on_click=E.update, kwargs={llave: pagina - 1})
+            st.text(f"Página {pagina} de {paginas}")
+            st.button("Página siguiente", key=f"{llave}_siguiente", disabled=pagina == paginas,
+                      on_click=E.update, kwargs={llave: pagina + 1})
+    inicio = (pagina - 1) * por_pagina
+    return inicio, min(inicio + por_pagina, total)
+
+
 def paso_3():
     st.title("Fotos y fichas técnicas", icon=":material/photo_library:")
     st.caption("Puedes seguir corrigiendo cantidades y precios aquí. Los cambios se guardan en el borrador.")
@@ -2715,7 +2768,8 @@ def paso_3():
         visibles.append(clave)
     st.caption(f"Mostrando {len(visibles)} de {len(claves)} productos. El filtro solo cambia la vista; no excluye productos de la cotización.")
     if visibles:
-        for clave in visibles:
+        inicio, fin = pagina_productos(len(visibles), "anexos")
+        for clave in visibles[inicio:fin]:
             tarjeta(clave, descripciones[clave], *anexos[clave], de_cotizacion=True)
     else:
         st.info("No hay productos que coincidan con este filtro.")
@@ -2817,7 +2871,9 @@ def archivar_cotizacion(cot_id, **archivos):
     version = E.get("_cotizacion_version")
     if GIOVAL_PROFILES and cot_id != E.get("cot_id"):
         version = hist.obtener(cot_id)["actualizado"]
-    hist.guardar_archivos(cot_id, version_esperada=version, **archivos)
+    version_guardada = hist.guardar_archivos(cot_id, version_esperada=version, **archivos)
+    if version_guardada and cot_id == E.get("cot_id"):
+        E["_cotizacion_version"] = version_guardada
     if GIOVAL_PROFILES or not GIOVAL_REQUIRE_ACCESS:
         E["_cotizacion_version"] = hist.obtener(cot_id)["actualizado"]
 
@@ -2891,11 +2947,12 @@ def confirmar_pdf():
     with tempfile.TemporaryDirectory() as temporal:
         xlsx = Path(temporal) / "cotizacion.xlsx"
         xlsx.write_bytes(E["xlsx_vista_previa"])
-        hist.guardar_archivos(
+        version_guardada = hist.guardar_archivos(
             E["cot_id"], xlsx=xlsx, pdf=E["pdf_bytes"], version_esperada=E["version_vista_previa"],
             etiqueta_version="PDF confirmado",
         )
-    E["_cotizacion_version"] = hist.obtener(E["cot_id"])["actualizado"]
+    if version_guardada:
+        E["_cotizacion_version"] = version_guardada
     E["pdf_confirmado"] = True
 
 
@@ -4308,6 +4365,8 @@ else:
         [1.05, 1.05, 1.45, 0.95], vertical_alignment="center"
     )
     {1: paso_1, 2: paso_2, 3: paso_3, 4: paso_4}[E["paso"]]()
+    if E.pop("_abriendo_borrador", False):
+        persistir_borrador(registrar_apertura=True)
     if guardar_cotizacion.button("Guardar borrador", key="guardar_editor", icon=":material/save:", width="stretch",
                                  disabled=bool(E.get("_conflicto_guardado") or E.get("pdf_bytes"))):
         E["_acuse_guardado"] = E.get("_acuse_guardado", 0) + 1

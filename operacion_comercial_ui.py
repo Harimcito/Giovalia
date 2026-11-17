@@ -15,7 +15,10 @@ from revisor import clp
 
 
 def margen_pedido(lineas, bib, hist=None, cot_id=None):
-    with st.expander("Margen y costos del pedido"):
+    panel = st.expander("Margen y costos del pedido", key="panel_margen_pedido", on_change="rerun")
+    if not panel.open:
+        return
+    with panel:
         if not lineas:
             st.caption("Agrega productos para estimar el margen.")
             return

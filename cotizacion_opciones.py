@@ -11,6 +11,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from flujo_cotizacion import EN_STOCK, A_PEDIDO, plazo_efectivo, texto_plazo
+from edicion_lineas import ID
 from stock_catalogo import datos_stock
 from ui_montos import clp
 
@@ -95,8 +96,13 @@ def grupos(lineas):
     return {grupo: opciones for grupo, opciones in salida.items() if len(opciones) > 1}
 
 
-def normalizar_alternativas(lineas):
+def normalizar_alternativas(lineas, preferidas=()):
     asociaciones = grupos(lineas)
+    preferidas = set(preferidas)
+    seleccionadas = {
+        linea[GRUPO]: linea[ID] for linea in lineas
+        if linea.get(ID) in preferidas and linea.get(GRUPO) in asociaciones and linea.get("incluir", True)
+    }
     activas = set()
     salida = []
     for linea in lineas:
@@ -104,7 +110,9 @@ def normalizar_alternativas(lineas):
         if grupo and (grupo not in asociaciones or not linea.get("es_producto", True)):
             linea = {k: v for k, v in linea.items() if k != GRUPO}
         elif grupo and linea.get("incluir", True):
-            if grupo in activas:
+            if grupo in seleccionadas:
+                linea = {**linea, "incluir": linea.get(ID) == seleccionadas[grupo]}
+            elif grupo in activas:
                 linea = {**linea, "incluir": False}
             activas.add(grupo)
         salida.append(linea)

@@ -198,6 +198,7 @@ class Biblioteca:
         self._semantic_mtime_ns = None
         self._semantic_postings: dict[str, set[str]] = {}
         self._semantic_variantes = {}
+        self._referencias = None
         self.asociar_carpetas_anteriores()
 
     def _mtime_indice(self) -> int:
@@ -218,6 +219,7 @@ class Biblioteca:
         self._snapshot_indice = deepcopy(indice)
         self._indice_mtime_ns = mtime_ns
         self._semantic_mtime_ns = None
+        self._referencias = None
         return True
 
     def _guardar_indice(self):
@@ -290,6 +292,7 @@ class Biblioteca:
             self._snapshot_indice = deepcopy(combinado)
             self._indice_mtime_ns = self._mtime_indice()
             self._semantic_mtime_ns = None
+            self._referencias = None
             if self.registrar_cambio and combinado != indice_actual:
                 for clave in indice_actual.keys() | combinado.keys():
                     antes, despues = indice_actual.get(clave, {}), combinado.get(clave, {})
@@ -320,6 +323,25 @@ class Biblioteca:
         self._semantic_postings = postings
         self._semantic_variantes = variantes_por_clave
         self._semantic_mtime_ns = self._indice_mtime_ns
+
+    def _referencias_catalogo(self):
+        """Normaliza las referencias una vez por versión del índice."""
+        if self._referencias is None:
+            por_alias = {}
+            por_descripcion = {}
+            for clave, ficha in self.indice.items():
+                aliases = [normalizar(alias) for alias in _alias_de_ficha(ficha)]
+                for alias in aliases:
+                    if alias:
+                        por_alias.setdefault(alias, set()).add(clave)
+                if not identidad_conflictiva(clave, ficha):
+                    for referencia in (normalizar(clave), normalizar(ficha.get("nombre", "")), *aliases):
+                        if len(referencia) >= 3:
+                            por_descripcion.setdefault(referencia, clave)
+            # El orden estable conserva la primera ficha del índice cuando hay empate.
+            ordenadas = sorted(por_descripcion.items(), key=lambda par: -len(par[0]))
+            self._referencias = por_alias, ordenadas
+        return self._referencias
 
     def asociar_carpetas_anteriores(self, score_minimo: float = 0.65, margen_minimo: float = 0.12) -> int:
         """Vincula archivos bajo claves antiguas cuando una sola ficha coincide con alta confianza."""
@@ -575,8 +597,10 @@ class Biblioteca:
         self._guardar_indice()
         return nuevo
 
-    def precio_sugerido(self, clave: str) -> float | None:
+    def precio_sugerido(self, clave: str | None) -> float | None:
         """Precio neto sugerido = costo × (1 + margen %). None si falta el costo o el margen."""
+        if not clave:
+            return None
         ficha = self.indice.get(clave.strip().upper(), {})
         recomendado = ficha.get("precio_recomendado_neto")
         try:
@@ -584,9 +608,13 @@ class Biblioteca:
                 return float(recomendado)
         except (TypeError, ValueError):
             pass
-        if ficha.get("costo_neto") and ficha.get("margen_pct") is not None:
-            return ficha["costo_neto"] * (1 + ficha["margen_pct"] / 100)
-        return None
+        try:
+            costo = float(ficha.get("costo_neto"))
+            margen = float(ficha.get("margen_pct"))
+        except (TypeError, ValueError):
+            return None
+        sugerido = costo * (1 + margen / 100)
+        return sugerido if costo and math.isfinite(sugerido) else None
 
     def clave_vigente(self, clave: str) -> str | None:
         """Resuelve el código de una ficha aunque se haya renombrado después de cotizar."""
@@ -598,11 +626,9 @@ class Biblioteca:
         referencia = normalizar(clave)
         if not referencia:
             return None
-        coincidencias = [
-            actual for actual, ficha in self.indice.items()
-            if any(normalizar(alias) == referencia for alias in _alias_de_ficha(ficha))
-        ]
-        return coincidencias[0] if len(coincidencias) == 1 else None
+        por_alias, _ = self._referencias_catalogo()
+        coincidencias = por_alias.get(referencia)
+        return next(iter(coincidencias)) if coincidencias and len(coincidencias) == 1 else None
 
     def filas_catalogo(self) -> list[dict]:
         filas = []
@@ -623,16 +649,13 @@ class Biblioteca:
            (mezcla de letras y números: CF283A, TK-3182, T544...).
         """
         dn = normalizar(descripcion)
-        mejor, largo = "", 0
-        for clave, datos in self.indice.items():
-            if identidad_conflictiva(clave, datos):
-                continue
-            for token in [clave, datos.get("nombre", ""), *_alias_de_ficha(datos)]:
-                n = normalizar(token)
-                if len(n) >= 3 and n in dn and len(n) > largo:
-                    mejor, largo = clave, len(n)
-        if mejor or solo_conocidos:
-            return mejor
+        if dn:
+            _, referencias = self._referencias_catalogo()
+            for token, clave in referencias:
+                if token in dn:
+                    return clave
+        if solo_conocidos:
+            return ""
         for tok in re.findall(r"\b[A-Z0-9]+(?:-[A-Z0-9]+)*\b", descripcion.upper()):
             if len(tok) >= 4 and re.search(r"[A-Z]", tok) and re.search(r"\d", tok) \
                     and not _MEDIDA.match(tok):
@@ -888,6 +911,8 @@ _QTY_FINAL = re.compile(r"^(\S.*?)[\s,;:\-–]*[(\[]?\s*(?:x|×|cant(?:idad)?[:.
 _QTY_PAREN = re.compile(r"^(\S.*?)[\s,;:\-–]*\(\s*(\d+)\s*(?:un\w*\.?|u\.?)\s*\)$", re.I)
 _SINONIMOS_CANT = {"CANTIDAD", "CANT", "QTY", "UNIDADES", "UNID", "CANTIDADES"}
 _SINONIMOS_DESC = {"DESCRIPCION", "PRODUCTO", "PRODUCTOS", "DETALLE", "ITEM", "ARTICULO", "NOMBRE", "GLOSA"}
+_SINONIMOS_CODIGO = {"CODIGO", "CODPRODUCTO", "CODIGOPRODUCTO", "SKU", "MPN"}
+_SINONIMOS_UNIDAD = {"UNIDAD", "UNIDADDEMEDIDA", "UDM", "UM"}
 
 
 def limpiar_descripcion(texto: str) -> str:
@@ -943,29 +968,40 @@ def leer_orden_archivo(ruta) -> list[dict]:
         dialecto = csv.Sniffer().sniff(crudo[:2000], delimiters=",;\t") if crudo.strip() else csv.excel
         filas = [list(f) for f in csv.reader(io.StringIO(crudo), dialecto)]
     else:
-        filas = [[c.value for c in fila] for fila in load_workbook(ruta, data_only=True).active.iter_rows()]
+        libro = load_workbook(ruta, data_only=True, read_only=True)
+        try:
+            filas = list(libro.active.values)
+        finally:
+            libro.close()
 
-    col_cant = col_desc = None
-    for fila in filas[:15]:  # ¿hay encabezados?
+    col_cant = col_desc = col_codigo = col_unidad = None
+    for encabezado, fila in enumerate(filas[:15]):
         etiquetas = {normalizar(v): i for i, v in enumerate(fila) if isinstance(v, str)}
         c = next((i for k, i in etiquetas.items() if k in _SINONIMOS_CANT), None)
         d = next((i for k, i in etiquetas.items() if k in _SINONIMOS_DESC), None)
         if c is not None and d is not None:
             col_cant, col_desc = c, d
+            col_codigo = next((i for k, i in etiquetas.items() if k in _SINONIMOS_CODIGO), None)
+            col_unidad = next((i for k, i in etiquetas.items() if k in _SINONIMOS_UNIDAD), None)
+            filas = filas[encabezado + 1:]
             break
 
     salida = []
     for fila in filas:
-        textos = [str(v).strip() for v in fila if isinstance(v, str) and v.strip() and _num(v) is None]
         if col_desc is not None:
             desc = fila[col_desc] if col_desc < len(fila) else None
             cant = _num(fila[col_cant]) if col_cant < len(fila) else None
-            if isinstance(desc, str) and desc.strip() and cant and cant > 0:
-                salida.append({"cantidad": _cantidad(cant), "descripcion": limpiar_descripcion(desc)})
+            if isinstance(desc, str) and desc.strip() and cant and math.isfinite(cant) and cant > 0:
+                producto = {"cantidad": _cantidad(cant), "descripcion": limpiar_descripcion(desc)}
+                for campo, columna in (("codigo", col_codigo), ("unidad", col_unidad)):
+                    if columna is not None and columna < len(fila) and fila[columna] is not None:
+                        producto[campo] = str(fila[columna]).strip()
+                salida.append(producto)
             continue
+        textos = [v.strip() for v in fila if isinstance(v, str) and v.strip() and _num(v) is None]
         if not textos:
             continue
-        nums = [_num(v) for v in fila if not isinstance(v, str) and _num(v) is not None and _num(v) > 0]
+        nums = [n for v in fila if (n := _num(v)) is not None and math.isfinite(n) and n > 0]
         desc = max(textos, key=len)
         if nums:
             salida.append({"cantidad": _cantidad(nums[0]), "descripcion": limpiar_descripcion(desc)})
