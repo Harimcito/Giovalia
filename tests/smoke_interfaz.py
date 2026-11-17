@@ -124,6 +124,8 @@ def comprobar_interfaz(numero, numero_otro):
         page.locator('.st-key-biblioteca_galeria_RESMA').get_by_role('button', name='Ver producto').click()
         expect(page.get_by_text('Detalle del producto',exact=True)).to_be_visible()
         page.get_by_role('button',name='Limpiar búsqueda y filtros').click()
+        page.locator('.st-key-gv_nav').get_by_role('button', name='Inicio', exact=True).click()
+        expect(page.get_by_role('heading', name='Cotizaciones', exact=True)).to_be_visible()
         assert not errores, errores
         comprobar_canastas_y_evidencia(browser, numero_otro)
         comprobar_importacion_y_casillas(browser)

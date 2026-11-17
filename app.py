@@ -273,7 +273,7 @@ ETIQUETAS_FUENTES = {
 
 if E.get("vista") in {"Mis productos", "Catálogo"}:
     E["vista"] = VISTAS[2]
-elif E.get("vista") in {"Nueva cotización", "Inicio"}:
+elif E.get("vista") == "Nueva cotización":
     E["vista"] = VISTAS[0]
 E.setdefault("vista", INICIO)
 
