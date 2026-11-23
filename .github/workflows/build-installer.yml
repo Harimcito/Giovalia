@@ -81,6 +81,12 @@ jobs:
             throw "El paquete de escritorio no pudo cargar sus dependencias de ventana."
           }
 
+      - name: Comprobar carga de OPENAI_API_KEY en Windows
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest tests.test_lector_ia_api_key -v
+
       - name: Instalar Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress

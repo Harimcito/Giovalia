@@ -11,7 +11,7 @@ import sesion_web
 sesion_web.activa = True
 
 
-ARCHIVOS_VERSION = ("app.py", "giovalia.css", "interfaz_giovalia.css",
+ARCHIVOS_VERSION = ("app.py", "lector_ia.py", "giovalia.css", "interfaz_giovalia.css",
                     "experiencia_giovalia.css", ".streamlit/config.toml")
 RAIZ = Path(__file__).resolve().parent
 

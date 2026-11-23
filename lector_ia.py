@@ -2,13 +2,14 @@
 
 - PDF con texto: se envía el texto extraído.
 - PDF escaneado o foto: se envían las imágenes al modelo con visión.
-La API key se toma de la variable OPENAI_API_KEY, de un archivo .env junto a la
-app, o de lo que escribas en la barra lateral.
+La API key se toma de OPENAI_API_KEY. En Windows se consulta la variable del
+sistema y luego la del usuario antes del entorno heredado, el .env o Ajustes.
 """
 import base64
 import io
 import json
 import os
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -37,16 +38,40 @@ PROMPT = (
 
 
 def cargar_api_key(carpeta_app) -> str:
-    """OPENAI_API_KEY del entorno o de un archivo .env en la carpeta de la app."""
-    if clave := os.environ.get("OPENAI_API_KEY"):
-        return clave.strip()
-    env = Path(carpeta_app) / ".env"
-    if env.exists():
-        for linea in env.read_text("utf-8", errors="ignore").splitlines():
-            nombre, _, valor = linea.partition("=")
-            if nombre.strip() == "OPENAI_API_KEY":
-                return valor.strip().strip("'\"")
-    return ""
+    return buscar_api_key(carpeta_app)[0]
+
+
+def clave_entorno() -> tuple[str, str]:
+    """Consulta las variables persistentes aunque el servidor heredara una clave antigua."""
+    if sys.platform == "win32":
+        import winreg
+
+        for raiz, ruta, origen in (
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "variable del sistema de Windows"),
+            (winreg.HKEY_CURRENT_USER, "Environment", "variable del usuario de Windows"),
+        ):
+            try:
+                with winreg.OpenKey(raiz, ruta) as registro:
+                    valor, _ = winreg.QueryValueEx(registro, "OPENAI_API_KEY")
+            except OSError:
+                continue
+            if isinstance(valor, str) and (clave := valor.strip().strip("'\"").strip()):
+                return clave, origen
+
+    clave = os.environ.get("OPENAI_API_KEY", "").strip().strip("'\"").strip()
+    return (clave, "variable de entorno") if clave else ("", "no encontrada")
+
+
+def cliente_openai(api_key, timeout):
+    """Relee OPENAI_API_KEY antes de cada operación para aplicar cambios sin reiniciar."""
+    from openai import OpenAI
+
+    clave, _ = clave_entorno()
+    clave = clave or str(api_key or "").strip()
+    if not clave:
+        raise ValueError("Falta la clave de OpenAI. Configura OPENAI_API_KEY o ingrésala en Ajustes.")
+    return OpenAI(api_key=clave, timeout=timeout, max_retries=0)
 
 
 def _a_data_url(datos: bytes) -> str:
@@ -129,10 +154,7 @@ def entender_productos(descripciones: list[str], api_key: str = "", catalogo=Non
         "\nDESCRIPCIONES:\n" + json.dumps(descripciones, ensure_ascii=False)
     )
     if cliente is None:
-        if not api_key:
-            raise ValueError("Falta la clave de OpenAI.")
-        from openai import OpenAI
-        cliente = OpenAI(api_key=api_key, timeout=TIMEOUT_COINCIDENCIAS, max_retries=0)
+        cliente = cliente_openai(api_key, TIMEOUT_COINCIDENCIAS)
     resp = cliente.chat.completions.create(
         model=MODELO, temperature=0, response_format={"type": "json_object"},
         messages=[{"role": "user", "content": prompt}],
@@ -186,11 +208,7 @@ def leer_orden_ia(archivos: list[tuple[str, bytes]], api_key: str = "", cliente=
         contenido.append({"type": "image_url", "image_url": {"url": _a_data_url(img), "detail": "high"}})
 
     if cliente is None:
-        if not api_key:
-            raise ValueError("Falta la API key de OpenAI (variable OPENAI_API_KEY, archivo .env "
-                             "o barra lateral).")
-        from openai import OpenAI
-        cliente = OpenAI(api_key=api_key, timeout=TIMEOUT_LECTURA, max_retries=0)
+        cliente = cliente_openai(api_key, TIMEOUT_LECTURA)
     resp = cliente.chat.completions.create(
         model=MODELO, temperature=0, response_format={"type": "json_object"},
         messages=[{"role": "user", "content": contenido}])
@@ -205,14 +223,15 @@ def leer_texto_orden_ia(texto: str, api_key: str = "", cliente=None) -> list[dic
     return leer_orden_ia([], api_key=api_key, cliente=cliente, texto_adicional=str(texto or ""))
 
 def buscar_api_key(carpeta_app) -> tuple[str, str]:
-    """Devuelve la API key y su origen: entorno, archivo .env o ninguna."""
-    if os.environ.get("OPENAI_API_KEY", "").strip():
-        return os.environ["OPENAI_API_KEY"].strip(), "variable de entorno"
+    """Prioriza la configuración vigente de Windows sobre claves guardadas o heredadas."""
+    clave, origen = clave_entorno()
+    if clave:
+        return clave, origen
 
     env = Path(carpeta_app) / ".env"
     if env.exists():
         for linea in env.read_text("utf-8", errors="ignore").splitlines():
-            nombre, _, valor = linea.partition("=")
+            nombre, _, valor = linea.strip().removeprefix("export ").partition("=")
             if nombre.strip() == "OPENAI_API_KEY":
                 clave = valor.strip().strip("'\"")
                 if clave:
