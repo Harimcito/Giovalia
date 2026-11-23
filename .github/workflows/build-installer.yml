@@ -62,6 +62,10 @@ jobs:
           python -m pip install -r requirements-desktop.txt
           python desktop_launcher.py --check-package
 
+      - name: Comprobar carga de OPENAI_API_KEY en Windows
+        shell: pwsh
+        run: python -m unittest tests.test_lector_ia_api_key -v
+
       - name: Descargar instalador de WebView2
         shell: pwsh
         run: |

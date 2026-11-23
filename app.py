@@ -3999,7 +3999,9 @@ def mostrar_preferencias(carpeta_compartida, servicios, conexion_ia, conexion_mp
     st.divider()
     st.markdown("**Conexión de inteligencia artificial**")
     if api_key:
-        st.caption(f"Conectada · Clave encontrada en {origen_key}")
+        st.caption(f"Clave detectada en {origen_key}")
+        st.caption("OPENAI_API_KEY tiene prioridad sobre las claves de Ajustes y .env. "
+                   "En Windows se consulta primero la variable del sistema y después la del usuario.")
     elif GIOVAL_REQUIRE_ACCESS:
         st.caption(
             "La IA no está configurada en el servidor. El administrador puede definir "

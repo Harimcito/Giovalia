@@ -79,7 +79,7 @@ $argsRespaldo = '"' + $scriptRespaldo + '" "' + $base + '" "' + $destinoRespaldo
 $respaldo = Start-Process -FilePath $python -ArgumentList $argsRespaldo -WindowStyle Hidden -Wait -PassThru
 if ($respaldo.ExitCode -ne 0) { throw 'No se pudo verificar el respaldo previo.' }
 
-$archivosVersion = @('app.py', 'giovalia.css', 'interfaz_giovalia.css', 'experiencia_giovalia.css', '.streamlit/config.toml')
+$archivosVersion = @('app.py', 'lector_ia.py', 'giovalia.css', 'interfaz_giovalia.css', 'experiencia_giovalia.css', '.streamlit/config.toml')
 $huellas = foreach ($archivoVersion in $archivosVersion) {
     (Get-FileHash -LiteralPath (Join-Path $preparada $archivoVersion) -Algorithm SHA256).Hash.ToLowerInvariant()
 }
