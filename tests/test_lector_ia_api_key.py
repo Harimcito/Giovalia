@@ -12,6 +12,9 @@ import lector_ia
 
 
 class GuardarApiKeyTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(lector_ia, "sys", SimpleNamespace(platform="linux")))
+
     def registro_windows(self, sistema=None, usuario=None):
         valores = {"sistema": sistema, "usuario": usuario}
         registro = MagicMock(HKEY_LOCAL_MACHINE="sistema", HKEY_CURRENT_USER="usuario")
@@ -86,7 +89,7 @@ class GuardarApiKeyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {}, clear=True):
                 path = lector_ia.guardar_api_key(tmp, "sk-test-demo")
-                self.assertEqual(path, Path(tmp) / ".env")
+                self.assertEqual(path, (Path(tmp) / ".env").resolve())
                 key, origin = lector_ia.buscar_api_key(tmp)
                 self.assertEqual(key, "sk-test-demo")
                 self.assertEqual(origin, "archivo .env")
